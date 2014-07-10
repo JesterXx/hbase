@@ -32,6 +32,8 @@ public class MobConstants {
 
   public static final String MOB_FILE_CACHE_SIZE_KEY = "hbase.mob.file.cache.size";
   public static final int DEFAULT_MOB_FILE_CACHE_SIZE = 1000;
+  public static final String MOB_CELL_SIZE_THRESHOLD = "hbase.mob.cell.size.threshold";
+  public static final int DEFAULT_MOB_CELL_SIZE_THRESHOLD = 0;
 
   public static final String MOB_ROOTDIR = "hbase.mob.rootdir";
   public static final String DEFAULT_MOB_ROOTDIR_NAME = "mob";

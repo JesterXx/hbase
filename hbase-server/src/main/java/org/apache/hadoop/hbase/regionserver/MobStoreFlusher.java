@@ -43,17 +43,20 @@ import org.apache.hadoop.util.StringUtils;
 
 /**
  * This is the StoreFlusher used by the MOB store.
- *
+ * 
  */
 public class MobStoreFlusher extends StoreFlusher {
 
   private static final Log LOG = LogFactory.getLog(MobStoreFlusher.class);
   private final Object flushLock = new Object();
   private boolean isMob = false;
+  private int mobCellSizeThreshold = 0;
 
   public MobStoreFlusher(Configuration conf, Store store) {
     super(conf, store);
     isMob = MobUtils.isMobFamily(store.getFamily());
+    mobCellSizeThreshold = conf.getInt(MobConstants.MOB_CELL_SIZE_THRESHOLD,
+        MobConstants.DEFAULT_MOB_CELL_SIZE_THRESHOLD);
   }
 
   @Override
@@ -116,15 +119,16 @@ public class MobStoreFlusher extends StoreFlusher {
               HConstants.COMPACTION_KV_MAX_DEFAULT);
           status.setStatus("Flushing " + store + ": creating writer");
           // A. Write the map out to the disk
-          writer = store.createWriterInTmp(snapshot.size(), store.getFamily()
-              .getCompression(), false, true, true);
+          writer = store.createWriterInTmp(snapshot.size(), store.getFamily().getCompression(),
+              false, true, true);
           writer.setTimeRangeTracker(snapshotTimeRangeTracker);
 
           Iterator<KeyValue> iter = snapshot.iterator();
           int mobKVCount = 0;
           while (iter != null && iter.hasNext()) {
             KeyValue kv = iter.next();
-            if (MobUtils.isMobReferenceKeyValue(kv)) {
+            if (kv.getValueLength() >= mobCellSizeThreshold && !MobUtils.isMobReferenceKeyValue(kv)
+                && kv.getTypeByte() == KeyValue.Type.Put.getCode()) {
               mobKVCount++;
             }
           }
@@ -158,7 +162,8 @@ public class MobStoreFlusher extends StoreFlusher {
                     kv.setMvccVersion(0);
                   }
 
-                  if (MobUtils.isMobReferenceKeyValue(kv)
+                  if (kv.getValueLength() < mobCellSizeThreshold
+                      || MobUtils.isMobReferenceKeyValue(kv)
                       || kv.getTypeByte() != KeyValue.Type.Put.getCode()) {
                     writer.append(kv);
                   } else {
