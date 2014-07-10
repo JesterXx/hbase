@@ -29,9 +29,9 @@ public class MobFilePath {
   private String date;
   private int startKey;
   private String uuid;
-  private int count;
+  private long count;
 
-  static public MobFilePath create(String startKey, int count, Date date, String uuid) {
+  static public MobFilePath create(String startKey, long count, Date date, String uuid) {
     String dateString = null;
     if (null != date) {
       dateString = MobUtils.formatDate(date);
@@ -101,11 +101,11 @@ public class MobFilePath {
       'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u',
       'v', 'w', 'x', 'y', 'z' };
 
-  public MobFilePath(String date, String startKey, int count, String uuid) {
+  public MobFilePath(String date, String startKey, long count, String uuid) {
     this(date, hexString2Int(startKey), count, uuid);
   }
 
-  public MobFilePath(String date, int startKey, int count, String uuid) {
+  public MobFilePath(String date, int startKey, long count, String uuid) {
 
     this.startKey = startKey;
     this.count = count;
@@ -146,7 +146,7 @@ public class MobFilePath {
     return false;
   }
 
-  public int getRecordCount() {
+  public long getRecordCount() {
     return this.count;
   }
 
@@ -159,6 +159,6 @@ public class MobFilePath {
   }
 
   public String getFileName() {
-    return int2HexString(this.startKey) + int2HexString(this.count) + this.uuid;
+    return int2HexString(this.startKey) + Long.toHexString(this.count) + this.uuid;
   }
 }

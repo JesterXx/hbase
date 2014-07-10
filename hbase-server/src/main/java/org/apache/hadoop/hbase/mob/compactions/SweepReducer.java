@@ -35,7 +35,9 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.HTableFactory;
 import org.apache.hadoop.hbase.client.HTableInterface;
@@ -46,6 +48,7 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFile;
 import org.apache.hadoop.hbase.mob.MobFilePath;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.regionserver.DefaultMemStore;
 import org.apache.hadoop.hbase.regionserver.MemStore;
 import org.apache.hadoop.hbase.regionserver.MemStoreWrapper;
 import org.apache.hadoop.hbase.regionserver.MobFileStore;
@@ -96,7 +99,7 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
     this.table.setAutoFlush(false, false);
 
     this.table.setWriteBufferSize(1 * 1024 * 1024); // 1MB
-    memstore = new MemStoreWrapper(context, table, new MemStore(), mobFileStore);
+    memstore = new MemStoreWrapper(context, table, new DefaultMemStore(), mobFileStore);
 
     long compactionBegin = Long.parseLong(conf.get(MobConstants.MOB_COMPACTION_START_DATE, "0"));
     this.compactionBeginString = MobUtils.formatDate(new Date(compactionBegin));
@@ -248,10 +251,11 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
         file.open();
         try {
           StoreFileScanner scanner = file.getScanner();
-          scanner.seek(KeyValue.createFirstOnRow(new byte[] {}));
+          scanner.seek(KeyValueUtil.createFirstOnRow(new byte[] {}));
 
-          KeyValue kv = null;
-          while (null != (kv = scanner.next())) {
+          Cell cell = null;
+          while (null != (cell = scanner.next())) {
+            KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
             KeyValue keyOnly = kv.createKeyOnly(false);
             if (kvs.contains(keyOnly)) {
               memstore.addToMemstore(kv);
@@ -340,7 +344,7 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
   }
 
   private static class MobFileStatus {
-    private int count;
+    private long count;
     private int referenceCount;
     private MobFilePath mobFilePath;
     private long length;

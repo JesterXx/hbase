@@ -27,6 +27,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
@@ -127,7 +128,7 @@ public class MobFileStore {
     return createWriterInTmp(path, maxKeyCount, compression, prefix);
   }
 
-  public StoreFile.Writer createWriterInTmp(Path tempPath, int maxKeyCount, Compression.Algorithm compression,
+  public StoreFile.Writer createWriterInTmp(Path tempPath, long maxKeyCount, Compression.Algorithm compression,
       String prefix) throws IOException {
     MobFilePath mobPath = MobFilePath.create(prefix, maxKeyCount, null, UUID.randomUUID()
         .toString().replaceAll("-", ""));
@@ -182,10 +183,10 @@ public class MobFileStore {
     }
   }
 
-  public KeyValue resolve(KeyValue reference, boolean cacheBlocks) throws IOException {
+  public Cell resolve(KeyValue reference, boolean cacheBlocks) throws IOException {
     byte[] referenceValue = reference.getValue();
     String fileName = Bytes.toString(referenceValue);
-    KeyValue result = null;
+    Cell result = null;
 
     Path targetPath = new Path(homePath, fileName);
     MobFile file = cacheConf.getMobFileCache().open(fs, targetPath, cacheConf);

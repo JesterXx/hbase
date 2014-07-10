@@ -60,44 +60,41 @@ public class MobStoreFlusher extends StoreFlusher {
   }
 
   @Override
-  public List<Path> flushSnapshot(SortedSet<KeyValue> snapshot, long cacheFlushId,
-      TimeRangeTracker snapshotTimeRangeTracker, AtomicLong flushedSize, MonitoredTask status)
-      throws IOException {
+  public List<Path> flushSnapshot(MemStoreSnapshot snapshot, long cacheFlushSeqNum,
+      MonitoredTask status) throws IOException {
     ArrayList<Path> result = new ArrayList<Path>();
-    if (snapshot.size() == 0) {
+    if (snapshot.getSize() == 0) {
       return result; // don't flush if there are no entries
     }
 
     // Use a store scanner to find which rows to flush.
     long smallestReadPoint = store.getSmallestReadPoint();
-    InternalScanner scanner = createScanner(snapshot, smallestReadPoint);
+    InternalScanner scanner = createScanner(snapshot.getScanner(), smallestReadPoint);
     if (scanner == null) {
       return result; // NULL scanner returned from coprocessor hooks means skip normal processing
     }
     if (!isMob) {
       StoreFile.Writer writer;
-      long flushed = 0;
       try {
         // TODO: We can fail in the below block before we complete adding this flush to
         // list of store files. Add cleanup of anything put on filesystem if we fail.
         synchronized (flushLock) {
           status.setStatus("Flushing " + store + ": creating writer");
           // Write the map out to the disk
-          writer = store.createWriterInTmp(snapshot.size(), store.getFamily().getCompression(),
+          writer = store.createWriterInTmp(snapshot.getSize(), store.getFamily().getCompression(),
               false, true, true);
-          writer.setTimeRangeTracker(snapshotTimeRangeTracker);
+          writer.setTimeRangeTracker(snapshot.getTimeRangeTracker());
           try {
-            flushed = performFlush(scanner, writer, smallestReadPoint);
+            performFlush(scanner, writer, smallestReadPoint);
           } finally {
-            finalizeWriter(writer, cacheFlushId, status);
+            finalizeWriter(writer, cacheFlushSeqNum, status);
           }
         }
       } finally {
-        flushedSize.set(flushed);
         scanner.close();
       }
-      LOG.info("Flushed, sequenceid=" + cacheFlushId + ", memsize="
-          + StringUtils.humanReadableInt(flushed) + ", hasBloomFilter=" + writer.hasGeneralBloom()
+      LOG.info("Flushed, sequenceid=" + cacheFlushSeqNum + ", memsize="
+          + snapshot.getSize() + ", hasBloomFilter=" + writer.hasGeneralBloom()
           + ", into tmp file " + writer.getPath());
       result.add(writer.getPath());
       return result;
@@ -119,18 +116,30 @@ public class MobStoreFlusher extends StoreFlusher {
               HConstants.COMPACTION_KV_MAX_DEFAULT);
           status.setStatus("Flushing " + store + ": creating writer");
           // A. Write the map out to the disk
-          writer = store.createWriterInTmp(snapshot.size(), store.getFamily().getCompression(),
+          writer = store.createWriterInTmp(snapshot.getSize(), store.getFamily().getCompression(),
               false, true, true);
-          writer.setTimeRangeTracker(snapshotTimeRangeTracker);
+          writer.setTimeRangeTracker(snapshot.getTimeRangeTracker());
 
-          Iterator<KeyValue> iter = snapshot.iterator();
+//          Iterator<KeyValue> iter = snapshot.iterator();
+//          int mobKVCount = 0;
+//          while (iter != null && iter.hasNext()) {
+//            KeyValue kv = iter.next();
+//            if (kv.getValueLength() >= mobCellSizeThreshold && !MobUtils.isMobReferenceKeyValue(kv)
+//                && kv.getTypeByte() == KeyValue.Type.Put.getCode()) {
+//              mobKVCount++;
+//            }
+//          }
+
+          KeyValueScanner snapshotScanner = snapshot.getScanner();
           int mobKVCount = 0;
-          while (iter != null && iter.hasNext()) {
-            KeyValue kv = iter.next();
+          Cell cell = snapshotScanner.next();
+          while(cell != null) {
+            KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
             if (kv.getValueLength() >= mobCellSizeThreshold && !MobUtils.isMobReferenceKeyValue(kv)
                 && kv.getTypeByte() == KeyValue.Type.Put.getCode()) {
               mobKVCount++;
             }
+            cell = snapshotScanner.next();
           }
 
           mobFileWriter = mobFileStore.createWriterInTmp(mobKVCount, store.getFamily()
@@ -159,7 +168,7 @@ public class MobStoreFlusher extends StoreFlusher {
                     // let us not change the original KV. It could be in the memstore
                     // changing its memstoreTS could affect other threads/scanners.
                     kv = kv.shallowCopy();
-                    kv.setMvccVersion(0);
+                    kv.setSequenceId(0);
                   }
 
                   if (kv.getValueLength() < mobCellSizeThreshold
@@ -187,7 +196,7 @@ public class MobStoreFlusher extends StoreFlusher {
                     writer.append(reference);
                   }
 
-                  flushed += MemStore.heapSizeChange(kv, true);
+                  flushed += DefaultMemStore.heapSizeChange(kv, true);
                 }
                 kvs.clear();
               }
@@ -197,8 +206,8 @@ public class MobStoreFlusher extends StoreFlusher {
             // hfile. Also write current time in metadata as minFlushTime.
             // The hfile is current up to and including cacheFlushSeqNum.
             status.setStatus("Flushing " + store + ": appending metadata");
-            writer.appendMetadata(cacheFlushId, false);
-            mobFileWriter.appendMetadata(cacheFlushId, false);
+            writer.appendMetadata(cacheFlushSeqNum, false);
+            mobFileWriter.appendMetadata(cacheFlushSeqNum, false);
             status.setStatus("Flushing " + store + ": closing flushed file");
             writer.close();
             mobFileWriter.close();
@@ -208,10 +217,10 @@ public class MobStoreFlusher extends StoreFlusher {
           }
         }
       } finally {
-        flushedSize.set(flushed);
+//        flushedSize.set(flushed);
         scanner.close();
       }
-      LOG.info("Flushed, sequenceid=" + cacheFlushId + ", memsize="
+      LOG.info("Flushed, sequenceid=" + cacheFlushSeqNum + ", memsize="
           + StringUtils.humanReadableInt(flushed) + ", hasBloomFilter=" + writer.hasGeneralBloom()
           + ", into tmp file " + writer.getPath());
       result.add(writer.getPath());

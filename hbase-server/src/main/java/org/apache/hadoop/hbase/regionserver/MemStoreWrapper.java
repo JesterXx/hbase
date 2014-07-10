@@ -27,7 +27,9 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.Put;
@@ -42,7 +44,7 @@ public class MemStoreWrapper {
 
   private static final Log LOG = LogFactory.getLog(MemStoreWrapper.class);
 
-  private MemStore memstore;
+  private DefaultMemStore memstore;
   private long blockingMemStoreSize;
   private SweepPartitionId partitionId;
   private Context context;
@@ -50,7 +52,7 @@ public class MemStoreWrapper {
   private MobFileStore mobFileStore;
   private HTableInterface table;
 
-  public MemStoreWrapper(Context context, HTableInterface table, MemStore memstore,
+  public MemStoreWrapper(Context context, HTableInterface table, DefaultMemStore memstore,
       MobFileStore mobFileStore) {
     this.memstore = memstore;
     this.context = context;
@@ -74,22 +76,21 @@ public class MemStoreWrapper {
   }
 
   public void flushMemStore() throws IOException {
-    memstore.snapshot();
-    SortedSet<KeyValue> snapshot = memstore.getSnapshot();
+    MemStoreSnapshot snapshot = memstore.snapshot();
     internalFlushCache(snapshot, Long.MAX_VALUE);
-    memstore.clearSnapshot(snapshot);
+    memstore.clearSnapshot(snapshot.getId());
   }
 
-  private void internalFlushCache(final SortedSet<KeyValue> set, final long logCacheFlushId)
+  private void internalFlushCache(final MemStoreSnapshot snapshot, final long logCacheFlushId)
       throws IOException {
-    if (set.size() == 0) {
+    if(snapshot.getSize() == 0) {
       return;
     }
     // generate the temp files into a fixed path.
     String tempPathString = context.getConfiguration().get(
         MobConstants.MOB_COMPACTION_JOB_WORKING_DIR);
     StoreFile.Writer mobFileWriter = mobFileStore.createWriterInTmp(new Path(tempPathString),
-        set.size(), mobFileStore.getColumnDescriptor().getCompactionCompression(),
+        snapshot.getSize(), mobFileStore.getColumnDescriptor().getCompactionCompression(),
         partitionId.getStartKey());
 
     Path targetPath = new Path(mobFileStore.getHomePath(), partitionId.getDate());
@@ -100,11 +101,12 @@ public class MemStoreWrapper {
 
     byte[] referenceValue = Bytes.toBytes(relativePath);
     int keyValueCount = 0;
-    KeyValueScanner scanner = new CollectionBackedScanner(set, KeyValue.COMPARATOR);
-    scanner.seek(KeyValue.createFirstOnRow(new byte[] {}));
-    KeyValue kv = null;
-    while (null != (kv = scanner.next())) {
-      kv.setMvccVersion(0);
+    KeyValueScanner scanner = snapshot.getScanner();
+    scanner.seek(KeyValueUtil.createFirstOnRow(new byte[] {}));
+    Cell cell = null;
+    while (null != (cell = scanner.next())) {
+      KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
+      kv.setSequenceId(0);
       mobFileWriter.append(kv);
       keyValueCount++;
     }
@@ -117,11 +119,12 @@ public class MemStoreWrapper {
     mobFileStore.commitFile(mobFileWriter.getPath(), targetPath);
     context.getCounter(SweepCounter.FILE_AFTER_MERGE_OR_CLEAN).increment(1);
     // write reference
-    scanner = new CollectionBackedScanner(set, KeyValue.COMPARATOR);
-    scanner.seek(KeyValue.createFirstOnRow(new byte[] {}));
-    kv = null;
-    while (null != (kv = scanner.next())) {
-      kv.setMvccVersion(0);
+    scanner = snapshot.getScanner();
+    scanner.seek(KeyValueUtil.createFirstOnRow(new byte[] {}));
+    cell = null;
+    while (null != (cell = scanner.next())) {
+      KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
+      kv.setSequenceId(0);
       List<Tag> existingTags = kv.getTags();
       if (existingTags.isEmpty()) {
         existingTags = new ArrayList<Tag>();

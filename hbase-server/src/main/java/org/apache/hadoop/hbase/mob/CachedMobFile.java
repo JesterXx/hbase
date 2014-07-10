@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.KeyValue;
 
 public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> {
@@ -54,7 +55,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
   }
 
   @Override
-  public KeyValue readKeyValue(KeyValue search, boolean cacheMobBlocks) throws IOException {
+  public Cell readKeyValue(KeyValue search, boolean cacheMobBlocks) throws IOException {
     return file.readKeyValue(search, cacheMobBlocks);
   }
 

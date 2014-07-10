@@ -28,6 +28,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
@@ -56,8 +57,8 @@ public class MobFile {
     return null;
   }
 
-  public KeyValue readKeyValue(KeyValue search, boolean cacheMobBlocks) throws IOException {
-    KeyValue result = null;
+  public Cell readKeyValue(KeyValue search, boolean cacheMobBlocks) throws IOException {
+    Cell result = null;
     StoreFileScanner scanner = null;
     String msg = "";
     List<StoreFile> sfs = new ArrayList<StoreFile>();

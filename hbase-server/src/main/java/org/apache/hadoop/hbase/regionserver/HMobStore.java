@@ -82,7 +82,7 @@ public class HMobStore extends HStore {
       LOG.info("Cannot obtain the lock for the store[" + this
           + "], ready to perform the minor compaction instead");
       // change the major compaction into a minor one
-      compaction.getRequest().setIsMajor(false);
+      compaction.getRequest().setIsMajor(false, false);
     }
     return super.compact(compaction);
   }
