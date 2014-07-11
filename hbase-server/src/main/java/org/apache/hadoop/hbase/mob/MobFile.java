@@ -30,6 +30,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
@@ -111,7 +112,7 @@ public class MobFile {
     }
   }
 
-  public static MobFile create(FileSystem fs, Path path, Configuration conf, MobCacheConfig cacheConf)
+  public static MobFile create(FileSystem fs, Path path, Configuration conf, CacheConfig cacheConf)
       throws IOException {
     StoreFile sf = new StoreFile(fs, path, conf, cacheConf, BloomType.NONE);
     return new MobFile(sf);

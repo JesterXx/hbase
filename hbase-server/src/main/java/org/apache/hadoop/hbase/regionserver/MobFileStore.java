@@ -30,7 +30,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.TableName;
@@ -40,7 +39,6 @@ import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
-import org.apache.hadoop.hbase.mob.MobCacheConfig;
 import org.apache.hadoop.hbase.mob.MobFile;
 import org.apache.hadoop.hbase.mob.MobFilePath;
 import org.apache.hadoop.hbase.mob.MobUtils;
@@ -51,7 +49,7 @@ public class MobFileStore {
   private static final Log LOG = LogFactory.getLog(MobFileStore.class);
   private FileSystem fs;
   private Path homePath;
-  private MobCacheConfig cacheConf;
+  private CacheConfig cacheConf;
   private HColumnDescriptor family;
   private final static String TMP = ".tmp";
   private Configuration conf;
@@ -61,7 +59,7 @@ public class MobFileStore {
     this.fs = fs;
     this.homePath = homedPath;
     this.conf = conf;
-    this.cacheConf = new MobCacheConfig(conf, family);
+    this.cacheConf = new CacheConfig(conf, family);
     this.family = family;
   }
 
@@ -189,7 +187,7 @@ public class MobFileStore {
     Cell result = null;
 
     Path targetPath = new Path(homePath, fileName);
-    MobFile file = cacheConf.getMobFileCache().open(fs, targetPath, cacheConf);
+    MobFile file = MobFile.create(fs, targetPath, conf, cacheConf);
     if (null != file) {
       result = file.readKeyValue(reference, cacheBlocks);
       file.close();

@@ -38,18 +38,16 @@ import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.HTableFactory;
 import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.HTableInterfaceFactory;
+import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
-import org.apache.hadoop.hbase.mob.MobCacheConfig;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFile;
 import org.apache.hadoop.hbase.mob.MobFilePath;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.DefaultMemStore;
-import org.apache.hadoop.hbase.regionserver.MemStore;
 import org.apache.hadoop.hbase.regionserver.MemStoreWrapper;
 import org.apache.hadoop.hbase.regionserver.MobFileStore;
 import org.apache.hadoop.hbase.regionserver.MobFileStoreManager;
@@ -71,7 +69,7 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
   private String family;
   private Path familyDir;
   private MobFileStore mobFileStore;
-  private MobCacheConfig cacheConf;
+  private CacheConfig cacheConf;
   private HTableInterface table;
   private String compactionBeginString;
 
@@ -85,7 +83,7 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
 
     MobFileStoreManager.current().init(conf, fs);
     this.mobFileStore = MobFileStoreManager.current().getMobFileStore(tableName, family);
-    this.cacheConf = new MobCacheConfig(conf, mobFileStore.getColumnDescriptor());
+    this.cacheConf = new CacheConfig(conf, mobFileStore.getColumnDescriptor());
 
     String htableFactoryClassName = conf.get(
         MobConstants.MOB_COMPACTION_OUTPUT_TABLE_FACTORY, HTableFactory.class.getName());
@@ -248,9 +246,9 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
       if (info.needClean() || (mergeSmall && info.needMerge())) {
         context.getCounter(SweepCounter.INPUT_FILE_COUNT).increment(1);
         MobFile file = MobFile.create(fs, mobFilePath.getAbsolutePath(familyDir), conf, cacheConf);
-        file.open();
+        StoreFileScanner scanner = null;
         try {
-          StoreFileScanner scanner = file.getScanner();
+          scanner = file.getScanner();
           scanner.seek(KeyValueUtil.createFirstOnRow(new byte[] {}));
 
           Cell cell = null;
@@ -263,12 +261,9 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
               memstore.flushMemStoreIfNecessary();
             }
           }
-          scanner.close();
         } finally {
-          try {
-            file.close();
-          } catch (IOException e) {
-            LOG.warn("Fail to close the mob file", e);
+          if (scanner != null) {
+            scanner.close();
           }
         }
         toBeDeleted.add(mobFilePath);
