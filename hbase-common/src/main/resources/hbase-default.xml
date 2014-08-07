@@ -1364,4 +1364,12 @@ possible configurations would overwhelm and obscure the important.
     <name>hbase.http.staticuser.user</name>
     <value>dr.stack</value>
   </property>
+  <!-- Mob properties. -->
+  <property>
+    <description>
+      How many files could be cached for each region server.
+    </description>
+    <name>hbase.mob.file.cache.size</name>
+    <value>1000</value>
+  </property>
 </configuration>

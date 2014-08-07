@@ -1,4 +1,5 @@
 /**
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -15,21 +16,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase;
+package org.apache.hadoop.hbase.mob;
 
 import org.apache.hadoop.classification.InterfaceAudience;
-import org.apache.hadoop.classification.InterfaceStability;
+import org.apache.hadoop.hbase.util.Bytes;
 
-@InterfaceAudience.Private
-@InterfaceStability.Evolving
-public final class TagType {
-  // Please declare new Tag Types here to avoid step on pre-existing tag types.
-  public static final byte ACL_TAG_TYPE = (byte) 1;
-  public static final byte VISIBILITY_TAG_TYPE = (byte) 2;
-  public static final byte LOG_REPLAY_TAG_TYPE = (byte) 3;
-  public static final byte VISIBILITY_EXP_SERIALIZATION_TAG_TYPE = (byte)4;
+/**
+ * The constants used in mob.
+ */
+@InterfaceAudience.Public
+public class MobConstants {
 
-  // mob tags
-  public static final byte MOB_REFERENCE_TAG_TYPE = (byte) 5;
-  public static final byte MOB_SIZE_TAG_TYPE = (byte) 6;
+  public static final String IS_MOB = "isMob";
+  public static final String SIZE_TAG = "mobSize";
+
+  public static final String MOB_SCAN_RAW = "hbase.mob.scan.raw";
+  public static final String MOB_CACHE_BLOCKS = "hbase.mob.cache.blocks";
+
+  public static final String MOB_FILE_CACHE_SIZE_KEY = "hbase.mob.file.cache.size";
+  public static final int DEFAULT_MOB_FILE_CACHE_SIZE = 1000;
+
+  public static final String MOB_DIR_NAME = "mobdir";
+  public static final String MOB_REGION_NAME = ".mob";
+  public static final byte[] MOB_REGION_NAME_BYTES = Bytes.toBytes(MOB_REGION_NAME);
+
+  private MobConstants() {
+
+  }
 }
