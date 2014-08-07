@@ -134,7 +134,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
                     // set its memstoreTS to 0. This will help us save space when writing to
                     // disk.
                     KeyValue kv = KeyValueUtil.ensureKeyValue(c);
-                    if (kv.getValueLength() < mobCellValueSizeThreshold
+                    if (kv.getValueLength() <= mobCellValueSizeThreshold
                         || MobUtils.isMobReferenceCell(kv)
                         || kv.getTypeByte() != KeyValue.Type.Put.getCode()) {
                       writer.append(kv);
@@ -151,15 +151,14 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
                       }
                       Tag mobRefTag = new Tag(TagType.MOB_REFERENCE_TAG_TYPE,
                           HConstants.EMPTY_BYTE_ARRAY);
-                      Tag mobSizeTag = new Tag(TagType.MOB_SIZE_TAG_TYPE, Bytes.toBytes(kv
-                          .getValueLength()));
                       existingTags.add(mobRefTag);
-                      existingTags.add(mobSizeTag);
+                      long valueLength = kv.getValueLength();
+                      byte[] newValue = Bytes.add(Bytes.toBytes(valueLength), referenceValue);
                       KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(),
                           kv.getRowLength(), kv.getFamilyArray(), kv.getFamilyOffset(),
                           kv.getFamilyLength(), kv.getQualifierArray(), kv.getQualifierOffset(),
                           kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put,
-                          referenceValue, 0, referenceValue.length, existingTags);
+                          newValue, 0, newValue.length, existingTags);
                       reference.setSequenceId(kv.getSequenceId());
                       writer.append(reference);
                     }

@@ -118,34 +118,6 @@ public class MobUtils {
   }
 
   /**
-   * Gets the tag that contains the size of the cell value.
-   * 
-   * @param cell
-   *          The current cell.
-   * @return The size tag.
-   */
-  public static Tag getSizeTag(Cell cell) {
-    List<Tag> tags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
-    return getSizeTag(tags);
-  }
-
-  /**
-   * Gets the tag that contains the size of the cell value.
-   * @param tags The tags of the current cell.
-   * @return The size tag.
-   */
-  public static Tag getSizeTag(List<Tag> tags) {
-    if (!tags.isEmpty()) {
-      for (Tag tag : tags) {
-        if (tag.getType() == TagType.MOB_SIZE_TAG_TYPE) {
-          return tag;
-        }
-      }
-    }
-    return null;
-  }
-
-  /**
    * Indicates whether it's a raw scan.
    * The information is set in the attribute "hbase.mob.scan.raw" of scan.
    * For a mob cell, in a normal scan the scanners retrieves the mob cell from the mob file.
