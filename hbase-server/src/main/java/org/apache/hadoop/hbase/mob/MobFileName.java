@@ -85,6 +85,11 @@ public class MobFileName {
     return new MobFileName(startKey, date, uuid);
   }
 
+  /**
+   * Converts an integer to a hex string.
+   * @param i An integer.
+   * @return A hex string.
+   */
   public static String int2HexString(int i) {
     int shift = 4;
     char[] buf = new char[8];
@@ -99,6 +104,11 @@ public class MobFileName {
     return new String(buf);
   }
 
+  /**
+   * Converts a hex string to an integer.
+   * @param hex A hex string.
+   * @return An integer.
+   */
   static int hexString2Int(String hex) {
     byte[] buffer = Bytes.toBytes(hex);
     if (buffer.length != 8) {
@@ -121,10 +131,18 @@ public class MobFileName {
     return Bytes.toInt(buffer, 0, 4);
   }
 
+  /**
+   * Gets the hex string of the checksum for a start key.
+   * @return The hex string of the checksum for a start key.
+   */
   public String getStartKey() {
     return int2HexString(startKey);
   }
 
+  /**
+   * Gets the date string. Its format is yyyymmdd.
+   * @return The date string.
+   */
   public String getDate() {
     return this.date;
   }
