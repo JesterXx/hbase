@@ -103,12 +103,19 @@ public class TestMobFileStore extends HBaseTestCase {
     mobWriter.append(key3);
     mobWriter.close();
     String targetPathName = MobUtils.formatDate(currentDate);
+
+    long valueLength1 = key1.getValueLength();
+    long valueLength2 = key2.getValueLength();
+    long valueLength3 = key3.getValueLength();
     byte[] referenceValue =
             Bytes.toBytes(targetPathName + Path.SEPARATOR
                 + mobFilePath.getName());
-    seekKey1 = new KeyValue(ROW, FAMILY, QF1, Long.MAX_VALUE, referenceValue);
-    seekKey2 = new KeyValue(ROW, FAMILY, QF2, Long.MAX_VALUE, referenceValue);
-    seekKey3 = new KeyValue(ROW2, FAMILY, QF3, Long.MAX_VALUE, referenceValue);
+    byte[] newReferenceValue1 = Bytes.add(Bytes.toBytes(valueLength1), referenceValue);
+    byte[] newReferenceValue2 = Bytes.add(Bytes.toBytes(valueLength2), referenceValue);
+    byte[] newReferenceValue3 = Bytes.add(Bytes.toBytes(valueLength3), referenceValue);
+    seekKey1 = new KeyValue(ROW, FAMILY, QF1, Long.MAX_VALUE, newReferenceValue1);
+    seekKey2 = new KeyValue(ROW, FAMILY, QF2, Long.MAX_VALUE, newReferenceValue2);
+    seekKey3 = new KeyValue(ROW2, FAMILY, QF3, Long.MAX_VALUE, newReferenceValue3);
   }
 
   @Test
@@ -136,8 +143,8 @@ public class TestMobFileStore extends HBaseTestCase {
     Cell resultKey2 = mobFileStore.resolve(seekKey2, false);
     Cell resultKey3 = mobFileStore.resolve(seekKey3, false);
     //compare
-    assertEquals(resultKey1.getValue(), VALUE);
-    assertEquals(resultKey2.getValue(), VALUE);
-    assertEquals(resultKey3.getValue(), VALUE2);
+    assertEquals(VALUE, resultKey1.getValue());
+    assertEquals(VALUE, resultKey2.getValue());
+    assertEquals(VALUE2, resultKey3.getValue());
   }
 }

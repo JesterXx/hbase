@@ -272,7 +272,7 @@ public class TestMobStoreScanner {
         Assert.assertFalse(Bytes.toString(value2).equals(Bytes.toString(cells.get(0).getValue())));
         
         byte[] referenceValue = cells.get(0).getValue();
-        String fileName = Bytes.toString(referenceValue);
+        String fileName = Bytes.toString(referenceValue, 8, referenceValue.length-8);
         Path mobFamilyPath;
         mobFamilyPath = new Path(MobUtils.getMobRegionPath(TEST_UTIL.getConfiguration(),
             TableName.valueOf(TN)), hcd.getNameAsString());
