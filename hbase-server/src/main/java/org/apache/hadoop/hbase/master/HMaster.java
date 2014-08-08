@@ -64,7 +64,6 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotDisabledException;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.UnknownRegionException;
-import org.apache.hadoop.hbase.MetaMigrationConvertingToPB;
 import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.client.MetaScanner;
 import org.apache.hadoop.hbase.client.MetaScanner.MetaScannerVisitor;
@@ -258,12 +257,11 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
    * {@link #finishActiveMasterInitialization(MonitoredTask)} after
    * the master becomes the active one.
    *
-   * @throws InterruptedException
    * @throws KeeperException
    * @throws IOException
    */
   public HMaster(final Configuration conf, CoordinatedStateManager csm)
-      throws IOException, KeeperException, InterruptedException {
+      throws IOException, KeeperException {
     super(conf, csm);
     this.rsFatals = new MemoryBoundedLogMessageBuffer(
       conf.getLong("hbase.master.buffer.for.rs.fatals", 1*1024*1024));
@@ -413,7 +411,6 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     this.assignmentManager = new AssignmentManager(this, serverManager,
       this.balancer, this.service, this.metricsMaster,
       this.tableLockManager);
-    zooKeeper.registerListenerFirst(assignmentManager);
 
     this.regionServerTracker = new RegionServerTracker(zooKeeper, this,
         this.serverManager);
@@ -574,11 +571,6 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
       this.serverManager.processDeadServer(tmpServer, true);
     }
 
-    // Update meta with new PB serialization if required. i.e migrate all HRI to PB serialization
-    // in meta. This must happen before we assign all user regions or else the assignment will
-    // fail.
-    MetaMigrationConvertingToPB.updateMetaIfNecessary(this);
-
     // Fix up assignment manager status
     status.setStatus("Starting assignment manager");
     this.assignmentManager.joinCluster();
@@ -674,34 +666,29 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
 
     RegionStates regionStates = assignmentManager.getRegionStates();
     regionStates.createRegionState(HRegionInfo.FIRST_META_REGIONINFO);
-    boolean rit = this.assignmentManager
-      .processRegionInTransitionAndBlockUntilAssigned(HRegionInfo.FIRST_META_REGIONINFO);
     boolean metaRegionLocation = metaTableLocator.verifyMetaRegionLocation(
       this.getShortCircuitConnection(), this.getZooKeeper(), timeout);
     ServerName currentMetaServer = metaTableLocator.getMetaRegionLocation(this.getZooKeeper());
     if (!metaRegionLocation) {
       // Meta location is not verified. It should be in transition, or offline.
       // We will wait for it to be assigned in enableSSHandWaitForMeta below.
-      assigned++;
-      if (!rit) {
-        // Assign meta since not already in transition
-        if (currentMetaServer != null) {
-          // If the meta server is not known to be dead or online,
-          // just split the meta log, and don't expire it since this
-          // could be a full cluster restart. Otherwise, we will think
-          // this is a failover and lose previous region locations.
-          // If it is really a failover case, AM will find out in rebuilding
-          // user regions. Otherwise, we are good since all logs are split
-          // or known to be replayed before user regions are assigned.
-          if (serverManager.isServerOnline(currentMetaServer)) {
-            LOG.info("Forcing expire of " + currentMetaServer);
-            serverManager.expireServer(currentMetaServer);
-          }
-          splitMetaLogBeforeAssignment(currentMetaServer);
-          previouslyFailedMetaRSs.add(currentMetaServer);
+      if (currentMetaServer != null) {
+        // If the meta server is not known to be dead or online,
+        // just split the meta log, and don't expire it since this
+        // could be a full cluster restart. Otherwise, we will think
+        // this is a failover and lose previous region locations.
+        // If it is really a failover case, AM will find out in rebuilding
+        // user regions. Otherwise, we are good since all logs are split
+        // or known to be replayed before user regions are assigned.
+        if (serverManager.isServerOnline(currentMetaServer)) {
+          LOG.info("Forcing expire of " + currentMetaServer);
+          serverManager.expireServer(currentMetaServer);
         }
-        assignmentManager.assignMeta();
+        splitMetaLogBeforeAssignment(currentMetaServer);
+        previouslyFailedMetaRSs.add(currentMetaServer);
       }
+      assignmentManager.assignMeta();
+      assigned++;
     } else {
       // Region already assigned. We didn't assign it. Add to in-memory state.
       regionStates.updateRegionState(
@@ -725,8 +712,8 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     // No need to wait for meta is assigned = 0 when meta is just verified.
     enableServerShutdownHandler(assigned != 0);
 
-    LOG.info("hbase:meta assigned=" + assigned + ", rit=" + rit +
-      ", location=" + metaTableLocator.getMetaRegionLocation(this.getZooKeeper()));
+    LOG.info("hbase:meta assigned=" + assigned + ", location="
+      + metaTableLocator.getMetaRegionLocation(this.getZooKeeper()));
     status.setStatus("META assigned.");
   }
 
@@ -1736,7 +1723,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   }
 
   public void assignRegion(HRegionInfo hri) {
-    assignmentManager.assign(hri, true);
+    assignmentManager.assign(hri);
   }
 
   /**

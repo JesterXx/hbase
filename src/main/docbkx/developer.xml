@@ -32,6 +32,16 @@
     <para>This chapter will be of interest only to those building and developing Apache HBase (i.e., as opposed to
     just downloading the latest distribution).
     </para>
+    <section xml:id="dev.contributing">
+      <title>Contributing</title>
+      <para>
+        If you are looking to contribute to Apache HBase, look for issues in JIRA
+        tagged with the label 'beginner': <link xlink:href="https://issues.apache.org/jira/issues/?jql=project%20%3D%20HBASE%20AND%20labels%20in%20(beginner)">project = HBASE AND labels in (beginner)</link>.  These are issues HBase contributors have
+        deemed worthy but not of immediate priority and a good way to ramp on
+        HBase internals<footnote><para>See <link xlink:href="http://search-hadoop.com/m/DHED43re96">What label is used for issues that are good on ramps for new contributors?</link>
+        from the dev mailing list for background.</para></footnote>.
+      </para>
+    </section>
     <section xml:id="repos">
       <title>Apache HBase Repositories</title>
       <para>There are two different repositories for Apache HBase: Subversion (SVN) and Git.
@@ -146,6 +156,13 @@ mvn clean package -DskipTests
        With Eclipse set up as explained above in <xref linkend="eclipse"/>, you can also simply use the build command in Eclipse.
        To create the full installable HBase package takes a little bit more work, so read on.
        </para>
+       <note>
+         <title>JDK Version Requirements</title>
+         <para>
+           Starting with HBase 1.0 you must use Java 7 or later to build from source code. See <xref linkend="java" /> for more complete
+           information about supported JDK versions.
+         </para>
+       </note>
       </section>
       <section xml:id="build.protobuf"><title>Build Protobuf</title>
             <para>You may need to change the protobuf definitions that reside in the hbase-protocol module or other modules.</para>
@@ -1552,13 +1569,32 @@ public class MyHBaseIntegrationTest {
            <para>We don't have many but what we have we list below.  All are subject to challenge of
            course but until then, please hold to the rules of the road.
            </para>
-          <section xml:id="design.invariants.zk.data">
-            <title>No permanent state in ZooKeeper</title>
-          <para>ZooKeeper state should transient (treat it like memory). If deleted, hbase
-          should be able to recover and essentially be in the same state<footnote><para>There are currently
-          a few exceptions that we need to fix around whether a table is enabled or disabled</para></footnote>.
-          </para>
-          </section>
+            <section xml:id="design.invariants.zk.data">
+                <title>No permanent state in ZooKeeper</title>
+                <para>ZooKeeper state should transient (treat it like memory). If ZooKeeper state is
+                    deleted, hbase should be able to recover and essentially be in the same
+                    state.</para>
+                <itemizedlist>
+                    <title>Exceptions</title>
+                    <listitem>
+                        <para>There are currently a few exceptions that we need to fix around
+                            whether a table is enabled or disabled.</para>
+                    </listitem>
+                    <listitem>
+                        <para>Replication data is currently stored only in ZooKeeper. Deleting
+                            ZooKeeper data related to replication may cause replication to be
+                            disabled. Do not delete the replication tree,
+                                <filename>/hbase/replication/</filename>.</para>
+                        <warning>
+                            <para>Replication may be disrupted and data loss may occur if you delete
+                                the replication tree (<filename>/hbase/replication/</filename>) from
+                                ZooKeeper. Follow progress on this issue at <link
+                                    xlink:href="https://issues.apache.org/jira/browse/HBASE-10295"
+                                    >HBASE-10295</link>.</para>
+                        </warning>
+                    </listitem>
+                </itemizedlist>
+            </section>
 
            </section> <!-- design.invariants -->
 
@@ -1634,6 +1670,16 @@ public class MyHBaseIntegrationTest {
           repository.  Patch files can also be easily generated from Eclipse, for example by selecting "Team -&gt; Create Patch".
           Patches can also be created by git diff and svn diff.
           </para>
+          <para xml:id="patch.master.first">Make patches against the master branch. Do the master
+              branch first even if you want the patch in another branch altogether.  We operate by
+              apply fixes first to the master branch and then backporting.  Another reason to patch
+              master first is because our patch testing system only works against the master branch.
+              Attach your patch to your JIRA and then mark the issue 'Patch Available'.  This will prompt
+              the HadoopQA system to run your
+              patch through all unit tests and report back the results to the JIRA. It may take a few hours
+              for your patch to be run. HadoopQA runs the most recently attached patch to the JIRA regardless.
+              If you want to rerun your patch against HadoopQA perhaps to verify that indeed a certain test
+          failure is the result of your patch, then reattach your patch and it will be run again.</para>
           <para>Please submit one patch-file per Jira.  For example, if multiple files are changed make sure the
           selected resource when generating the patch is a directory.  Patch files can reflect changes in multiple files. </para>
       <para>

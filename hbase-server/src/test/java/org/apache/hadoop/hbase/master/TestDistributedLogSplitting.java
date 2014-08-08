@@ -95,13 +95,11 @@ import org.apache.hadoop.hbase.util.JVMClusterUtil.MasterThread;
 import org.apache.hadoop.hbase.util.JVMClusterUtil.RegionServerThread;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
-import org.apache.hadoop.hbase.zookeeper.ZKAssign;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
-import org.apache.zookeeper.KeeperException;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -781,7 +779,7 @@ public class TestDistributedLogSplitting {
     makeHLog(hrs.getWAL(), regions, "table", "family", NUM_LOG_LINES, 100);
     
     LOG.info("Disabling table\n");
-    TEST_UTIL.getHBaseAdmin().disableTable(Bytes.toBytes("disableTable"));
+    TEST_UTIL.getHBaseAdmin().disableTable(TableName.valueOf("disableTable"));
     
     // abort RS
     LOG.info("Aborting region server: " + hrs.getServerName());
@@ -1361,7 +1359,7 @@ public class TestDistributedLogSplitting {
   HTable installTable(ZooKeeperWatcher zkw, String tname, String fname, int nrs, 
       int existingRegions) throws Exception {
     // Create a table with regions
-    byte [] table = Bytes.toBytes(tname);
+    TableName table = TableName.valueOf(tname);
     byte [] family = Bytes.toBytes(fname);
     LOG.info("Creating table with " + nrs + " regions");
     HTable ht = TEST_UTIL.createTable(table, family);
@@ -1505,10 +1503,8 @@ public class TestDistributedLogSplitting {
     return count;
   }
 
-  private void blockUntilNoRIT(ZooKeeperWatcher zkw, HMaster master)
-  throws KeeperException, InterruptedException {
-    ZKAssign.blockUntilNoRIT(zkw);
-    master.assignmentManager.waitUntilNoRegionsInTransition(60000);
+  private void blockUntilNoRIT(ZooKeeperWatcher zkw, HMaster master) throws Exception {
+    TEST_UTIL.waitUntilNoRegionsInTransition(60000);
   }
 
   private void putData(HRegion region, byte[] startRow, int numRows, byte [] qf,
@@ -1617,7 +1613,7 @@ public class TestDistributedLogSplitting {
           final HRegionServer destRS = hrs;
           // the RS doesn't have regions of the specified table so we need move one to this RS
           List<HRegionInfo> tableRegions =
-              TEST_UTIL.getHBaseAdmin().getTableRegions(Bytes.toBytes(tableName));
+              TEST_UTIL.getHBaseAdmin().getTableRegions(TableName.valueOf(tableName));
           final HRegionInfo hri = tableRegions.get(0);
           TEST_UTIL.getHBaseAdmin().move(hri.getEncodedNameAsBytes(),
             Bytes.toBytes(destRS.getServerName().getServerName()));

@@ -20,7 +20,7 @@
 
 package org.apache.hadoop.hbase.io.hfile.bucket;
 
-import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -32,6 +32,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.io.hfile.BlockCacheKey;
+import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.bucket.BucketCache.BucketEntry;
 import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 
@@ -174,13 +175,13 @@ public final class BucketAllocator {
     private int sizeIndex;
 
     BucketSizeInfo(int sizeIndex) {
-      bucketList = new ArrayList<Bucket>();
-      freeBuckets = new ArrayList<Bucket>();
-      completelyFreeBuckets = new ArrayList<Bucket>();
+      bucketList = new LinkedList<Bucket>();
+      freeBuckets = new LinkedList<Bucket>();
+      completelyFreeBuckets = new LinkedList<Bucket>();
       this.sizeIndex = sizeIndex;
     }
 
-    public void instantiateBucket(Bucket b) {
+    public synchronized void instantiateBucket(Bucket b) {
       assert b.isUninstantiated() || b.isCompletelyFree();
       b.reconfigure(sizeIndex, bucketSizes, bucketCapacity);
       bucketList.add(b);
@@ -230,7 +231,7 @@ public final class BucketAllocator {
       return b;
     }
 
-    private void removeBucket(Bucket b) {
+    private synchronized void removeBucket(Bucket b) {
       assert b.isCompletelyFree();
       bucketList.remove(b);
       freeBuckets.remove(b);
@@ -246,7 +247,7 @@ public final class BucketAllocator {
       if (b.isCompletelyFree()) completelyFreeBuckets.add(b);
     }
 
-    public IndexStatistics statistics() {
+    public synchronized IndexStatistics statistics() {
       long free = 0, used = 0;
       for (Bucket b : bucketList) {
         free += b.freeCount();
@@ -415,7 +416,9 @@ public final class BucketAllocator {
     assert blockSize > 0;
     BucketSizeInfo bsi = roundUpToBucketSizeInfo(blockSize);
     if (bsi == null) {
-      throw new BucketAllocatorException("Allocation too big size=" + blockSize);
+      throw new BucketAllocatorException("Allocation too big size=" + blockSize +
+        "; adjust BucketCache sizes " + CacheConfig.BUCKET_CACHE_BUCKETS_KEY +
+        " to accomodate if size seems reasonable and you want it cached.");
     }
     long offset = bsi.allocateBlock();
 

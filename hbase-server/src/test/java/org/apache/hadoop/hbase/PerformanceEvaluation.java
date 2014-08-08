@@ -47,6 +47,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Consistency;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
@@ -272,7 +273,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
    * {@code opts.presplitRegions} is specified or when the existing table's
    * region replica count doesn't match {@code opts.replicas}.
    */
-  static boolean checkTable(HBaseAdmin admin, TestOptions opts) throws IOException {
+  static boolean checkTable(Admin admin, TestOptions opts) throws IOException {
     TableName tableName = TableName.valueOf(opts.tableName);
     boolean needsDelete = false, exists = admin.tableExists(tableName);
     boolean isReadCmd = opts.cmdName.toLowerCase().contains("read")
@@ -567,6 +568,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
     int perClientRunRows = DEFAULT_ROWS_PER_GB;
     int numClientThreads = 1;
     int totalRows = DEFAULT_ROWS_PER_GB;
+    int measureAfter = 0;
     float sampleRate = 1.0f;
     double traceRate = 0.0;
     String tableName = TABLE_NAME;
@@ -631,6 +633,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
       this.valueSize = that.valueSize;
       this.period = that.period;
       this.randomSleep = that.randomSleep;
+      this.measureAfter = that.measureAfter;
     }
 
     public int getCycles() {
@@ -888,6 +891,14 @@ public class PerformanceEvaluation extends Configured implements Tool {
     public boolean isOneCon() {
       return oneCon;
     }
+
+    public int getMeasureAfter() {
+      return measureAfter;
+    }
+
+    public void setMeasureAfter(int measureAfter) {
+      this.measureAfter = measureAfter;
+    }
   }
 
   /*
@@ -1048,9 +1059,11 @@ public class PerformanceEvaluation extends Configured implements Tool {
           } finally {
             scope.close();
           }
-          latency.update((System.nanoTime() - startTime) / 1000);
-          if (status != null && i > 0 && (i % getReportingPeriod()) == 0) {
-            status.setStatus(generateStatus(opts.startRow, i, lastRow));
+          if ( (i - opts.startRow) > opts.measureAfter) {
+            latency.update((System.nanoTime() - startTime) / 1000);
+            if (status != null && i > 0 && (i % getReportingPeriod()) == 0) {
+              status.setStatus(generateStatus(opts.startRow, i, lastRow));
+            }
           }
         }
       }
@@ -1611,6 +1624,8 @@ public class PerformanceEvaluation extends Configured implements Tool {
         + " there by not returning any thing back to the client.  Helps to check the server side"
         + " performance.  Uses FilterAllFilter internally. ");
     System.err.println(" latency         Set to report operation latencies. Default: False");
+    System.err.println(" measureAfter    Start to measure the latency once 'measureAfter'" +
+        " rows have been treated. Default: 0");
     System.err.println(" bloomFilter      Bloom filter type, one of " + Arrays.toString(BloomType.values()));
     System.err.println(" valueSize       Pass value size to use: Default: 1024");
     System.err.println(" valueRandom     Set if we should vary value size between 0 and " +
@@ -1805,6 +1820,12 @@ public class PerformanceEvaluation extends Configured implements Tool {
       final String randomSleep = "--randomSleep=";
       if (cmd.startsWith(randomSleep)) {
         opts.randomSleep = Integer.parseInt(cmd.substring(randomSleep.length()));
+        continue;
+      }
+
+      final String measureAfter = "--measureAfter=";
+      if (cmd.startsWith(measureAfter)) {
+        opts.measureAfter = Integer.parseInt(cmd.substring(measureAfter.length()));
         continue;
       }
 
