@@ -39,7 +39,8 @@ public class MobTestUtil {
     }
     return sb.toString();
   }
-  protected static void writeStoreFile(final StoreFile.Writer writer, String caseName) throws IOException {
+  protected static void writeStoreFile(final StoreFile.Writer writer, String caseName)
+      throws IOException {
     writeStoreFile(writer, Bytes.toBytes(caseName), Bytes.toBytes(caseName));
   }
 

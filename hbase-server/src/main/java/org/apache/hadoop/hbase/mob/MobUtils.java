@@ -42,7 +42,8 @@ import org.apache.hadoop.hbase.util.Strings;
 @InterfaceAudience.Private
 public class MobUtils {
 
-  private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT = new ThreadLocal<SimpleDateFormat>() {
+  private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT =
+      new ThreadLocal<SimpleDateFormat>() {
     @Override
     protected SimpleDateFormat initialValue() {
       return new SimpleDateFormat("yyyyMMdd");
@@ -60,14 +61,14 @@ public class MobUtils {
   }
 
   /**
-   * Gets the mob size threshold.
+   * Gets the mob threshold.
    * If the size of a cell value is larger than this threshold, it's regarded as a mob.
    * @param hcd The descriptor of a column family.
    * @return The threshold.
    */
-  public static long getMobSizeThreshold(HColumnDescriptor hcd) {
+  public static long getMobThreshold(HColumnDescriptor hcd) {
     String threshold = hcd.getValue(MobConstants.MOB_THRESHOLD);
-    return Strings.isEmpty(threshold) ? 0 : Integer.parseInt(threshold);
+    return Strings.isEmpty(threshold) ? 0 : Long.parseLong(threshold);
   }
 
   /**

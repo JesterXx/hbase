@@ -65,7 +65,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   public DefaultMobStoreFlusher(Configuration conf, Store store) {
     super(conf, store);
     isMob = MobUtils.isMobFamily(store.getFamily());
-    mobCellValueSizeThreshold = MobUtils.getMobSizeThreshold(store.getFamily());
+    mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
     this.targetPath = new Path(MobUtils.getMobRegionPath(conf, store.getTableName()),
         store.getColumnFamilyName());
   }

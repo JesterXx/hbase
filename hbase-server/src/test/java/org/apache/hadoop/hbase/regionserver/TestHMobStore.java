@@ -375,7 +375,7 @@ public class TestHMobStore {
       //this is not mob reference cell.
       Assert.assertFalse(MobUtils.isMobReferenceCell(cell));
       Assert.assertEquals(expected.get(i), results.get(i));
-      Assert.assertEquals(100, MobUtils.getMobSizeThreshold(store.getFamily()));
+      Assert.assertEquals(100, MobUtils.getMobThreshold(store.getFamily()));
     }
   }
 

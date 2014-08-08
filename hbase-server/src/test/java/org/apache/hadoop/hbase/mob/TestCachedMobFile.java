@@ -129,7 +129,8 @@ public class TestCachedMobFile extends HBaseTestCase {
     
     // Test the start key
     byte[] startKey = Bytes.toBytes("aa");  // The start key bytes
-    KeyValue expectedKey = new KeyValue(startKey, family, qualify, Long.MAX_VALUE, Type.Put, startKey);
+    KeyValue expectedKey =
+        new KeyValue(startKey, family, qualify, Long.MAX_VALUE, Type.Put, startKey);
     KeyValue seekKey = expectedKey.createKeyOnly(false);
     KeyValue kv = KeyValueUtil.ensureKeyValue(cachedMobFile.readCell(seekKey, false));
     assertKeyValuesEquals(expectedKey, kv);
