@@ -28,7 +28,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 public class MobConstants {
 
   public static final String IS_MOB = "isMob";
-  public static final String SIZE_TAG = "mobSize";
+  public static final String MOB_THRESHOLD = "mobThreshold";
 
   public static final String MOB_SCAN_RAW = "hbase.mob.scan.raw";
   public static final String MOB_CACHE_BLOCKS = "hbase.mob.cache.blocks";

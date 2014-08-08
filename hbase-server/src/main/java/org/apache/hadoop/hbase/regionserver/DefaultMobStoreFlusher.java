@@ -45,10 +45,10 @@ import org.apache.hadoop.hbase.util.Bytes;
  * One is the store files of HBase, the other is the mob files.
  * <ol>
  * <li>Cells that are not PUT type or have the delete mark will be directly flushed to HBase.</li>
- * <li>If the size of a cell value is larger than or equal with a threshold, it'll be flushed
+ * <li>If the size of a cell value is larger than a threshold, it'll be flushed
  * to a mob file, another cell with the path of this file will be flushed to HBase.</li>
- * <li>If the size of a cell value is smaller than a threshold, it'll be flushed to HBase
- * directly.</li>
+ * <li>If the size of a cell value is smaller than or equal with a threshold, it'll be flushed to
+ * HBase directly.</li>
  * </ol>
  * 
  */
@@ -76,12 +76,12 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
    * If the store is a mob one, the flusher flushes the MemStore into two places.
    * One is the store files of HBase, the other is the mob files.
    * <ol>
-   * <li>Cells that are not PUT type or have the delete mark will be directly flushed to HBase.</li>
-   * <li>If the size of a cell value is larger than or equal with a threshold, it'll be
-   * flushed to a mob file,
-   * another cell with the path of this file will be flushed to HBase.</li>
-   * <li>If the size of a cell value is smaller than a threshold, it'll be flushed to HBase
-   * directly.</li>
+   * <li>Cells that are not PUT type or have the delete mark will be directly flushed to
+   * HBase.</li>
+   * <li>If the size of a cell value is larger than a threshold, it'll be
+   * flushed to a mob file, another cell with the path of this file will be flushed to HBase.</li>
+   * <li>If the size of a cell value is smaller than or equal with a threshold, it'll be flushed to
+   * HBase directly.</li>
    * </ol>
    */
   @Override

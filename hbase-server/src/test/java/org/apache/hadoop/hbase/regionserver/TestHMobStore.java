@@ -335,7 +335,7 @@ public class TestHMobStore {
     HColumnDescriptor hcd;
     hcd = new HColumnDescriptor(family);
     hcd.setValue(MobConstants.IS_MOB, "true");
-    hcd.setValue(MobConstants.SIZE_TAG, "100");
+    hcd.setValue(MobConstants.MOB_THRESHOLD, "100");
     hcd.setMaxVersions(4);
     init(name.getMethodName(), conf, hcd);
 

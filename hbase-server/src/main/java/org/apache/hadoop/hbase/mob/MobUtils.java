@@ -61,12 +61,12 @@ public class MobUtils {
 
   /**
    * Gets the mob size threshold.
-   * If the size of a cell value is not less than this threshold, it's regarded as a mob.
+   * If the size of a cell value is larger than this threshold, it's regarded as a mob.
    * @param hcd The descriptor of a column family.
    * @return The threshold.
    */
   public static long getMobSizeThreshold(HColumnDescriptor hcd) {
-    String threshold = hcd.getValue(MobConstants.SIZE_TAG);
+    String threshold = hcd.getValue(MobConstants.MOB_THRESHOLD);
     return Strings.isEmpty(threshold) ? 0 : Integer.parseInt(threshold);
   }
 
