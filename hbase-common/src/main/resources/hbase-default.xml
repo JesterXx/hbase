@@ -1367,7 +1367,7 @@ possible configurations would overwhelm and obscure the important.
   <!-- Mob properties. -->
   <property>
     <description>
-      How many files could be cached for each region server.
+      How many file handlers could be cached for each region server.
     </description>
     <name>hbase.mob.file.cache.size</name>
     <value>1000</value>
