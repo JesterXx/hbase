@@ -29,11 +29,13 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.Strings;
 
 /**
@@ -177,15 +179,51 @@ public class MobUtils {
 
   /**
    * Gets the region dir of the mob files.
-   * It's {HBASE_DIR}/mobdir/{namespace}/{tableName}/.mob.
+   * It's {HBASE_DIR}/mobdir/{namespace}/{tableName}/{regionEncodedName}.
    * @param conf The current configuration.
    * @param tableName The current table name.
    * @return The region dir of the mob files.
    */
   public static Path getMobRegionPath(Configuration conf, TableName tableName) {
-    Path tablePath = new Path(MobUtils.getMobHome(conf), new Path(tableName.getNamespaceAsString(),
-        tableName.getQualifierAsString()));
-    return new Path(tablePath, MobConstants.MOB_REGION_NAME);
+    Path tablePath = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
+    HRegionInfo regionInfo = getMobRegionInfo(tableName);
+    return new Path(tablePath, regionInfo.getEncodedName());
+  }
+
+  /**
+   * Gets the family dir of the mob files.
+   * It's {HBASE_DIR}/mobdir/{namespace}/{tableName}/{regionEncodedName}/{columnFamilyName}.
+   * @param conf The current configuration.
+   * @param tableName The current table name.
+   * @param familyName The current family name.
+   * @return The family dir of the mob files.
+   */
+  public static Path getMobFamilyPath(Configuration conf, TableName tableName, String familyName) {
+    return new Path(getMobRegionPath(conf, tableName), familyName);
+  }
+
+  /**
+   * Gets the family dir of the mob files.
+   * It's {HBASE_DIR}/mobdir/{namespace}/{tableName}/{regionEncodedName}/{columnFamilyName}.
+   * @param regionPath The path of mob region which is a dummy one.
+   * @param familyName The current family name.
+   * @return The family dir of the mob files.
+   */
+  public static Path getMobFamilyPath(Path regionPath, String familyName) {
+    return new Path(regionPath, familyName);
+  } 
+
+  /**
+   * Gets the HRegionInfo of the mob files.
+   * This is a dummy region. The mob files are not saved in a region in HBase.
+   * This is only used in mob snapshot. It's internally used only.
+   * @param tableName
+   * @return
+   */
+  public static HRegionInfo getMobRegionInfo(TableName tableName) {
+    HRegionInfo info = new HRegionInfo(tableName, MobConstants.MOB_REGION_NAME_BYTES,
+        HConstants.EMPTY_END_ROW, false, 0);
+    return info;
   }
 
   /**

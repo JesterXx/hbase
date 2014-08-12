@@ -73,8 +73,7 @@ public class MobFileStore {
     this.tableName = tableName;
     this.family = family;
     this.familyAsString = family.getNameAsString();
-    this.mobFamilyPath = new Path(MobUtils.getMobRegionPath(conf, tableName),
-        family.getNameAsString());
+    this.mobFamilyPath = MobUtils.getMobFamilyPath(conf, tableName, family.getNameAsString());
   }
 
   /**
