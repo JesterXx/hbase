@@ -116,6 +116,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
             StoreFile.Writer mobFileWriter = null;
             int compactionKVMax = conf.getInt(HConstants.COMPACTION_KV_MAX,
                 HConstants.COMPACTION_KV_MAX_DEFAULT);
+            long mobKVCount = 0;
             long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
             mobFileWriter = mobFileStore.createWriterInTmp(new Date(time), cellsCount, store
                 .getFamily().getCompression(), store.getRegionInfo().getStartKey());
@@ -141,6 +142,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
                     } else {
                       // append the original keyValue in the mob file.
                       mobFileWriter.append(kv);
+                      mobKVCount++;
 
                       // append the tags to the KeyValue.
                       // The key is same, the value is the filename of the mob file
@@ -173,8 +175,17 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
               mobFileWriter.close();
             }
 
-            // commit the mob file from temp folder to target folder.
-            mobFileStore.commitFile(mobFileWriter.getPath(), targetPath);
+            if (mobKVCount > 0) {
+              // commit the mob file from temp folder to target folder.
+              mobFileStore.commitFile(mobFileWriter.getPath(), targetPath);
+            } else {
+              try {
+                // If the mob file is empty, delete it instead of committing.
+                store.getFileSystem().delete(mobFileWriter.getPath(), true);
+              } catch (IOException e) {
+                LOG.error("Fail to delete the temp mob file", e);
+              }
+            }
           }
         } finally {
           finalizeWriter(writer, cacheFlushId, status);
