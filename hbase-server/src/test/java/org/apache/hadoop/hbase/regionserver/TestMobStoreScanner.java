@@ -24,10 +24,10 @@ import java.util.List;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.MediumTests;
 import org.apache.hadoop.hbase.TableName;
@@ -71,7 +71,7 @@ public class TestMobStoreScanner {
   private final static byte [] value6 = Bytes.toBytes("value6");
   private static HTable table;
   private static HBaseAdmin admin;
-  private static HColumnDescriptor hcd; 
+  private static HColumnDescriptor hcd;
   private static HTableDescriptor desc;
 
   @BeforeClass
@@ -84,68 +84,83 @@ public class TestMobStoreScanner {
 
     TEST_UTIL.startMiniCluster(1);
   }
-  
+
   @AfterClass
   public static void tearDownAfterClass() throws Exception {
     TEST_UTIL.shutdownMiniCluster();
   }
-  
-  @SuppressWarnings("deprecation")
-  @Before
+
   public void setUp() throws Exception {
-    desc = new HTableDescriptor(TN);
+    desc = new HTableDescriptor(TableName.valueOf(TN));
     hcd = new HColumnDescriptor(family);
     hcd.setValue(MobConstants.IS_MOB, "true");
     hcd.setMaxVersions(4);
     desc.addFamily(hcd);
-    
     admin = new HBaseAdmin(TEST_UTIL.getConfiguration());
     admin.createTable(desc);
     table = new HTable(TEST_UTIL.getConfiguration(), TN);
   }
-  
-  @After
+
   public void tearDown() throws Exception {
     admin.disableTable(TN);
     admin.deleteTable(TN);
     admin.close();
   }
-  
-  @SuppressWarnings("deprecation")
+
+  /**
+   * set the scan attribute
+   *
+   * @param reversed if true, scan will be backward order
+   * @param mobScanRaw if true, scan will get the mob reference
+   * @return this
+   */
+  public void setScan(Scan scan, boolean reversed, boolean mobScanRaw) {
+      scan.setReversed(reversed);
+      scan.addColumn(family, qf2);
+      scan.setMaxVersions(4);
+      if(mobScanRaw) {
+        scan.setAttribute(MobConstants.MOB_SCAN_RAW, Bytes.toBytes(Boolean.TRUE));
+      }
+  }
+
   @Test
-  public void testMobStoreScannerGetFromFiles() throws InterruptedException {
+  public void testMobStoreScanner() throws Exception {
+	  testGetFromFiles(false);
+	  testGetReferences(false);
+	  testGetFromMemStore(false);
+  }
+
+  @Test
+  public void testReversedMobStoreScanner() throws Exception {
+	  testGetFromFiles(true);
+	  testGetReferences(true);
+	  testGetFromMemStore(true);
+  }
+
+  public void testGetFromFiles(boolean reversed) throws Exception {
     try {
-      
-      long ts1 = 1; // System.currentTimeMillis();
+      setUp();
+      long ts1 = System.currentTimeMillis();
       long ts2 = ts1 + 1;
       long ts3 = ts1 + 2;
-      
-      KeyValue kv13 = new KeyValue(row1, family, qf1, ts3, KeyValue.Type.Put, value1);
-      KeyValue kv12 = new KeyValue(row1, family, qf2, ts2, KeyValue.Type.Put, value2);
-      KeyValue kv11 = new KeyValue(row1, family, qf3, ts1, KeyValue.Type.Put, value3);
 
-      KeyValue kv23 = new KeyValue(row2, family, qf4, ts3, KeyValue.Type.Put, value4);
-      KeyValue kv22 = new KeyValue(row2, family, qf5, ts2, KeyValue.Type.Put, value5);
-      KeyValue kv21 = new KeyValue(row2, family, qf6, ts1, KeyValue.Type.Put, value6);
-      
       Put put1 = new Put(row1);
-      put1.add(kv13);
-      put1.add(kv12);
-      put1.add(kv11);
+      put1.add(family, qf1, ts3, value1);
+      put1.add(family, qf2, ts2, value2);
+      put1.add(family, qf3, ts1, value3);
       table.put(put1);
-      
+
       Put put2 = new Put(row2);
-      put2.add(kv23);
-      put2.add(kv22);
-      put2.add(kv21);
+      put2.add(family, qf4, ts3, value4);
+      put2.add(family, qf5, ts2, value5);
+      put2.add(family, qf6, ts1, value6);
       table.put(put2);
 
       table.flushCommits();
       admin.flush(TN);
-      
+
       Scan scan = new Scan();
-      scan.addColumn(family, qf2);
-      scan.setMaxVersions(4);
+      setScan(scan, reversed, false);
       ResultScanner scanner = table.getScanner(scan);
 
       Result result = scanner.next();
@@ -154,11 +169,13 @@ public class TestMobStoreScanner {
         size++;
         List<Cell> cells = result.getColumnCells(family, qf2);
         Assert.assertEquals(1, cells.size());
-        Assert.assertEquals(Bytes.toString(value2), Bytes.toString(cells.get(0).getValue()));
+        Assert.assertEquals(Bytes.toString(value2),
+            Bytes.toString(CellUtil.cloneValue(cells.get(0))));
         result = scanner.next();
       }
       scanner.close();
       Assert.assertEquals(1, size);
+      tearDown();
     } catch (MasterNotRunningException e) {
       e.printStackTrace();
     } catch (ZooKeeperConnectionException e) {
@@ -167,39 +184,28 @@ public class TestMobStoreScanner {
       e.printStackTrace();
     }
   }
-  
-  @SuppressWarnings("deprecation")
-  @Test
-  public void testMobStoreScannerGetFromMemStore() throws InterruptedException {
+
+  public void testGetFromMemStore(boolean reversed) throws Exception {
     try {
-      
-      long ts1 = 1; // System.currentTimeMillis();
+      setUp();
+      long ts1 = System.currentTimeMillis();
       long ts2 = ts1 + 1;
       long ts3 = ts1 + 2;
-      
-      KeyValue kv13 = new KeyValue(row1, family, qf1, ts3, KeyValue.Type.Put, value1);
-      KeyValue kv12 = new KeyValue(row1, family, qf2, ts2, KeyValue.Type.Put, value2);
-      KeyValue kv11 = new KeyValue(row1, family, qf3, ts1, KeyValue.Type.Put, value3);
 
-      KeyValue kv23 = new KeyValue(row2, family, qf4, ts3, KeyValue.Type.Put, value4);
-      KeyValue kv22 = new KeyValue(row2, family, qf5, ts2, KeyValue.Type.Put, value5);
-      KeyValue kv21 = new KeyValue(row2, family, qf6, ts1, KeyValue.Type.Put, value6);
-      
       Put put1 = new Put(row1);
-      put1.add(kv13);
-      put1.add(kv12);
-      put1.add(kv11);
+      put1.add(family, qf1, ts3, value1);
+      put1.add(family, qf2, ts2, value2);
+      put1.add(family, qf3, ts1, value3);
       table.put(put1);
-      
+
       Put put2 = new Put(row2);
-      put2.add(kv23);
-      put2.add(kv22);
-      put2.add(kv21);
+      put2.add(family, qf4, ts3, value4);
+      put2.add(family, qf5, ts2, value5);
+      put2.add(family, qf6, ts1, value6);
       table.put(put2);
-      
+
       Scan scan = new Scan();
-      scan.addColumn(family, qf2);
-      scan.setMaxVersions(4);
+      setScan(scan, reversed, false);
       ResultScanner scanner = table.getScanner(scan);
 
       Result result = scanner.next();
@@ -208,11 +214,13 @@ public class TestMobStoreScanner {
         size++;
         List<Cell> cells = result.getColumnCells(family, qf2);
         Assert.assertEquals(1, cells.size());
-        Assert.assertEquals(Bytes.toString(value2), Bytes.toString(cells.get(0).getValue()));
+        Assert.assertEquals(Bytes.toString(value2),
+            Bytes.toString(CellUtil.cloneValue(cells.get(0))));
         result = scanner.next();
       }
       scanner.close();
       Assert.assertEquals(1, size);
+      tearDown();
     } catch (MasterNotRunningException e) {
       e.printStackTrace();
     } catch (ZooKeeperConnectionException e) {
@@ -221,69 +229,59 @@ public class TestMobStoreScanner {
       e.printStackTrace();
     }
   }
-  
-  @SuppressWarnings("deprecation")
-  @Test
-  public void testMobStoreScannerGetReferences() throws InterruptedException {
+
+  public void testGetReferences(boolean reversed) throws Exception {
     try {
-      
-      long ts1 = 1; // System.currentTimeMillis();
+      setUp();
+      long ts1 = System.currentTimeMillis();
       long ts2 = ts1 + 1;
       long ts3 = ts1 + 2;
-      
-      KeyValue kv13 = new KeyValue(row1, family, qf1, ts3, KeyValue.Type.Put, value1);
-      KeyValue kv12 = new KeyValue(row1, family, qf2, ts2, KeyValue.Type.Put, value2);
-      KeyValue kv11 = new KeyValue(row1, family, qf3, ts1, KeyValue.Type.Put, value3);
 
-      KeyValue kv23 = new KeyValue(row2, family, qf4, ts3, KeyValue.Type.Put, value4);
-      KeyValue kv22 = new KeyValue(row2, family, qf5, ts2, KeyValue.Type.Put, value5);
-      KeyValue kv21 = new KeyValue(row2, family, qf6, ts1, KeyValue.Type.Put, value6);
-      
       Put put1 = new Put(row1);
-      put1.add(kv13);
-      put1.add(kv12);
-      put1.add(kv11);
+      put1.add(family, qf1, ts3, value1);
+      put1.add(family, qf2, ts2, value2);
+      put1.add(family, qf3, ts1, value3);
       table.put(put1);
-      
+
       Put put2 = new Put(row2);
-      put2.add(kv23);
-      put2.add(kv22);
-      put2.add(kv21);
+      put2.add(family, qf4, ts3, value4);
+      put2.add(family, qf5, ts2, value5);
+      put2.add(family, qf6, ts1, value6);
       table.put(put2);
-      
+
       table.flushCommits();
       admin.flush(TN);
-      
-      Scan scan = new Scan();
-      scan.addColumn(family, qf2);
-      scan.setMaxVersions(4);
-      //set the scan attribute
-      scan.setAttribute(MobConstants.MOB_SCAN_RAW, Bytes.toBytes(Boolean.TRUE));
-      ResultScanner scanner = table.getScanner(scan);
 
+      Scan scan = new Scan();
+      setScan(scan, reversed, true);
+
+      ResultScanner scanner = table.getScanner(scan);
       Result result = scanner.next();
       int size = 0;
       while (result != null) {
         size++;
         List<Cell> cells = result.getColumnCells(family, qf2);
         Assert.assertEquals(1, cells.size());
-        Assert.assertEquals(Bytes.toString(row1), Bytes.toString(cells.get(0).getRow()));
-        Assert.assertEquals(Bytes.toString(family), Bytes.toString(cells.get(0).getFamily()));
-        Assert.assertFalse(Bytes.toString(value2).equals(Bytes.toString(cells.get(0).getValue())));
-        
-        byte[] referenceValue = cells.get(0).getValue();
+        Assert.assertEquals(Bytes.toString(row1),
+            Bytes.toString(CellUtil.cloneRow(cells.get(0))));
+        Assert.assertEquals(Bytes.toString(family),
+            Bytes.toString(CellUtil.cloneFamily(cells.get(0))));
+        Assert.assertFalse(Bytes.toString(value2).equals(
+            Bytes.toString(CellUtil.cloneValue(cells.get(0)))));
+        byte[] referenceValue = CellUtil.cloneValue(cells.get(0));
         String fileName = Bytes.toString(referenceValue, 8, referenceValue.length-8);
         Path mobFamilyPath;
         mobFamilyPath = new Path(MobUtils.getMobRegionPath(TEST_UTIL.getConfiguration(),
             TableName.valueOf(TN)), hcd.getNameAsString());
         Path targetPath = new Path(mobFamilyPath, fileName);
-          FileSystem fs = FileSystem.get(TEST_UTIL.getConfiguration());
+        FileSystem fs = FileSystem.get(TEST_UTIL.getConfiguration());
         Assert.assertTrue(fs.exists(targetPath));
-        
+
         result = scanner.next();
       }
       scanner.close();
       Assert.assertEquals(1, size);
+      tearDown();
     } catch (MasterNotRunningException e) {
       e.printStackTrace();
     } catch (ZooKeeperConnectionException e) {

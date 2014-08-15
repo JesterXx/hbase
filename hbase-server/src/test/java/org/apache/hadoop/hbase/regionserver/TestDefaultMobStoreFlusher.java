@@ -22,12 +22,13 @@ import java.io.IOException;
 import java.util.List;
 
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.LargeTests;
 import org.apache.hadoop.hbase.MasterNotRunningException;
+import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HTable;
@@ -66,39 +67,36 @@ public class TestDefaultMobStoreFlusher {
 
    TEST_UTIL.startMiniCluster(1);
  }
- 
+
  @AfterClass
  public static void tearDownAfterClass() throws Exception {
    TEST_UTIL.shutdownMiniCluster();
  }
- 
- @SuppressWarnings("deprecation")
+
  @Test
  public void testFlushNonMobFile() throws InterruptedException {
    String TN = "testFlushNonMobFile";
    HTable table = null;
    HBaseAdmin admin = null;
-   
+
    try {
-     HTableDescriptor desc = new HTableDescriptor(TN);
+     HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(TN));
      HColumnDescriptor hcd = new HColumnDescriptor(family);
      hcd.setMaxVersions(4);
      desc.addFamily(hcd);
-     
+
      admin = new HBaseAdmin(TEST_UTIL.getConfiguration());
      admin.createTable(desc);
      table = new HTable(TEST_UTIL.getConfiguration(), TN);
-     
+
      //Put data
      Put put0 = new Put(row1);
-     KeyValue kv1 = new KeyValue(row1, family, qf1, 1, KeyValue.Type.Put, value1);
-     put0.add(kv1);
+     put0.add(family, qf1, 1, value1);
      table.put(put0);
 
      //Put more data
      Put put1 = new Put(row2);
-     KeyValue kv2 = new KeyValue(row2, family, qf2, 1, KeyValue.Type.Put, value2);
-     put1.add(kv2);
+     put1.add(family, qf2, 1, value2);
      table.put(put1);
 
      //Flush
@@ -119,7 +117,8 @@ public class TestDefaultMobStoreFlusher {
        // Verify the cell size
        Assert.assertEquals(1, cells.size());
        // Verify the value
-       Assert.assertEquals(Bytes.toString(value1), Bytes.toString(cells.get(0).getValue()));
+       Assert.assertEquals(Bytes.toString(value1),
+           Bytes.toString(CellUtil.cloneValue(cells.get(0))));
        result = scanner.next();
      }
      scanner.close();
@@ -133,35 +132,32 @@ public class TestDefaultMobStoreFlusher {
      e3.printStackTrace();
    }
  }
- 
- @SuppressWarnings("deprecation")
+
  @Test
  public void testFlushMobFile() throws InterruptedException {
    String TN = "testFlushMobFile";
    HTable table = null;
    HBaseAdmin admin = null;
-   
+
    try {
-     HTableDescriptor desc = new HTableDescriptor(TN);
+     HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(TN));
      HColumnDescriptor hcd = new HColumnDescriptor(family);
      hcd.setValue(MobConstants.IS_MOB, "true");
      hcd.setMaxVersions(4);
      desc.addFamily(hcd);
-     
+
      admin = new HBaseAdmin(TEST_UTIL.getConfiguration());
      admin.createTable(desc);
      table = new HTable(TEST_UTIL.getConfiguration(), TN);
 
      //put data
      Put put0 = new Put(row1);
-     KeyValue kv1 = new KeyValue(row1, family, qf1, 1, KeyValue.Type.Put, value1);
-     put0.add(kv1);
+     put0.add(family, qf1, 1, value1);
      table.put(put0);
 
      //put more data
      Put put1 = new Put(row2);
-     KeyValue kv2 = new KeyValue(row2, family, qf2, 1, KeyValue.Type.Put, value2);
-     put1.add(kv2);
+     put1.add(family, qf2, 1, value2);
      table.put(put1);
 
      //flush
@@ -183,7 +179,8 @@ public class TestDefaultMobStoreFlusher {
        // Verify the the cell size
        Assert.assertEquals(1, cells.size());
        // Verify the value
-       Assert.assertEquals(Bytes.toString(value1), Bytes.toString(cells.get(0).getValue()));
+       Assert.assertEquals(Bytes.toString(value1),
+           Bytes.toString(CellUtil.cloneValue(cells.get(0))));
        result = scanner.next();
      }
      scanner.close();

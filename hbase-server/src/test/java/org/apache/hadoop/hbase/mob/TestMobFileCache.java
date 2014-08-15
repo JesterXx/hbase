@@ -21,13 +21,14 @@ package org.apache.hadoop.hbase.mob;
 import java.io.IOException;
 import java.util.Date;
 
+import junit.framework.TestCase;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HBaseTestCase;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -37,12 +38,14 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.regionserver.MobFileStore;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 @Category(SmallTests.class)
-public class TestMobFileCache extends HBaseTestCase {
+public class TestMobFileCache extends TestCase {
   static final Log LOG = LogFactory.getLog(TestMobFileCache.class);
+  private Configuration conf = HBaseConfiguration.create();
   private MobCacheConfig mobCacheConf;
   private MobFileCache mobFileCache;
   private Date currentDate = new Date();
@@ -53,12 +56,12 @@ public class TestMobFileCache extends HBaseTestCase {
   private final int EXPECTED_CACHE_SIZE_THREE = 3;
   private final long EXPECTED_REFERENCE_ONE = 1;
   private final long EXPECTED_REFERENCE_TWO = 2;
-  
+
   private final String TABLE = "tableName";
   private final String FAMILY1 = "family1";
   private final String FAMILY2 = "family2";
   private final String FAMILY3 = "family3";
-  
+
   private final byte[] ROW = Bytes.toBytes("row");
   private final byte[] ROW2 = Bytes.toBytes("row2");
   private final byte[] VALUE = Bytes.toBytes("value");
@@ -101,10 +104,12 @@ public class TestMobFileCache extends HBaseTestCase {
   private Path createMobStoreFile(Configuration conf, HColumnDescriptor hcd)
       throws IOException {
     // Setting up a Store
-    Path basedir = this.testDir;
+    FileSystem fs = FileSystem.get(conf);
+    Path testDir = FSUtils.getRootDir(conf);
+    Path basedir = testDir;
     fs = FileSystem.get(conf);
 
-    HTableDescriptor htd = new HTableDescriptor(TABLE);
+    HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(TABLE));
     htd.addFamily(hcd);
     Path homePath = new Path(basedir, TABLE + Path.SEPARATOR
         + Bytes.toString(hcd.getName()));
@@ -121,7 +126,7 @@ public class TestMobFileCache extends HBaseTestCase {
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
     HRegionInfo regionStartKey = new HRegionInfo();
-    StoreFile.Writer mobWriter = mobFileStore.createWriterInTmp(currentDate, 
+    StoreFile.Writer mobWriter = mobFileStore.createWriterInTmp(currentDate,
         maxKeyCount, hcd.getCompactionCompression(), regionStartKey.getStartKey());
     Path mobFilePath = mobWriter.getPath();
     String fileName = mobFilePath.getName();
@@ -137,43 +142,44 @@ public class TestMobFileCache extends HBaseTestCase {
 
   @Test
   public void testMobFileCache() throws Exception {
+    FileSystem fs = FileSystem.get(conf);
     conf.set(MobConstants.MOB_FILE_CACHE_SIZE_KEY, TEST_CACHE_SIZE);
     mobFileCache = new MobFileCache(conf);
     Path file1Path = createMobStoreFile(FAMILY1);
     Path file2Path = createMobStoreFile(FAMILY2);
     Path file3Path = createMobStoreFile(FAMILY3);
-    
+
     // Before open one file by the MobFileCache
     assertEquals(EXPECTED_CACHE_SIZE_ZERO, mobFileCache.getCacheSize());
     // Open one file by the MobFileCache
     CachedMobFile cachedMobFile1 = (CachedMobFile) mobFileCache.openFile(
-        this.fs, file1Path, mobCacheConf);
+        fs, file1Path, mobCacheConf);
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
     assertNotNull(cachedMobFile1);
     assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
-    
+
     // The evict is also managed by a schedule thread pool.
     // And its check period is set as 3600 seconds by default.
     // This evict should get the lock at the most time
     mobFileCache.evict();  // Cache not full, evict it
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
     assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
-    
+
     mobFileCache.evictFile(file1Path.getName());  // Evict one file
     assertEquals(EXPECTED_CACHE_SIZE_ZERO, mobFileCache.getCacheSize());
     assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReference());
-    
+
     cachedMobFile1.close();  // Close the cached mob file
-    
+
     // Reopen three cached file
     cachedMobFile1 = (CachedMobFile) mobFileCache.openFile(
-        this.fs, file1Path, mobCacheConf);
+        fs, file1Path, mobCacheConf);
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
     CachedMobFile cachedMobFile2 = (CachedMobFile) mobFileCache.openFile(
-        this.fs, file2Path, mobCacheConf);
+        fs, file2Path, mobCacheConf);
     assertEquals(EXPECTED_CACHE_SIZE_TWO, mobFileCache.getCacheSize());
     CachedMobFile cachedMobFile3 = (CachedMobFile) mobFileCache.openFile(
-        this.fs, file3Path, mobCacheConf);
+        fs, file3Path, mobCacheConf);
     // Before the evict
     // Evict the cache, should clost the first file 1
     assertEquals(EXPECTED_CACHE_SIZE_THREE, mobFileCache.getCacheSize());
