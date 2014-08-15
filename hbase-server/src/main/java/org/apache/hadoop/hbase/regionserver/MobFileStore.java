@@ -287,20 +287,15 @@ public class MobFileStore {
       String fileName = Bytes.toString(reference.getValueArray(), reference.getValueOffset()
           + Bytes.SIZEOF_LONG, reference.getValueLength() - Bytes.SIZEOF_LONG);
       Path targetPath = new Path(mobFamilyPath, fileName);
-      MobFile file = null;
-      try {
-        file = cacheConf.getMobFileCache().openFile(fs, targetPath, cacheConf);
-        result = file.readCell(reference, cacheBlocks);
-      } catch (IOException e) {
-        LOG.error("Fail to open/read the mob file " + targetPath.toString(), e);
-      } catch (NullPointerException e) {
-        // When delete the file during the scan, the hdfs getBlockRange will
-        // throw NullPointerException, catch it and manage it.
-        LOG.error("Fail to read the mob file " + targetPath.toString(), e);
-      } finally {
-        if (file != null) {
+      MobFile file = MobUtils.openExistFile(this, targetPath);
+      if (file != null) {
+        try {
+          result = MobUtils.readCellFromExistFile(this, file, reference, cacheBlocks);
+        } finally {
           cacheConf.getMobFileCache().closeFile(file);
         }
+      } else {
+        LOG.warn("Fail to find the mob file " + targetPath);
       }
     }
 
