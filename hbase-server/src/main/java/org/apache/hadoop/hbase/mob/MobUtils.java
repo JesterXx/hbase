@@ -18,13 +18,21 @@
  */
 package org.apache.hadoop.hbase.mob;
 
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
@@ -33,9 +41,13 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
+import org.apache.hadoop.hbase.backup.HFileArchiver;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.regionserver.MobFileStore;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.HFileArchiveUtil;
 import org.apache.hadoop.hbase.util.Strings;
 
 /**
@@ -43,6 +55,8 @@ import org.apache.hadoop.hbase.util.Strings;
  */
 @InterfaceAudience.Private
 public class MobUtils {
+
+  private static final Log LOG = LogFactory.getLog(MobUtils.class);
 
   private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT =
       new ThreadLocal<SimpleDateFormat>() {
@@ -178,6 +192,19 @@ public class MobUtils {
   }
 
   /**
+   * Gets the qualified root dir of the mob files.
+   * @param conf The current configuration.
+   * @return The qualified root dir.
+   * @throws IOException
+   */
+  public static Path getQualifiedMobRootDir(Configuration conf) throws IOException {
+    Path hbaseDir = new Path(conf.get(HConstants.HBASE_DIR));
+    Path mobRootDir = new Path(hbaseDir, MobConstants.MOB_DIR_NAME);
+    FileSystem fs = mobRootDir.getFileSystem(conf);
+    return mobRootDir.makeQualified(fs);
+  }
+
+  /**
    * Gets the region dir of the mob files.
    * It's {HBASE_DIR}/mobdir/{namespace}/{tableName}/{regionEncodedName}.
    * @param conf The current configuration.
@@ -224,6 +251,152 @@ public class MobUtils {
     HRegionInfo info = new HRegionInfo(tableName, MobConstants.MOB_REGION_NAME_BYTES,
         HConstants.EMPTY_END_ROW, false, 0);
     return info;
+  }
+
+  /**
+   * Archives the mob files.
+   * @param conf The current configuration.
+   * @param fs The current file system.
+   * @param tableName The table name.
+   * @param family The name of the column family.
+   * @param storeFiles The files to be deleted.
+   * @throws IOException
+   */
+  public static void removeMobFiles(Configuration conf, FileSystem fs, TableName tableName,
+      byte[] family, Collection<StoreFile> storeFiles) throws IOException {
+    HFileArchiver.archiveStoreFiles(conf, fs, getMobRegionInfo(tableName), family, storeFiles);
+  }
+
+  /**
+   * Opens existing files.
+   * The file to be opened might be unavailable. Instead the file in another location
+   * will be opened.
+   * The possible locations for a file could be either in mob directory or the archive directory.
+   * @param mobFileStore The current MobFileStore.
+   * @param path The path of the file to be opened.
+   * @return The opened MobFile.
+   * @throws IOException
+   */
+  public static MobFile openExistFile(MobFileStore mobFileStore, Path path) throws IOException {
+    boolean findArchive = false;
+    MobCacheConfig cacheConf = mobFileStore.getCacheConfig();
+    FileSystem fs = mobFileStore.getFileSystem();
+    try {
+      return cacheConf.getMobFileCache().openFile(fs, path, cacheConf);
+    } catch (IOException e) {
+      if (e.getCause() instanceof FileNotFoundException) {
+        logFileNotFoundException(e.getCause());
+        findArchive = true;
+      } else {
+        throw e;
+      }
+    }
+    if (findArchive) {
+      // find from archive
+      // Evict the cached file
+      String fileName = path.getName();
+      evictFile(cacheConf, fileName);
+      Path archivePath = HFileArchiveUtil.getStoreArchivePath(mobFileStore.getConfiguration(),
+          mobFileStore.getTableName(), getMobRegionInfo(mobFileStore.getTableName())
+              .getEncodedName(), mobFileStore.getColumnDescriptor().getName());
+      try {
+        // Open and cache
+        return cacheConf.getMobFileCache().openFile(fs, archivePath, cacheConf);
+      } catch (IOException e) {
+        if (e.getCause() instanceof FileNotFoundException) {
+          logFileNotFoundException(e.getCause());
+          return null;
+        }
+        throw e;
+      }
+    }
+    // never come here
+    return null;
+  }
+
+  /**
+   * Reads the mob cells from the existing file.
+   * The file to be opened might be unavailable. Instead the file in another location
+   * will be opened and read.
+   * The possible locations for a file could be either in mob directory or the archive directory.
+   * @param mobFileStore The current MobFileStore.
+   * @param file The file to be read.
+   * @param search The cell to be searched.
+   * @param cacheMobBlocks Whether the scanner should cache blocks.
+   * @return The found cell.
+   * @throws IOException
+   */
+  public static Cell readCellFromExistFile(MobFileStore mobFileStore, MobFile file, Cell search,
+      boolean cacheMobBlocks) throws IOException {
+    boolean findArchive = false;
+    MobCacheConfig cacheConf = mobFileStore.getCacheConfig();
+    FileSystem fs = mobFileStore.getFileSystem();
+    try {
+      return file.readCell(search, cacheMobBlocks);
+    } catch (IOException e) {
+      if (e.getCause() instanceof FileNotFoundException) {
+        logFileNotFoundException(e.getCause());
+        findArchive = true;
+      }
+      throw e;
+    } catch (NullPointerException e) {
+      logNullPointerException(e);
+      findArchive = true;
+    }
+    if (findArchive) {
+      evictFile(cacheConf, file.getName());
+      Path archivePath = HFileArchiveUtil.getStoreArchivePath(mobFileStore.getConfiguration(),
+          mobFileStore.getTableName(), getMobRegionInfo(mobFileStore.getTableName())
+              .getEncodedName(), mobFileStore.getColumnDescriptor().getName());
+      try {
+        MobFile archive = cacheConf.getMobFileCache().openFile(fs, archivePath, cacheConf);
+        return archive.readCell(search, cacheMobBlocks);
+      } catch (IOException e) {
+        if (e.getCause() instanceof FileNotFoundException) {
+          logFileNotFoundException(e.getCause());
+          evictFile(cacheConf, file.getName());
+          return null;
+        }
+        throw e;
+      } catch (NullPointerException e) {
+        logNullPointerException(e);
+        evictFile(cacheConf, file.getName());
+        return null;
+      }
+    }
+    // never come here
+    return null;
+  }
+
+  /**
+   * Logs the exception.
+   * @param e The exception to be logged.
+   */
+  private static void logNullPointerException(Throwable e) {
+    // When delete the file during the scan, the hdfs getBlockRange will
+    // throw NullPointerException, catch it and manage it.
+    LOG.error("Fail to read Cell", e);
+  }
+
+  /**
+   * Logs the exception.
+   * @param e The exception to be logged.
+   */
+  private static void logFileNotFoundException(Throwable e) {
+    LOG.error("Fail to read Cell, this mob file doesn't exist", e);
+  }
+
+  /**
+   * Evicts the cached file.
+   * @param cacheConf The current MobCachConfig.
+   * @param fileName The name of the file to be evicted.
+   */
+  private static void evictFile(MobCacheConfig cacheConf, String fileName) {
+    try {
+      cacheConf.getMobFileCache().evictFile(fileName);
+    } catch (IOException e) {
+      LOG.error("Fail to evict the file " + fileName, e);
+    }
   }
 
   /**

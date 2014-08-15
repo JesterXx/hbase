@@ -2932,6 +2932,25 @@ public class HRegion implements HeapSize { // , Writable{
     Path rootDir = FSUtils.getRootDir(conf);
     Path snapshotDir = SnapshotDescriptionUtils.getWorkingSnapshotDir(desc, rootDir);
 
+    if (Bytes.equals(getStartKey(), HConstants.EMPTY_START_ROW)) {
+      Map<byte[], Store> stores = getStores();
+      boolean hasMobStore = false;
+      for (Entry<byte[], Store> store : stores.entrySet()) {
+        hasMobStore = MobUtils.isMobFamily(store.getValue().getFamily());
+        if (hasMobStore) {
+          break;
+        }
+      }
+      if (hasMobStore) {
+        // if this is the first region, snapshot the mob files.
+        SnapshotManifest snapshotManifest = SnapshotManifest.create(conf, getFilesystem(),
+            snapshotDir, desc, exnSnare);
+        // use the .mob as the start key and 0 as the regionid
+        HRegionInfo mobRegionInfo = MobUtils.getMobRegionInfo(this.getTableDesc().getTableName());
+        mobRegionInfo.setOffline(true);
+        snapshotManifest.addMobRegion(mobRegionInfo, this.getTableDesc().getColumnFamilies()); 
+      }
+    }
     SnapshotManifest manifest = SnapshotManifest.create(conf, getFilesystem(),
                                                         snapshotDir, desc, exnSnare);
     manifest.addRegion(this);
