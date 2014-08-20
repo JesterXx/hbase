@@ -183,7 +183,7 @@ public class MobFileStore {
     CRC32 crc = new CRC32();
     crc.update(startKey);
     int checksum = (int) crc.getValue();
-    return createWriterInTmp(date, maxKeyCount, compression, MobFileName.int2HexString(checksum));
+    return createWriterInTmp(date, maxKeyCount, compression, MobUtils.int2HexString(checksum));
   }
 
   /**
