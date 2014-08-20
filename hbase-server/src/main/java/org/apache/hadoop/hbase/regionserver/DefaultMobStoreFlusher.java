@@ -216,6 +216,9 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
     if (mobKVCount > 0) {
       // commit the mob file from temp folder to target folder.
+      // If the mob file is committed successfully but the store file is not,
+      // the committed mob file will be handled by the sweep tool as a unused
+      // file.
       mobFileManager.commitFile(mobFileWriter.getPath(), targetPath);
     } else {
       try {
