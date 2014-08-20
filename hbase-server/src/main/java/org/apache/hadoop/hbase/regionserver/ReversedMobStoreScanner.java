@@ -28,16 +28,16 @@ import org.apache.hadoop.hbase.mob.MobFileManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 
 /**
- * MobReversedStoreScanner extends from ReversedStoreScanner, and is used to support
+ * ReversedMobStoreScanner extends from ReversedStoreScanner, and is used to support
  * reversed scanning in both the memstore and the MOB store.
  *
  */
-public class MobReversedStoreScanner extends ReversedStoreScanner {
+public class ReversedMobStoreScanner extends ReversedStoreScanner {
 
   private boolean cacheMobBlocks = false;
   private MobFileManager mobFileManager;
 
-  MobReversedStoreScanner(Store store, ScanInfo scanInfo, Scan scan, NavigableSet<byte[]> columns,
+  ReversedMobStoreScanner(Store store, ScanInfo scanInfo, Scan scan, NavigableSet<byte[]> columns,
       long readPt, MobFileManager mobFileStore) throws IOException {
     super(store, scanInfo, scan, columns, readPt);
     cacheMobBlocks = MobUtils.isCacheMobBlocks(scan);

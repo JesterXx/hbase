@@ -294,7 +294,8 @@ public class MobFileManager {
       } catch (NullPointerException e) {
         // When delete the file during the scan, the hdfs getBlockRange will
         // throw NullPointerException, catch it and manage it.
-        LOG.error("Fail to read the mob file " + targetPath.toString(), e);
+        LOG.error("Fail to read the mob file " + targetPath.toString()
+            + " since it's already deleted", e);
       } finally {
         if (file != null) {
           cacheConf.getMobFileCache().closeFile(file);

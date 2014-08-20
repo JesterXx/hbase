@@ -61,7 +61,7 @@ public class HMobStore extends HStore {
         scanner = this.getCoprocessorHost().preStoreScannerOpen(this, scan, targetCols);
       }
       if (scanner == null) {
-        scanner = scan.isReversed() ? new MobReversedStoreScanner(this, getScanInfo(), scan,
+        scanner = scan.isReversed() ? new ReversedMobStoreScanner(this, getScanInfo(), scan,
             targetCols, readPt, mobFileManager) : new MobStoreScanner(this, getScanInfo(), scan,
             targetCols, readPt, mobFileManager);
       }
