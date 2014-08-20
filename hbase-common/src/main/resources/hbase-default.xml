@@ -1372,4 +1372,20 @@ possible configurations would overwhelm and obscure the important.
     <name>hbase.mob.file.cache.size</name>
     <value>1000</value>
   </property>
+  <property>
+    <description>
+      How long the mob cache evits the cached mob files. The unit is seconds.
+      The default value is 3600 seconds.
+    </description>
+    <name>hbase.mob.cache.evict.period</name>
+    <value>3600</value>
+  </property>
+  <property>
+    <description>
+      How many cached files are left after the eviction is executed if the
+      count of cached mob files exceeds the cache capacity.
+    </description>
+    <name>hbase.mob.cache.evict.remain.ratio</name>
+    <value>0.5f</value>
+  </property>
 </configuration>
