@@ -230,19 +230,6 @@ public class MobUtils {
   }
 
   /**
-   * Gets the absolute path according to the root path and file name.
-   * 
-   * @param rootPath
-   *          The root path.
-   * @param The
-   *          file name.
-   * @return The absolute file path.
-   */
-  public static Path getAbsolutePath(Path rootPath, String fileName) {
-    return new Path(rootPath, fileName);
-  }
-
-  /**
    * Converts an integer to a hex string.
    * @param i An integer.
    * @return A hex string.

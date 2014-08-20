@@ -222,7 +222,7 @@ public class MobFileManager {
         .withHBaseCheckSum(true).withDataBlockEncoding(DataBlockEncoding.NONE).build();
 
     StoreFile.Writer w = new StoreFile.WriterBuilder(conf, writerCacheConf, fs)
-        .withFilePath(MobUtils.getAbsolutePath(mobFamilyPath, mobFileName.getFileName()))
+        .withFilePath(new Path(basePath, mobFileName.getFileName()))
         .withComparator(KeyValue.COMPARATOR).withBloomType(BloomType.NONE)
         .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
     return w;
