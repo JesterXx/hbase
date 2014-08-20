@@ -37,13 +37,13 @@ import org.apache.hadoop.hbase.client.Scan;
  */
 public class HMobStore extends HStore {
 
-  private MobFileStore mobFileStore;
+  private MobFileManager mobFileManager;
 
   public HMobStore(final HRegion region, final HColumnDescriptor family,
       final Configuration confParam) throws IOException {
     super(region, family, confParam);
-    mobFileStore = MobFileStore.create(region.conf, region.getFilesystem(), this.getTableName(),
-        this.getFamily());
+    mobFileManager = MobFileManager.create(region.conf, region.getFilesystem(),
+        this.getTableName(), this.getFamily());
   }
 
   /**
@@ -61,8 +61,8 @@ public class HMobStore extends HStore {
       }
       if (scanner == null) {
         scanner = scan.isReversed() ? new MobReversedStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileStore) : new MobStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileStore);
+            targetCols, readPt, mobFileManager) : new MobStoreScanner(this, getScanInfo(), scan,
+            targetCols, readPt, mobFileManager);
       }
       return scanner;
     } finally {

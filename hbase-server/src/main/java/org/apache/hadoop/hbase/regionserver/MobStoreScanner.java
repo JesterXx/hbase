@@ -34,14 +34,14 @@ import org.apache.hadoop.hbase.mob.MobUtils;
 public class MobStoreScanner extends StoreScanner {
 
   private boolean cacheMobBlocks = false;
-  private MobFileStore mobFileStore;
+  private MobFileManager mobFileManager;
 
   public MobStoreScanner(Store store, ScanInfo scanInfo, Scan scan,
-      final NavigableSet<byte[]> columns, long readPt, MobFileStore mobFileStore)
+      final NavigableSet<byte[]> columns, long readPt, MobFileManager mobFileStore)
       throws IOException {
     super(store, scanInfo, scan, columns, readPt);
     cacheMobBlocks = MobUtils.isCacheMobBlocks(scan);
-    this.mobFileStore = mobFileStore;
+    this.mobFileManager = mobFileStore;
   }
 
   /**
@@ -60,7 +60,7 @@ public class MobStoreScanner extends StoreScanner {
       for (int i = 0; i < outResult.size(); i++) {
         Cell cell = outResult.get(i);
         if (MobUtils.isMobReferenceCell(cell)) {
-          outResult.set(i, mobFileStore.resolve(cell, cacheMobBlocks));
+          outResult.set(i, mobFileManager.resolve(cell, cacheMobBlocks));
         }
       }
     }

@@ -34,7 +34,7 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.SmallTests;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.regionserver.MobFileStore;
+import org.apache.hadoop.hbase.regionserver.MobFileManager;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Test;
@@ -108,11 +108,11 @@ public class TestMobFileCache extends HBaseTestCase {
     htd.addFamily(hcd);
     Path homePath = new Path(basedir, TABLE + Path.SEPARATOR
         + Bytes.toString(hcd.getName()));
-    MobFileStore mobFileStore = MobFileStore.create(conf, fs,
+    MobFileManager mobFileManager = MobFileManager.create(conf, fs,
         TableName.valueOf(TABLE), hcd);
-    if (mobFileStore == null) {
+    if (mobFileManager == null) {
       fs.mkdirs(homePath);
-      mobFileStore = MobFileStore.create(conf, fs, TableName.valueOf(TABLE), hcd);
+      mobFileManager = MobFileManager.create(conf, fs, TableName.valueOf(TABLE), hcd);
     }
 
     KeyValue key1 = new KeyValue(ROW, hcd.getName(), QF1, 1, VALUE);
@@ -121,7 +121,7 @@ public class TestMobFileCache extends HBaseTestCase {
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
     HRegionInfo regionStartKey = new HRegionInfo();
-    StoreFile.Writer mobWriter = mobFileStore.createWriterInTmp(currentDate, 
+    StoreFile.Writer mobWriter = mobFileManager.createWriterInTmp(currentDate, 
         maxKeyCount, hcd.getCompactionCompression(), regionStartKey.getStartKey());
     Path mobFilePath = mobWriter.getPath();
     String fileName = mobFilePath.getName();
@@ -130,8 +130,8 @@ public class TestMobFileCache extends HBaseTestCase {
     mobWriter.append(key3);
     mobWriter.close();
     String targetPathName = MobUtils.formatDate(currentDate);
-    Path targetPath = new Path(mobFileStore.getPath(), targetPathName);
-    mobFileStore.commitFile(mobFilePath, targetPath);
+    Path targetPath = new Path(mobFileManager.getPath(), targetPathName);
+    mobFileManager.commitFile(mobFilePath, targetPath);
     return new Path(targetPath, fileName);
   }
 

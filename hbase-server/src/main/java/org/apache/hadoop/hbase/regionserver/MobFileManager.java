@@ -51,9 +51,9 @@ import org.apache.hadoop.hbase.util.Bytes;
  * It provides the information of the MOB column family in HBase, validates the mob files and
  * reads the MOB cells from the MOB files.
  */
-public class MobFileStore {
+public class MobFileManager {
 
-  private static final Log LOG = LogFactory.getLog(MobFileStore.class);
+  private static final Log LOG = LogFactory.getLog(MobFileManager.class);
   private Configuration conf;
   private FileSystem fs;
   private Path homePath;
@@ -64,7 +64,7 @@ public class MobFileStore {
   private Path mobFamilyPath;
   private final static String TMP = ".tmp";
 
-  private MobFileStore(Configuration conf, FileSystem fs, TableName tableName,
+  private MobFileManager(Configuration conf, FileSystem fs, TableName tableName,
       HColumnDescriptor family) {
     this.fs = fs;
     this.homePath = MobUtils.getMobHome(conf);
@@ -85,7 +85,7 @@ public class MobFileStore {
    * @return An instance of MobFileStore.
    * @throws IOException
    */
-  public static MobFileStore create(Configuration conf, FileSystem fs, TableName tableName,
+  public static MobFileManager create(Configuration conf, FileSystem fs, TableName tableName,
       HColumnDescriptor family) throws IOException {
     if (null == family) {
       LOG.warn("fail to create the MobFileStore because the family is null in table [" + tableName
@@ -98,7 +98,7 @@ public class MobFileStore {
           + "] in table [" + tableName + "] is not a mob one!");
       return null;
     }
-    return new MobFileStore(conf, fs, tableName, family);
+    return new MobFileManager(conf, fs, tableName, family);
   }
 
   /**

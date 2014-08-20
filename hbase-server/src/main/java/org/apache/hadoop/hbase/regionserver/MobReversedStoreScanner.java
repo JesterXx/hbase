@@ -34,13 +34,13 @@ import org.apache.hadoop.hbase.mob.MobUtils;
 public class MobReversedStoreScanner extends ReversedStoreScanner {
 
   private boolean cacheMobBlocks = false;
-  private MobFileStore mobFileStore;
+  private MobFileManager mobFileManager;
 
   MobReversedStoreScanner(Store store, ScanInfo scanInfo, Scan scan, NavigableSet<byte[]> columns,
-      long readPt, MobFileStore mobFileStore) throws IOException {
+      long readPt, MobFileManager mobFileStore) throws IOException {
     super(store, scanInfo, scan, columns, readPt);
     cacheMobBlocks = MobUtils.isCacheMobBlocks(scan);
-    this.mobFileStore = mobFileStore;
+    this.mobFileManager = mobFileStore;
   }
 
   /**
@@ -59,7 +59,7 @@ public class MobReversedStoreScanner extends ReversedStoreScanner {
       for (int i = 0; i < outResult.size(); i++) {
         Cell cell = outResult.get(i);
         if (MobUtils.isMobReferenceCell(cell)) {
-          outResult.set(i, mobFileStore.resolve(cell, cacheMobBlocks));
+          outResult.set(i, mobFileManager.resolve(cell, cacheMobBlocks));
         }
       }
     }

@@ -45,7 +45,7 @@ import org.junit.experimental.categories.Category;
 public class TestMobFileStore extends HBaseTestCase {
   public static final Log LOG = LogFactory.getLog(TestMobFileStore.class);
 
-  private MobFileStore mobFileStore;
+  private MobFileManager mobFileManager;
   private Path mobFilePath;
   private FileSystem fs;
   private KeyValue seekKey1;
@@ -86,7 +86,7 @@ public class TestMobFileStore extends HBaseTestCase {
     Path homePath = new Path(basedir, Bytes.toString(TABLE) + Path.SEPARATOR
         + Bytes.toString(FAMILY));
     fs.mkdirs(homePath);
-    mobFileStore = MobFileStore.create(conf, fs, TableName.valueOf(TABLE), hcd);
+    mobFileManager = MobFileManager.create(conf, fs, TableName.valueOf(TABLE), hcd);
 
     KeyValue key1 = new KeyValue(ROW, FAMILY, QF1, 1, VALUE);
     KeyValue key2 = new KeyValue(ROW, FAMILY, QF2, 1, VALUE);
@@ -94,7 +94,7 @@ public class TestMobFileStore extends HBaseTestCase {
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
     HRegionInfo region = new HRegionInfo();
-    StoreFile.Writer mobWriter = mobFileStore.createWriterInTmp(currentDate,
+    StoreFile.Writer mobWriter = mobFileManager.createWriterInTmp(currentDate,
         maxKeyCount, hcd.getCompactionCompression(), region.getStartKey());
     mobFilePath = mobWriter.getPath();
 
@@ -122,12 +122,12 @@ public class TestMobFileStore extends HBaseTestCase {
   public void testCommitFile() throws Exception {
     init(getName());
     String targetPathName = MobUtils.formatDate(new Date());
-    Path targetPath = new Path(mobFileStore.getPath(), (targetPathName
+    Path targetPath = new Path(mobFileManager.getPath(), (targetPathName
         + Path.SEPARATOR + mobFilePath.getName()));
     fs.delete(targetPath);
     assertFalse(fs.exists(targetPath));
     //commit file
-    mobFileStore.commitFile(mobFilePath, targetPath);
+    mobFileManager.commitFile(mobFilePath, targetPath);
     assertTrue(fs.exists(targetPath));
   }
 
@@ -136,12 +136,12 @@ public class TestMobFileStore extends HBaseTestCase {
   public void testResolve() throws Exception {
     init(getName());
     String targetPathName = MobUtils.formatDate(currentDate);
-    Path targetPath = new Path(mobFileStore.getPath(), targetPathName);
-    mobFileStore.commitFile(mobFilePath, targetPath);
+    Path targetPath = new Path(mobFileManager.getPath(), targetPathName);
+    mobFileManager.commitFile(mobFilePath, targetPath);
     //resolve
-    Cell resultKey1 = mobFileStore.resolve(seekKey1, false);
-    Cell resultKey2 = mobFileStore.resolve(seekKey2, false);
-    Cell resultKey3 = mobFileStore.resolve(seekKey3, false);
+    Cell resultKey1 = mobFileManager.resolve(seekKey1, false);
+    Cell resultKey2 = mobFileManager.resolve(seekKey2, false);
+    Cell resultKey3 = mobFileManager.resolve(seekKey3, false);
     //compare
     assertEquals(VALUE, resultKey1.getValue());
     assertEquals(VALUE, resultKey2.getValue());

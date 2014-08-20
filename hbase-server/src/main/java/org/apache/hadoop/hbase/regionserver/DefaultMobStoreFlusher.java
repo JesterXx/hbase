@@ -59,7 +59,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   private boolean isMob = false;
   private long mobCellValueSizeThreshold = 0;
   private Path targetPath;
-  private MobFileStore mobFileStore;
+  private MobFileManager mobFileManager;
 
   public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException{
     super(conf, store);
@@ -70,7 +70,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
     if (!this.store.getFileSystem().exists(targetPath)) {
       this.store.getFileSystem().mkdirs(targetPath);
     }
-    mobFileStore = MobFileStore.create(conf, this.store.getFileSystem(),
+    mobFileManager = MobFileManager.create(conf, this.store.getFileSystem(),
         this.store.getTableName(), this.store.getFamily());
   }
 
@@ -158,7 +158,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         HConstants.COMPACTION_KV_MAX_DEFAULT);
     long mobKVCount = 0;
     long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
-    mobFileWriter = mobFileStore.createWriterInTmp(new Date(time), snapshot.getCellsCount(), store
+    mobFileWriter = mobFileManager.createWriterInTmp(new Date(time), snapshot.getCellsCount(), store
         .getFamily().getCompression(), store.getRegionInfo().getStartKey());
     // the target path is {tableName}/.mob/{cfName}/mobFiles
     // the relative path is mobFiles
@@ -215,7 +215,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
     if (mobKVCount > 0) {
       // commit the mob file from temp folder to target folder.
-      mobFileStore.commitFile(mobFileWriter.getPath(), targetPath);
+      mobFileManager.commitFile(mobFileWriter.getPath(), targetPath);
     } else {
       try {
         // If the mob file is empty, delete it instead of committing.
