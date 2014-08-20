@@ -61,16 +61,13 @@ public class MobFile {
     List<StoreFileScanner> sfScanners = StoreFileScanner.getScannersForStoreFiles(sfs, false, true,
         false, null, sf.getMaxMemstoreTS());
 
-    if (!sfScanners.isEmpty()) {
-      return sfScanners.get(0);
-    }
-    return null;
+    return sfScanners.get(0);
   }
 
   /**
    * Reads a cell from the mob file.
    * @param search The cell need to be searched in the mob file.
-   * @param cacheMobBlocks Whether should this scanner cache blocks.
+   * @param cacheMobBlocks Should this scanner cache blocks.
    * @return The cell in the mob file.
    * @throws IOException
    */

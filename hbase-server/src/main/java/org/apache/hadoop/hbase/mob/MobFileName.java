@@ -33,6 +33,11 @@ import org.apache.hadoop.hbase.util.Bytes;
  * of cells in this file</li>
  * <li>the remaining characters: the uuid.</li>
  * </ol>
+ * Has the checksum of the start key in the file name in order to keep region information in the
+ * file name. This might be useful in bulkload to minimize the target regions.
+ * The cells come from different regions might be in the same mob file, this is allowed.
+ * Has the latest timestamp of cells in the file name in order to clean the expired mob files by
+ * TTL easily. If this timestamp is older than the TTL, it's regarded as expired.
  */
 public class MobFileName {
 
