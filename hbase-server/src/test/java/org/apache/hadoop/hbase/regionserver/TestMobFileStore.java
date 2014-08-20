@@ -93,9 +93,9 @@ public class TestMobFileStore extends HBaseTestCase {
     KeyValue key3 = new KeyValue(ROW2, FAMILY, QF3, 1, VALUE2);
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
-    HRegionInfo regionStartKey = new HRegionInfo();
+    HRegionInfo region = new HRegionInfo();
     StoreFile.Writer mobWriter = mobFileStore.createWriterInTmp(currentDate,
-        maxKeyCount, hcd.getCompactionCompression(), regionStartKey.getStartKey());
+        maxKeyCount, hcd.getCompactionCompression(), region.getStartKey());
     mobFilePath = mobWriter.getPath();
 
     mobWriter.append(key1);
