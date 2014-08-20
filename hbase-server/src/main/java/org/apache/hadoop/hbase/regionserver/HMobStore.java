@@ -24,6 +24,7 @@ import java.util.NavigableSet;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.mob.MobFileManager;
 
 /**
  * The store implementation to save MOBs (medium objects), it extends the HStore.
