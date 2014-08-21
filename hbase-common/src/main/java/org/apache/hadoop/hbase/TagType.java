@@ -27,7 +27,7 @@ public final class TagType {
   public static final byte ACL_TAG_TYPE = (byte) 1;
   public static final byte VISIBILITY_TAG_TYPE = (byte) 2;
   public static final byte LOG_REPLAY_TAG_TYPE = (byte) 3;
-  public static final byte VISIBILITY_EXP_SERIALIZATION_TAG_TYPE = (byte)4;
+  public static final byte VISIBILITY_EXP_SERIALIZATION_FORMAT_TAG_TYPE = (byte)4;
 
   // mob tags
   public static final byte MOB_REFERENCE_TAG_TYPE = (byte) 5;
