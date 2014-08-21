@@ -874,7 +874,7 @@ public class MasterRpcServices extends RSRpcServices
   public IsMasterRunningResponse isMasterRunning(RpcController c,
       IsMasterRunningRequest req) throws ServiceException {
     try {
-      master.checkInitialized();
+      master.checkServiceStarted();
       return IsMasterRunningResponse.newBuilder().setIsMasterRunning(
         !master.isStopped()).build();
     } catch (IOException e) {
@@ -1229,12 +1229,7 @@ public class MasterRpcServices extends RSRpcServices
       }
       LOG.debug(master.getClientIdAuditPrefix() + " unassign " + hri.getRegionNameAsString()
           + " in current location if it is online and reassign.force=" + force);
-      master.assignmentManager.unassign(hri, force);
-      if (master.assignmentManager.getRegionStates().isRegionOffline(hri)) {
-        LOG.debug("Region " + hri.getRegionNameAsString()
-            + " is not online on any region server, reassigning it.");
-        master.assignRegion(hri);
-      }
+      master.assignmentManager.unassign(hri);
       if (master.cpHost != null) {
         master.cpHost.postUnassign(hri, force);
       }

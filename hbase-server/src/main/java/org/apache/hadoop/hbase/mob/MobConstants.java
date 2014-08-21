@@ -40,6 +40,9 @@ public class MobConstants {
   public static final String MOB_REGION_NAME = ".mob";
   public static final byte[] MOB_REGION_NAME_BYTES = Bytes.toBytes(MOB_REGION_NAME);
 
+  public static final String MOB_CACHE_EVICT_PERIOD = "hbase.mob.cache.evict.period";
+  public static final String MOB_CACHE_EVICT_REMAIN_RATIO = "hbase.mob.cache.evict.remain.ratio";
+
   private MobConstants() {
 
   }

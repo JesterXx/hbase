@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.regionserver;
+package org.apache.hadoop.hbase.mob;
 
 import java.io.IOException;
 import java.util.Date;
@@ -40,10 +40,8 @@ import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
-import org.apache.hadoop.hbase.mob.MobCacheConfig;
-import org.apache.hadoop.hbase.mob.MobFile;
-import org.apache.hadoop.hbase.mob.MobFileName;
-import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.regionserver.BloomType;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
@@ -51,9 +49,9 @@ import org.apache.hadoop.hbase.util.Bytes;
  * It provides the information of the MOB column family in HBase, validates the mob files and
  * reads the MOB cells from the MOB files.
  */
-public class MobFileStore {
+public class MobFileManager {
 
-  private static final Log LOG = LogFactory.getLog(MobFileStore.class);
+  private static final Log LOG = LogFactory.getLog(MobFileManager.class);
   private Configuration conf;
   private FileSystem fs;
   private Path homePath;
@@ -64,7 +62,7 @@ public class MobFileStore {
   private Path mobFamilyPath;
   private final static String TMP = ".tmp";
 
-  private MobFileStore(Configuration conf, FileSystem fs, TableName tableName,
+  private MobFileManager(Configuration conf, FileSystem fs, TableName tableName,
       HColumnDescriptor family) {
     this.fs = fs;
     this.homePath = MobUtils.getMobHome(conf);
@@ -85,7 +83,7 @@ public class MobFileStore {
    * @return An instance of MobFileStore.
    * @throws IOException
    */
-  public static MobFileStore create(Configuration conf, FileSystem fs, TableName tableName,
+  public static MobFileManager create(Configuration conf, FileSystem fs, TableName tableName,
       HColumnDescriptor family) throws IOException {
     if (null == family) {
       LOG.warn("fail to create the MobFileStore because the family is null in table [" + tableName
@@ -98,7 +96,7 @@ public class MobFileStore {
           + "] in table [" + tableName + "] is not a mob one!");
       return null;
     }
-    return new MobFileStore(conf, fs, tableName, family);
+    return new MobFileManager(conf, fs, tableName, family);
   }
 
   /**
@@ -183,7 +181,7 @@ public class MobFileStore {
     CRC32 crc = new CRC32();
     crc.update(startKey);
     int checksum = (int) crc.getValue();
-    return createWriterInTmp(date, maxKeyCount, compression, MobFileName.int2HexString(checksum));
+    return createWriterInTmp(date, maxKeyCount, compression, MobUtils.int2HexString(checksum));
   }
 
   /**
@@ -224,7 +222,7 @@ public class MobFileStore {
         .withHBaseCheckSum(true).withDataBlockEncoding(DataBlockEncoding.NONE).build();
 
     StoreFile.Writer w = new StoreFile.WriterBuilder(conf, writerCacheConf, fs)
-        .withFilePath(MobUtils.getAbsolutePath(mobFamilyPath, mobFileName.getFileName()))
+        .withFilePath(new Path(basePath, mobFileName.getFileName()))
         .withComparator(KeyValue.COMPARATOR).withBloomType(BloomType.NONE)
         .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
     return w;
@@ -287,15 +285,21 @@ public class MobFileStore {
       String fileName = Bytes.toString(reference.getValueArray(), reference.getValueOffset()
           + Bytes.SIZEOF_LONG, reference.getValueLength() - Bytes.SIZEOF_LONG);
       Path targetPath = new Path(mobFamilyPath, fileName);
-      MobFile file = MobUtils.openExistFile(this, targetPath);
-      if (file != null) {
-        try {
-          result = MobUtils.readCellFromExistFile(this, file, reference, cacheBlocks);
-        } finally {
+      MobFile file = null;
+      try {
+        file = cacheConf.getMobFileCache().openFile(fs, targetPath, cacheConf);
+        result = file.readCell(reference, cacheBlocks);
+      } catch (IOException e) {
+        LOG.error("Fail to open/read the mob file " + targetPath.toString(), e);
+      } catch (NullPointerException e) {
+        // When delete the file during the scan, the hdfs getBlockRange will
+        // throw NullPointerException, catch it and manage it.
+        LOG.error("Fail to read the mob file " + targetPath.toString()
+            + " since it's already deleted", e);
+      } finally {
+        if (file != null) {
           cacheConf.getMobFileCache().closeFile(file);
         }
-      } else {
-        LOG.warn("Fail to find the mob file " + targetPath);
       }
     }
 

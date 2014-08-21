@@ -98,8 +98,8 @@ public class MobFileCache {
     this.count = new AtomicLong(0);
     this.miss = new AtomicLong(0);
     if (isCacheEnabled) {
-      long period = conf.getInt("hbase.mob.cache.evict.period", 3600); // in seconds
-      evictRemainRatio = conf.getFloat("hbase.mob.cache.evict.remain.ratio",
+      long period = conf.getInt(MobConstants.MOB_CACHE_EVICT_PERIOD, 3600); // in seconds
+      evictRemainRatio = conf.getFloat(MobConstants.MOB_CACHE_EVICT_REMAIN_RATIO,
           DEFAULT_EVICT_REMAIN_RATIO);
       this.scheduleThreadPool.scheduleAtFixedRate(new EvictionThread(this), period, period,
           TimeUnit.SECONDS);

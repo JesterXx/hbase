@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.regionserver;
+package org.apache.hadoop.hbase.mob;
 
 import java.io.IOException;
 import java.util.Date;
@@ -37,6 +37,7 @@ import org.apache.hadoop.hbase.SmallTests;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.junit.Assert;
@@ -44,10 +45,10 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 @Category(SmallTests.class)
-public class TestMobFileStore {
-  public static final Log LOG = LogFactory.getLog(TestMobFileStore.class);
+public class TestMobFileManager {
+  public static final Log LOG = LogFactory.getLog(TestMobFileManager.class);
 
-  private MobFileStore mobFileStore;
+  private MobFileManager mobFileManager;
   private Path mobFilePath;
   private FileSystem fs;
   private KeyValue seekKey1;
@@ -88,16 +89,16 @@ public class TestMobFileStore {
     Path homePath = new Path(basedir, Bytes.toString(TABLE) + Path.SEPARATOR
         + Bytes.toString(FAMILY));
     fs.mkdirs(homePath);
-    mobFileStore = MobFileStore.create(conf, fs, TableName.valueOf(TABLE), hcd);
+    mobFileManager = MobFileManager.create(conf, fs, TableName.valueOf(TABLE), hcd);
 
     KeyValue key1 = new KeyValue(ROW, FAMILY, QF1, 1, VALUE);
     KeyValue key2 = new KeyValue(ROW, FAMILY, QF2, 1, VALUE);
     KeyValue key3 = new KeyValue(ROW2, FAMILY, QF3, 1, VALUE2);
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
-    HRegionInfo regionStartKey = new HRegionInfo(TableName.valueOf(TABLE));
-    StoreFile.Writer mobWriter = mobFileStore.createWriterInTmp(currentDate,
-        maxKeyCount, hcd.getCompactionCompression(), regionStartKey.getStartKey());
+    HRegionInfo region = new HRegionInfo(TableName.valueOf(TABLE));
+    StoreFile.Writer mobWriter = mobFileManager.createWriterInTmp(currentDate,
+        maxKeyCount, hcd.getCompactionCompression(), region.getStartKey());
     mobFilePath = mobWriter.getPath();
 
     mobWriter.append(key1);
@@ -124,12 +125,12 @@ public class TestMobFileStore {
   public void testCommitFile() throws Exception {
     init();
     String targetPathName = MobUtils.formatDate(new Date());
-    Path targetPath = new Path(mobFileStore.getPath(), (targetPathName
+    Path targetPath = new Path(mobFileManager.getPath(), (targetPathName
         + Path.SEPARATOR + mobFilePath.getName()));
     fs.delete(targetPath, true);
     Assert.assertFalse(fs.exists(targetPath));
     //commit file
-    mobFileStore.commitFile(mobFilePath, targetPath);
+    mobFileManager.commitFile(mobFilePath, targetPath);
     Assert.assertTrue(fs.exists(targetPath));
   }
 
@@ -137,12 +138,12 @@ public class TestMobFileStore {
   public void testResolve() throws Exception {
     init();
     String targetPathName = MobUtils.formatDate(currentDate);
-    Path targetPath = new Path(mobFileStore.getPath(), targetPathName);
-    mobFileStore.commitFile(mobFilePath, targetPath);
+    Path targetPath = new Path(mobFileManager.getPath(), targetPathName);
+    mobFileManager.commitFile(mobFilePath, targetPath);
     //resolve
-    Cell resultCell1 = mobFileStore.resolve(seekKey1, false);
-    Cell resultCell2 = mobFileStore.resolve(seekKey2, false);
-    Cell resultCell3 = mobFileStore.resolve(seekKey3, false);
+    Cell resultCell1 = mobFileManager.resolve(seekKey1, false);
+    Cell resultCell2 = mobFileManager.resolve(seekKey2, false);
+    Cell resultCell3 = mobFileManager.resolve(seekKey3, false);
     //compare
     Assert.assertEquals(Bytes.toString(VALUE),
         Bytes.toString(CellUtil.cloneValue(resultCell1)));

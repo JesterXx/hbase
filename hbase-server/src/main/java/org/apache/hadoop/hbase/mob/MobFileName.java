@@ -33,6 +33,11 @@ import org.apache.hadoop.hbase.util.Bytes;
  * of cells in this file</li>
  * <li>the remaining characters: the uuid.</li>
  * </ol>
+ * Has the checksum of the start key in the file name in order to keep region information in the
+ * file name. This might be useful in bulkload to minimize the target regions.
+ * The cells come from different regions might be in the same mob file, this is allowed.
+ * Has the latest timestamp of cells in the file name in order to clean the expired mob files by
+ * TTL easily. If this timestamp is older than the TTL, it's regarded as expired.
  */
 public class MobFileName {
 
@@ -56,7 +61,7 @@ public class MobFileName {
     this.startKey = startKey;
     this.uuid = uuid;
     this.date = date;
-    this.fileName = int2HexString(startKey) + date + uuid;
+    this.fileName = MobUtils.int2HexString(startKey) + date + uuid;
   }
 
   /**
@@ -70,7 +75,7 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String startKey, String date, String uuid) {
-    return new MobFileName(hexString2Int(startKey), date, uuid);
+    return new MobFileName(MobUtils.hexString2Int(startKey), date, uuid);
   }
 
   /**
@@ -79,56 +84,10 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String fileName) {
-    int startKey = hexString2Int(fileName.substring(0, 8));
+    int startKey = MobUtils.hexString2Int(fileName.substring(0, 8));
     String date = fileName.substring(8, 16);
     String uuid = fileName.substring(16);
     return new MobFileName(startKey, date, uuid);
-  }
-
-  /**
-   * Converts an integer to a hex string.
-   * @param i An integer.
-   * @return A hex string.
-   */
-  public static String int2HexString(int i) {
-    int shift = 4;
-    char[] buf = new char[8];
-
-    int charPos = 8;
-    int mask = 15;
-    do {
-      buf[--charPos] = digits[i & mask];
-      i >>>= shift;
-    } while (charPos > 0);
-
-    return new String(buf);
-  }
-
-  /**
-   * Converts a hex string to an integer.
-   * @param hex A hex string.
-   * @return An integer.
-   */
-  static int hexString2Int(String hex) {
-    byte[] buffer = Bytes.toBytes(hex);
-    if (buffer.length != 8) {
-      throw new InvalidParameterException("hexString2Int length not valid");
-    }
-
-    for (int i = 0; i < buffer.length; i++) {
-      byte ch = buffer[i];
-      if (ch >= 'a' && ch <= 'f') {
-        buffer[i] = (byte) (ch - 'a' + 10);
-      } else {
-        buffer[i] = (byte) (ch - '0');
-      }
-    }
-
-    buffer[0] = (byte) ((buffer[0] << 4) ^ buffer[1]);
-    buffer[1] = (byte) ((buffer[2] << 4) ^ buffer[3]);
-    buffer[2] = (byte) ((buffer[4] << 4) ^ buffer[5]);
-    buffer[3] = (byte) ((buffer[6] << 4) ^ buffer[7]);
-    return Bytes.toInt(buffer, 0, 4);
   }
 
   /**
@@ -136,7 +95,7 @@ public class MobFileName {
    * @return The hex string of the checksum for a start key.
    */
   public String getStartKey() {
-    return int2HexString(startKey);
+    return MobUtils.int2HexString(startKey);
   }
 
   /**

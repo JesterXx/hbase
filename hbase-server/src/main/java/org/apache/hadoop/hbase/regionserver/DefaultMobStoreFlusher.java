@@ -33,6 +33,7 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
+import org.apache.hadoop.hbase.mob.MobFileManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -59,15 +60,19 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   private boolean isMob = false;
   private long mobCellValueSizeThreshold = 0;
   private Path targetPath;
-  private MobFileStore mobFileStore;
-  private Object lock = new Object();
+  private MobFileManager mobFileManager;
 
-  public DefaultMobStoreFlusher(Configuration conf, Store store) {
+  public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException{
     super(conf, store);
     isMob = MobUtils.isMobFamily(store.getFamily());
     mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
     this.targetPath = MobUtils.getMobFamilyPath(conf, store.getTableName(),
         store.getColumnFamilyName());
+    if (!this.store.getFileSystem().exists(targetPath)) {
+      this.store.getFileSystem().mkdirs(targetPath);
+    }
+    mobFileManager = MobFileManager.create(conf, this.store.getFileSystem(),
+        this.store.getTableName(), this.store.getFamily());
   }
 
   /**
@@ -112,80 +117,9 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
             // It's not a mob store, flush the cells in a normal way
             performFlush(scanner, writer, smallestReadPoint);
           } else {
-            mobFileStore = currentMobFileStore();
-            StoreFile.Writer mobFileWriter = null;
-            int compactionKVMax = conf.getInt(HConstants.COMPACTION_KV_MAX,
-                HConstants.COMPACTION_KV_MAX_DEFAULT);
-            long mobKVCount = 0;
-            long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
-            mobFileWriter = mobFileStore.createWriterInTmp(new Date(time), cellsCount, store
-                .getFamily().getCompression(), store.getRegionInfo().getStartKey());
-            // the target path is {tableName}/.mob/{cfName}/mobFiles
-            // the relative path is mobFiles
-            String relativePath = mobFileWriter.getPath().getName();
-            byte[] referenceValue = Bytes.toBytes(relativePath);
-            try {
-              List<Cell> kvs = new ArrayList<Cell>();
-              boolean hasMore;
-              do {
-                hasMore = scanner.next(kvs, compactionKVMax);
-                if (!kvs.isEmpty()) {
-                  for (Cell c : kvs) {
-                    // If we know that this KV is going to be included always, then let us
-                    // set its memstoreTS to 0. This will help us save space when writing to
-                    // disk.
-                    KeyValue kv = KeyValueUtil.ensureKeyValue(c);
-                    if (kv.getValueLength() <= mobCellValueSizeThreshold
-                        || MobUtils.isMobReferenceCell(kv)
-                        || kv.getTypeByte() != KeyValue.Type.Put.getCode()) {
-                      writer.append(kv);
-                    } else {
-                      // append the original keyValue in the mob file.
-                      mobFileWriter.append(kv);
-                      mobKVCount++;
-
-                      // append the tags to the KeyValue.
-                      // The key is same, the value is the filename of the mob file
-                      List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(),
-                          kv.getTagsLength());
-                      if (existingTags.isEmpty()) {
-                        existingTags = new ArrayList<Tag>();
-                      }
-                      Tag mobRefTag = new Tag(TagType.MOB_REFERENCE_TAG_TYPE,
-                          HConstants.EMPTY_BYTE_ARRAY);
-                      existingTags.add(mobRefTag);
-                      long valueLength = kv.getValueLength();
-                      byte[] newValue = Bytes.add(Bytes.toBytes(valueLength), referenceValue);
-                      KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(),
-                          kv.getRowLength(), kv.getFamilyArray(), kv.getFamilyOffset(),
-                          kv.getFamilyLength(), kv.getQualifierArray(), kv.getQualifierOffset(),
-                          kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put,
-                          newValue, 0, newValue.length, existingTags);
-                      reference.setSequenceId(kv.getSequenceId());
-                      writer.append(reference);
-                    }
-                  }
-                  kvs.clear();
-                }
-              } while (hasMore);
-            } finally {
-              status.setStatus("Flushing mob file " + store + ": appending metadata");
-              mobFileWriter.appendMetadata(cacheFlushId, false);
-              status.setStatus("Flushing mob file " + store + ": closing flushed file");
-              mobFileWriter.close();
-            }
-
-            if (mobKVCount > 0) {
-              // commit the mob file from temp folder to target folder.
-              mobFileStore.commitFile(mobFileWriter.getPath(), targetPath);
-            } else {
-              try {
-                // If the mob file is empty, delete it instead of committing.
-                store.getFileSystem().delete(mobFileWriter.getPath(), true);
-              } catch (IOException e) {
-                LOG.error("Fail to delete the temp mob file", e);
-              }
-            }
+            // It's a mob store, flush the cells in a mob way. This is the difference of flushing
+            // between a normal and a mob store.
+            performMobFlush(snapshot, cacheFlushId, scanner, writer, status);
           }
         } finally {
           finalizeWriter(writer, cacheFlushId, status);
@@ -202,23 +136,97 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   }
 
   /**
-   * Gets the current MobFileStore.
-   * 
-   * @return The current MobFileStore.
+   * Flushes the cells in the mob store.
+   * <ol>In the mob store, the cells with PUT type might have or have no mob tags.
+   * <li>If a cell does not have a mob tag, flushing the cell to different files depends
+   * on the value length. If the length is larger than a threshold, it's flushed to a
+   * mob file and the mob file is flushed to a store file in HBase. Otherwise, directly
+   * flush the cell to a store file in HBase.</li>
+   * <li>If a cell have a mob tag, its value is a mob file name, directly flush it
+   * to a store file in HBase.</li>
+   * </ol>
+   * @param snapshot Memstore snapshot.
+   * @param cacheFlushId Log cache flush sequence number.
+   * @param scanner The scanner of memstore snapshot.
+   * @param writer The store file writer.
+   * @param status Task that represents the flush operation and may be updated with status.
    * @throws IOException
    */
-  private MobFileStore currentMobFileStore() throws IOException {
-    if (null == mobFileStore) {
-      synchronized (lock) {
-        if (null == mobFileStore) {
-          if (!this.store.getFileSystem().exists(targetPath)) {
-            this.store.getFileSystem().mkdirs(targetPath);
+  protected void performMobFlush(MemStoreSnapshot snapshot, long cacheFlushId,
+      InternalScanner scanner, StoreFile.Writer writer, MonitoredTask status) throws IOException {
+    StoreFile.Writer mobFileWriter = null;
+    int compactionKVMax = conf.getInt(HConstants.COMPACTION_KV_MAX,
+        HConstants.COMPACTION_KV_MAX_DEFAULT);
+    long mobKVCount = 0;
+    long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
+    mobFileWriter = mobFileManager.createWriterInTmp(new Date(time), snapshot.getCellsCount(), store
+        .getFamily().getCompression(), store.getRegionInfo().getStartKey());
+    // the target path is {tableName}/.mob/{cfName}/mobFiles
+    // the relative path is mobFiles
+    String relativePath = mobFileWriter.getPath().getName();
+    byte[] referenceValue = Bytes.toBytes(relativePath);
+    try {
+      List<Cell> kvs = new ArrayList<Cell>();
+      boolean hasMore;
+      do {
+        hasMore = scanner.next(kvs, compactionKVMax);
+        if (!kvs.isEmpty()) {
+          for (Cell c : kvs) {
+            // If we know that this KV is going to be included always, then let us
+            // set its memstoreTS to 0. This will help us save space when writing to
+            // disk.
+            KeyValue kv = KeyValueUtil.ensureKeyValue(c);
+            if (kv.getValueLength() <= mobCellValueSizeThreshold || MobUtils.isMobReferenceCell(kv)
+                || kv.getTypeByte() != KeyValue.Type.Put.getCode()) {
+              writer.append(kv);
+            } else {
+              // append the original keyValue in the mob file.
+              mobFileWriter.append(kv);
+              mobKVCount++;
+
+              // append the tags to the KeyValue.
+              // The key is same, the value is the filename of the mob file
+              List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(),
+                  kv.getTagsLength());
+              if (existingTags.isEmpty()) {
+                existingTags = new ArrayList<Tag>();
+              }
+              Tag mobRefTag = new Tag(TagType.MOB_REFERENCE_TAG_TYPE, HConstants.EMPTY_BYTE_ARRAY);
+              existingTags.add(mobRefTag);
+              long valueLength = kv.getValueLength();
+              byte[] newValue = Bytes.add(Bytes.toBytes(valueLength), referenceValue);
+              KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(),
+                  kv.getRowLength(), kv.getFamilyArray(), kv.getFamilyOffset(),
+                  kv.getFamilyLength(), kv.getQualifierArray(), kv.getQualifierOffset(),
+                  kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put, newValue, 0,
+                  newValue.length, existingTags);
+              reference.setSequenceId(kv.getSequenceId());
+              writer.append(reference);
+            }
           }
-          mobFileStore = MobFileStore.create(conf, this.store.getFileSystem(),
-              this.store.getTableName(), this.store.getFamily());
+          kvs.clear();
         }
+      } while (hasMore);
+    } finally {
+      status.setStatus("Flushing mob file " + store + ": appending metadata");
+      mobFileWriter.appendMetadata(cacheFlushId, false);
+      status.setStatus("Flushing mob file " + store + ": closing flushed file");
+      mobFileWriter.close();
+    }
+
+    if (mobKVCount > 0) {
+      // commit the mob file from temp folder to target folder.
+      // If the mob file is committed successfully but the store file is not,
+      // the committed mob file will be handled by the sweep tool as an unused
+      // file.
+      mobFileManager.commitFile(mobFileWriter.getPath(), targetPath);
+    } else {
+      try {
+        // If the mob file is empty, delete it instead of committing.
+        store.getFileSystem().delete(mobFileWriter.getPath(), true);
+      } catch (IOException e) {
+        LOG.error("Fail to delete the temp mob file", e);
       }
     }
-    return mobFileStore;
   }
 }

@@ -121,6 +121,7 @@ import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.CoprocessorServic
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.protobuf.generated.WALProtos.CompactionDescriptor;
 import org.apache.hadoop.hbase.protobuf.generated.WALProtos.FlushDescriptor;
+import org.apache.hadoop.hbase.protobuf.generated.WALProtos.RegionEventDescriptor;
 import org.apache.hadoop.hbase.protobuf.generated.WALProtos.FlushDescriptor.FlushAction;
 import org.apache.hadoop.hbase.regionserver.MultiVersionConsistencyControl.WriteEntry;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
@@ -726,6 +727,8 @@ public class HRegion implements HeapSize { // , Writable{
     status.setStatus("Writing region info on filesystem");
     fs.checkRegionInfoOnFilesystem();
 
+
+
     // Initialize all the HStores
     status.setStatus("Initializing all the Stores");
     long maxSeqId = initializeRegionStores(reporter, status);
@@ -762,6 +765,7 @@ public class HRegion implements HeapSize { // , Writable{
       // overlaps used sequence numbers
       nextSeqid += this.flushPerChanges + 10000000; // add another extra 10million
     }
+
     LOG.info("Onlined " + this.getRegionInfo().getShortNameToLog() +
       "; next sequenceid=" + nextSeqid);
 
@@ -849,6 +853,44 @@ public class HRegion implements HeapSize { // , Writable{
     maxSeqId = Math.max(maxSeqId, maxMemstoreTS + 1);
     mvcc.initialize(maxSeqId);
     return maxSeqId;
+  }
+
+  private void writeRegionOpenMarker(HLog log, long openSeqId) throws IOException {
+    Map<byte[], List<Path>> storeFiles
+    = new TreeMap<byte[], List<Path>>(Bytes.BYTES_COMPARATOR);
+    for (Map.Entry<byte[], Store> entry : getStores().entrySet()) {
+      Store store = entry.getValue();
+      ArrayList<Path> storeFileNames = new ArrayList<Path>();
+      for (StoreFile storeFile: store.getStorefiles()) {
+        storeFileNames.add(storeFile.getPath());
+      }
+      storeFiles.put(entry.getKey(), storeFileNames);
+    }
+
+    RegionEventDescriptor regionOpenDesc = ProtobufUtil.toRegionEventDescriptor(
+      RegionEventDescriptor.EventType.REGION_OPEN, getRegionInfo(), openSeqId,
+      getRegionServerServices().getServerName(), storeFiles);
+    HLogUtil.writeRegionEventMarker(log, getTableDesc(), getRegionInfo(), regionOpenDesc,
+      getSequenceId());
+  }
+
+  private void writeRegionCloseMarker(HLog log) throws IOException {
+    Map<byte[], List<Path>> storeFiles
+    = new TreeMap<byte[], List<Path>>(Bytes.BYTES_COMPARATOR);
+    for (Map.Entry<byte[], Store> entry : getStores().entrySet()) {
+      Store store = entry.getValue();
+      ArrayList<Path> storeFileNames = new ArrayList<Path>();
+      for (StoreFile storeFile: store.getStorefiles()) {
+        storeFileNames.add(storeFile.getPath());
+      }
+      storeFiles.put(entry.getKey(), storeFileNames);
+    }
+
+    RegionEventDescriptor regionEventDesc = ProtobufUtil.toRegionEventDescriptor(
+      RegionEventDescriptor.EventType.REGION_CLOSE, getRegionInfo(), getSequenceId().get(),
+      getRegionServerServices().getServerName(), storeFiles);
+    HLogUtil.writeRegionEventMarker(log, getTableDesc(), getRegionInfo(), regionEventDesc,
+      getSequenceId());
   }
 
   /**
@@ -1228,6 +1270,12 @@ public class HRegion implements HeapSize { // , Writable{
           storeCloserThreadPool.shutdownNow();
         }
       }
+
+      status.setStatus("Writing region close event to WAL");
+      if (!abort  && log != null && getRegionServerServices() != null) {
+        writeRegionCloseMarker(log);
+      }
+
       this.closed.set(true);
       if (memstoreSize.get() != 0) LOG.error("Memstore size is " + memstoreSize.get());
       if (coprocessorHost != null) {
@@ -3573,6 +3621,7 @@ public class HRegion implements HeapSize { // , Writable{
     }
     return storeFileNames;
   }
+
   //////////////////////////////////////////////////////////////////////////////
   // Support code
   //////////////////////////////////////////////////////////////////////////////
@@ -4624,6 +4673,9 @@ public class HRegion implements HeapSize { // , Writable{
 
     this.openSeqNum = initialize(reporter);
     this.setSequenceId(openSeqNum);
+    if (log != null && getRegionServerServices() != null) {
+      writeRegionOpenMarker(log, openSeqNum);
+    }
     return this;
   }
 

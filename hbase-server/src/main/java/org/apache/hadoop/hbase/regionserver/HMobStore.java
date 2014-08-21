@@ -24,6 +24,7 @@ import java.util.NavigableSet;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.mob.MobFileManager;
 
 /**
  * The store implementation to save MOBs (medium objects), it extends the HStore.
@@ -37,13 +38,13 @@ import org.apache.hadoop.hbase.client.Scan;
  */
 public class HMobStore extends HStore {
 
-  private MobFileStore mobFileStore;
+  private MobFileManager mobFileManager;
 
   public HMobStore(final HRegion region, final HColumnDescriptor family,
       final Configuration confParam) throws IOException {
     super(region, family, confParam);
-    mobFileStore = MobFileStore.create(region.conf, region.getFilesystem(), this.getTableName(),
-        this.getFamily());
+    mobFileManager = MobFileManager.create(region.conf, region.getFilesystem(),
+        this.getTableName(), this.getFamily());
   }
 
   /**
@@ -60,9 +61,9 @@ public class HMobStore extends HStore {
         scanner = this.getCoprocessorHost().preStoreScannerOpen(this, scan, targetCols);
       }
       if (scanner == null) {
-        scanner = scan.isReversed() ? new MobReversedStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileStore) : new MobStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileStore);
+        scanner = scan.isReversed() ? new ReversedMobStoreScanner(this, getScanInfo(), scan,
+            targetCols, readPt, mobFileManager) : new MobStoreScanner(this, getScanInfo(), scan,
+            targetCols, readPt, mobFileManager);
       }
       return scanner;
     } finally {

@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.master;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -144,9 +145,8 @@ public class RegionStates {
   /**
    * @return an unmodifiable the region assignment map
    */
-  @SuppressWarnings("unchecked")
   public synchronized Map<HRegionInfo, ServerName> getRegionAssignments() {
-    return (Map<HRegionInfo, ServerName>)regionAssignments.clone();
+    return Collections.unmodifiableMap(regionAssignments);
   }
 
   /**
@@ -508,7 +508,7 @@ public class RegionStates {
       ServerName oldServerName = regionAssignments.remove(hri);
       if (oldServerName != null && serverHoldings.containsKey(oldServerName)
           && (newState == State.MERGED || newState == State.SPLIT
-            || tableStateManager.isTableState(hri.getTable(),
+            || hri.isMetaRegion() || tableStateManager.isTableState(hri.getTable(),
               ZooKeeperProtos.Table.State.DISABLED, ZooKeeperProtos.Table.State.DISABLING))) {
         // Offline the region only if it's merged/split, or the table is disabled/disabling.
         // Otherwise, offline it from this server only when it is online on a different server.
