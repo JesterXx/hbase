@@ -45,6 +45,7 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.LargeTests;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.ScannerCallable;
@@ -150,7 +151,7 @@ public class TestMobFlushSnapshotFromClient {
    */
   @Test (timeout=300000)
   public void testFlushTableSnapshot() throws Exception {
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     // make sure we don't fail on listing snapshots
     SnapshotTestingUtils.assertNoSnapshots(admin);
 
@@ -165,7 +166,7 @@ public class TestMobFlushSnapshotFromClient {
     // take a snapshot of the enabled table
     String snapshotString = "offlineTableSnapshot";
     byte[] snapshot = Bytes.toBytes(snapshotString);
-    admin.snapshot(snapshotString, STRING_TABLE_NAME, SnapshotDescription.Type.FLUSH);
+    admin.snapshot(snapshotString, TABLE_NAME, SnapshotDescription.Type.FLUSH);
     LOG.debug("Snapshot completed.");
 
     // make sure we have the snapshot
@@ -189,7 +190,7 @@ public class TestMobFlushSnapshotFromClient {
    */
   @Test(timeout=30000)
   public void testSkipFlushTableSnapshot() throws Exception {
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     // make sure we don't fail on listing snapshots
     SnapshotTestingUtils.assertNoSnapshots(admin);
 
@@ -204,7 +205,7 @@ public class TestMobFlushSnapshotFromClient {
     // take a snapshot of the enabled table
     String snapshotString = "skipFlushTableSnapshot";
     byte[] snapshot = Bytes.toBytes(snapshotString);
-    admin.snapshot(snapshotString, STRING_TABLE_NAME, SnapshotDescription.Type.SKIPFLUSH);
+    admin.snapshot(snapshotString, TABLE_NAME, SnapshotDescription.Type.SKIPFLUSH);
     LOG.debug("Snapshot completed.");
 
     // make sure we have the snapshot
@@ -233,7 +234,7 @@ public class TestMobFlushSnapshotFromClient {
    */
   @Test (timeout=300000)
   public void testFlushTableSnapshotWithProcedure() throws Exception {
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     // make sure we don't fail on listing snapshots
     SnapshotTestingUtils.assertNoSnapshots(admin);
 
@@ -249,7 +250,7 @@ public class TestMobFlushSnapshotFromClient {
     String snapshotString = "offlineTableSnapshot";
     byte[] snapshot = Bytes.toBytes(snapshotString);
     Map<String, String> props = new HashMap<String, String>();
-    props.put("table", STRING_TABLE_NAME);
+    props.put("table", TABLE_NAME.getNameAsString());
     admin.execProcedure(SnapshotManager.ONLINE_SNAPSHOT_CONTROLLER_DESCRIPTION,
         snapshotString, props);
 
@@ -273,19 +274,19 @@ public class TestMobFlushSnapshotFromClient {
 
   @Test (timeout=300000)
   public void testSnapshotFailsOnNonExistantTable() throws Exception {
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     // make sure we don't fail on listing snapshots
     SnapshotTestingUtils.assertNoSnapshots(admin);
-    String tableName = "_not_a_table";
+    TableName tableName = TableName.valueOf("_not_a_table");
 
     // make sure the table doesn't exist
     boolean fail = false;
     do {
     try {
-      admin.getTableDescriptor(Bytes.toBytes(tableName));
+      admin.getTableDescriptor(tableName);
       fail = true;
       LOG.error("Table:" + tableName + " already exists, checking a new name");
-      tableName = tableName+"!";
+      tableName = TableName.valueOf(tableName+"!");
     } catch (TableNotFoundException e) {
       fail = false;
       }
@@ -302,7 +303,7 @@ public class TestMobFlushSnapshotFromClient {
 
   @Test(timeout = 300000)
   public void testAsyncFlushSnapshot() throws Exception {
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     SnapshotDescription snapshot = SnapshotDescription.newBuilder().setName("asyncSnapshot")
         .setTable(TABLE_NAME.getNameAsString())
         .setType(SnapshotDescription.Type.FLUSH)
@@ -327,7 +328,7 @@ public class TestMobFlushSnapshotFromClient {
   @Test (timeout=300000)
   public void testFlushCreateListDestroy() throws Exception {
     LOG.debug("------- Starting Snapshot test -------------");
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     // make sure we don't fail on listing snapshots
     SnapshotTestingUtils.assertNoSnapshots(admin);
     // load the table so we have some data
@@ -336,8 +337,7 @@ public class TestMobFlushSnapshotFromClient {
     String snapshotName = "flushSnapshotCreateListDestroy";
     FileSystem fs = UTIL.getHBaseCluster().getMaster().getMasterFileSystem().getFileSystem();
     Path rootDir = UTIL.getHBaseCluster().getMaster().getMasterFileSystem().getRootDir();
-    SnapshotTestingUtils.createSnapshotAndValidate(admin,
-      TableName.valueOf(STRING_TABLE_NAME), Bytes.toString(TEST_FAM),
+    SnapshotTestingUtils.createSnapshotAndValidate(admin, TABLE_NAME, Bytes.toString(TEST_FAM),
       snapshotName, rootDir, fs, true);
   }
 
@@ -353,7 +353,7 @@ public class TestMobFlushSnapshotFromClient {
         TableName.valueOf(STRING_TABLE2_NAME);
 
     int ssNum = 20;
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     // make sure we don't fail on listing snapshots
     SnapshotTestingUtils.assertNoSnapshots(admin);
     // create second testing table
@@ -373,7 +373,7 @@ public class TestMobFlushSnapshotFromClient {
       @Override
       public void run() {
         try {
-          HBaseAdmin admin = UTIL.getHBaseAdmin();
+          Admin admin = UTIL.getHBaseAdmin();
           LOG.info("Submitting snapshot request: " + ClientSnapshotDescriptionUtils.toString(ss));
           admin.takeSnapshotAsync(ss);
         } catch (Exception e) {
@@ -454,7 +454,7 @@ public class TestMobFlushSnapshotFromClient {
 
   private void waitRegionsAfterMerge(final long numRegionsAfterMerge)
       throws IOException, InterruptedException {
-    HBaseAdmin admin = UTIL.getHBaseAdmin();
+    Admin admin = UTIL.getHBaseAdmin();
     // Verify that there's one region less
     long startTime = System.currentTimeMillis();
     while (admin.getTableRegions(TABLE_NAME).size() != numRegionsAfterMerge) {

@@ -63,9 +63,9 @@ public class HFileArchiveUtil {
    */
   public static Path getStoreArchivePath(final Configuration conf,
                                          final TableName tableName,
-      final String regionName, final String familyName) throws IOException {
+      final String regionName, final byte[] family) throws IOException {
     Path tableArchiveDir = getTableArchivePath(conf, tableName);
-    return HStore.getStoreHomedir(tableArchiveDir, regionName, Bytes.toBytes(familyName));
+    return HStore.getStoreHomedir(tableArchiveDir, regionName, family);
   }
 
   /**
