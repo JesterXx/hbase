@@ -59,7 +59,11 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
   }
 
   /**
-   * Opens the mob file and increases the reference.
+   * Opens the mob file if it's not opened yet and increases the reference.
+   * The reader of the mob file is just opened when it's not opened no matter how many times
+   * this open() method is invoked.
+   * The reference is a counter that how many times times this reader is referenced. When the
+   * reference is 0, this reader is closed.
    */
   @Override
   public void open() throws IOException {
@@ -68,7 +72,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
   }
 
   /**
-   * Closes the mob file and decreases the reference.
+   * Decreases the reference of the underlying reader for the mob file.
    * This underlying reader isn't closed until the reference is 0.
    */
   @Override

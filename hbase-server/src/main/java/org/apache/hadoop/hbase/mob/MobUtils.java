@@ -18,7 +18,6 @@
  */
 package org.apache.hadoop.hbase.mob;
 
-import java.security.InvalidParameterException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -52,8 +51,6 @@ public class MobUtils {
       return new SimpleDateFormat("yyyyMMdd");
     }
   };
-  private final static char[] digits = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a',
-      'b', 'c', 'd', 'e', 'f' };
 
   /**
    * Indicates whether the column family is a mob one.
@@ -68,12 +65,13 @@ public class MobUtils {
   /**
    * Gets the mob threshold.
    * If the size of a cell value is larger than this threshold, it's regarded as a mob.
+   * The default threshold is 1024*100(100K)B.
    * @param hcd The descriptor of a column family.
    * @return The threshold.
    */
   public static long getMobThreshold(HColumnDescriptor hcd) {
     String threshold = hcd.getValue(MobConstants.MOB_THRESHOLD);
-    return Strings.isEmpty(threshold) ? 0 : Long.parseLong(threshold);
+    return Strings.isEmpty(threshold) ? 102400 : Long.parseLong(threshold);
   }
 
   /**
@@ -235,17 +233,7 @@ public class MobUtils {
    * @return A hex string.
    */
   public static String int2HexString(int i) {
-    int shift = 4;
-    char[] buf = new char[8];
-
-    int charPos = 8;
-    int mask = 15;
-    do {
-      buf[--charPos] = digits[i & mask];
-      i >>>= shift;
-    } while (charPos > 0);
-
-    return new String(buf);
+    return Integer.toHexString(i);
   }
 
   /**
@@ -254,24 +242,6 @@ public class MobUtils {
    * @return An integer.
    */
   public static int hexString2Int(String hex) {
-    byte[] buffer = Bytes.toBytes(hex);
-    if (buffer.length != 8) {
-      throw new InvalidParameterException("hexString2Int length not valid");
-    }
-
-    for (int i = 0; i < buffer.length; i++) {
-      byte ch = buffer[i];
-      if (ch >= 'a' && ch <= 'f') {
-        buffer[i] = (byte) (ch - 'a' + 10);
-      } else {
-        buffer[i] = (byte) (ch - '0');
-      }
-    }
-
-    buffer[0] = (byte) ((buffer[0] << 4) ^ buffer[1]);
-    buffer[1] = (byte) ((buffer[2] << 4) ^ buffer[3]);
-    buffer[2] = (byte) ((buffer[4] << 4) ^ buffer[5]);
-    buffer[3] = (byte) ((buffer[6] << 4) ^ buffer[7]);
-    return Bytes.toInt(buffer, 0, 4);
+    return (int)Long.parseLong(hex, 16);
   }
 }
