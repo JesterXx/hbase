@@ -81,10 +81,10 @@ public class MobFileManager {
    * @param tableName The table name.
    * @param family The column family.
    * @return An instance of MobFileStore.
-   * @throws IOException
+   *         A null is returned if this column family is null or it doesn't have a mob flag.
    */
   public static MobFileManager create(Configuration conf, FileSystem fs, TableName tableName,
-      HColumnDescriptor family) throws IOException {
+      HColumnDescriptor family) {
     if (null == family) {
       LOG.warn("fail to create the MobFileStore because the family is null in table [" + tableName
           + "]!");
