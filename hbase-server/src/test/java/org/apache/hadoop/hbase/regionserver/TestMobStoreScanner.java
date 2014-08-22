@@ -29,10 +29,8 @@ import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.MediumTests;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
@@ -52,7 +50,6 @@ import org.junit.experimental.categories.Category;
 public class TestMobStoreScanner {
 
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
-  private final static String TN = "testMobStoreScanner";
   private final static byte [] row1 = Bytes.toBytes("row1");
   private final static byte [] family = Bytes.toBytes("family");
   private final static byte [] qf1 = Bytes.toBytes("qualifier1");
@@ -81,7 +78,7 @@ public class TestMobStoreScanner {
     TEST_UTIL.shutdownMiniCluster();
   }
 
-  public void setUp(String threshold) throws Exception {
+  public void setUp(String threshold, String TN) throws Exception {
     desc = new HTableDescriptor(TableName.valueOf(TN));
     hcd = new HColumnDescriptor(family);
     hcd.setValue(MobConstants.IS_MOB, "true");
@@ -91,12 +88,6 @@ public class TestMobStoreScanner {
     admin = new HBaseAdmin(TEST_UTIL.getConfiguration());
     admin.createTable(desc);
     table = new HTable(TEST_UTIL.getConfiguration(), TN);
-  }
-
-  public void tearDown() throws Exception {
-    admin.disableTable(TN);
-    admin.deleteTable(TN);
-    admin.close();
   }
 
   /**
@@ -119,11 +110,11 @@ public class TestMobStoreScanner {
    * @return this
    */
   public void setScan(Scan scan, boolean reversed, boolean mobScanRaw) {
-      scan.setReversed(reversed);
-      scan.setMaxVersions(4);
-      if(mobScanRaw) {
-        scan.setAttribute(MobConstants.MOB_SCAN_RAW, Bytes.toBytes(Boolean.TRUE));
-      }
+    scan.setReversed(reversed);
+    scan.setMaxVersions(4);
+    if(mobScanRaw) {
+      scan.setAttribute(MobConstants.MOB_SCAN_RAW, Bytes.toBytes(Boolean.TRUE));
+    }
   }
 
   @Test
@@ -139,194 +130,159 @@ public class TestMobStoreScanner {
 	  testGetFromFiles(true);
 	  testGetFromMemStore(true);
     testGetReferences(true);
-    testMobThreshold(false);
+    testMobThreshold(true);
   }
 
   public void testGetFromFiles(boolean reversed) throws Exception {
-    try {
-      setUp(defaultThreshold);
-      long ts1 = System.currentTimeMillis();
-      long ts2 = ts1 + 1;
-      long ts3 = ts1 + 2;
-      byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);
+    String TN = "testGetFromFiles" + reversed;
+    setUp(defaultThreshold, TN);
+    long ts1 = System.currentTimeMillis();
+    long ts2 = ts1 + 1;
+    long ts3 = ts1 + 2;
+    byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);
 
-      Put put1 = new Put(row1);
-      put1.add(family, qf1, ts3, value);
-      put1.add(family, qf2, ts2, value);
-      put1.add(family, qf3, ts1, value);
-      table.put(put1);
+    Put put1 = new Put(row1);
+    put1.add(family, qf1, ts3, value);
+    put1.add(family, qf2, ts2, value);
+    put1.add(family, qf3, ts1, value);
+    table.put(put1);
 
-      table.flushCommits();
-      admin.flush(TN);
+    table.flushCommits();
+    admin.flush(TN);
 
-      Scan scan = new Scan();
-      setScan(scan, reversed, false);
+    Scan scan = new Scan();
+    setScan(scan, reversed, false);
 
-      ResultScanner results = table.getScanner(scan);
-      int count = 0;
-      for (Result res : results) {
-        List<Cell> cells = res.listCells();
-        for(Cell cell : cells) {
-          // Verify the value
-          Assert.assertEquals(Bytes.toString(value),
-              Bytes.toString(CellUtil.cloneValue(cell)));
-          count++;
-        }
+    ResultScanner results = table.getScanner(scan);
+    int count = 0;
+    for (Result res : results) {
+      List<Cell> cells = res.listCells();
+      for(Cell cell : cells) {
+        // Verify the value
+        Assert.assertEquals(Bytes.toString(value),
+            Bytes.toString(CellUtil.cloneValue(cell)));
+        count++;
       }
-
-      results.close();
-      Assert.assertEquals(3, count);
-      tearDown();
-    } catch (MasterNotRunningException e) {
-      e.printStackTrace();
-    } catch (ZooKeeperConnectionException e) {
-      e.printStackTrace();
-    } catch (IOException e) {
-      e.printStackTrace();
     }
+    results.close();
+    Assert.assertEquals(3, count);
   }
 
   public void testGetFromMemStore(boolean reversed) throws Exception {
-    try {
-      setUp(defaultThreshold);
-      long ts1 = System.currentTimeMillis();
-      long ts2 = ts1 + 1;
-      long ts3 = ts1 + 2;
-      byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);;
+    String TN = "testGetFromMemStore" + reversed;
+    setUp(defaultThreshold, TN);
+    long ts1 = System.currentTimeMillis();
+    long ts2 = ts1 + 1;
+    long ts3 = ts1 + 2;
+    byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);;
 
-      Put put1 = new Put(row1);
-      put1.add(family, qf1, ts3, value);
-      put1.add(family, qf2, ts2, value);
-      put1.add(family, qf3, ts1, value);
-      table.put(put1);
+    Put put1 = new Put(row1);
+    put1.add(family, qf1, ts3, value);
+    put1.add(family, qf2, ts2, value);
+    put1.add(family, qf3, ts1, value);
+    table.put(put1);
 
-      Scan scan = new Scan();
-      setScan(scan, reversed, false);
+    Scan scan = new Scan();
+    setScan(scan, reversed, false);
 
-      ResultScanner results = table.getScanner(scan);
-      int count = 0;
-      for (Result res : results) {
-        List<Cell> cells = res.listCells();
-        for(Cell cell : cells) {
-          // Verify the value
-          Assert.assertEquals(Bytes.toString(value),
-              Bytes.toString(CellUtil.cloneValue(cell)));
-          count++;
-        }
+    ResultScanner results = table.getScanner(scan);
+    int count = 0;
+    for (Result res : results) {
+      List<Cell> cells = res.listCells();
+      for(Cell cell : cells) {
+        // Verify the value
+        Assert.assertEquals(Bytes.toString(value),
+            Bytes.toString(CellUtil.cloneValue(cell)));
+        count++;
       }
-
-      results.close();
-      Assert.assertEquals(3, count);
-      tearDown();
-    } catch (MasterNotRunningException e) {
-      e.printStackTrace();
-    } catch (ZooKeeperConnectionException e) {
-      e.printStackTrace();
-    } catch (IOException e) {
-      e.printStackTrace();
     }
+    results.close();
+    Assert.assertEquals(3, count);
   }
 
   public void testGetReferences(boolean reversed) throws Exception {
-    try {
-      setUp(defaultThreshold);
-      long ts1 = System.currentTimeMillis();
-      long ts2 = ts1 + 1;
-      long ts3 = ts1 + 2;
-      byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);;
+    String TN = "testGetReferences" + reversed;
+    setUp(defaultThreshold, TN);
+    long ts1 = System.currentTimeMillis();
+    long ts2 = ts1 + 1;
+    long ts3 = ts1 + 2;
+    byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);;
 
-      Put put1 = new Put(row1);
-      put1.add(family, qf1, ts3, value);
-      put1.add(family, qf2, ts2, value);
-      put1.add(family, qf3, ts1, value);
-      table.put(put1);
+    Put put1 = new Put(row1);
+    put1.add(family, qf1, ts3, value);
+    put1.add(family, qf2, ts2, value);
+    put1.add(family, qf3, ts1, value);
+    table.put(put1);
 
-      table.flushCommits();
-      admin.flush(TN);
+    table.flushCommits();
+    admin.flush(TN);
 
-      Scan scan = new Scan();
-      setScan(scan, reversed, true);
+    Scan scan = new Scan();
+    setScan(scan, reversed, true);
 
-      ResultScanner results = table.getScanner(scan);
-      int count = 0;
-      for (Result res : results) {
-        List<Cell> cells = res.listCells();
-        for(Cell cell : cells) {
-          // Verify the value
-          assertIsMobReference(cell, row1, family, value);
-          count++;
-        }
+    ResultScanner results = table.getScanner(scan);
+    int count = 0;
+    for (Result res : results) {
+      List<Cell> cells = res.listCells();
+      for(Cell cell : cells) {
+        // Verify the value
+        assertIsMobReference(cell, row1, family, value, TN);
+        count++;
       }
-
-      results.close();
-      Assert.assertEquals(3, count);
-      tearDown();
-    } catch (MasterNotRunningException e) {
-      e.printStackTrace();
-    } catch (ZooKeeperConnectionException e) {
-      e.printStackTrace();
-    } catch (IOException e) {
-      e.printStackTrace();
     }
+    results.close();
+    Assert.assertEquals(3, count);
   }
 
   public void testMobThreshold(boolean reversed) throws Exception {
-    try {
-      setUp(defaultThreshold);
-      byte [] valueLess = generateMobValue(Integer.parseInt(defaultThreshold)-1);
-      byte [] valueEqual = generateMobValue(Integer.parseInt(defaultThreshold));
-      byte [] valueGreater = generateMobValue(Integer.parseInt(defaultThreshold)+1);
-      long ts1 = System.currentTimeMillis();
-      long ts2 = ts1 + 1;
-      long ts3 = ts1 + 2;
+    String TN = "testMobThreshold" + reversed;
+    setUp(defaultThreshold, TN);
+    byte [] valueLess = generateMobValue(Integer.parseInt(defaultThreshold)-1);
+    byte [] valueEqual = generateMobValue(Integer.parseInt(defaultThreshold));
+    byte [] valueGreater = generateMobValue(Integer.parseInt(defaultThreshold)+1);
+    long ts1 = System.currentTimeMillis();
+    long ts2 = ts1 + 1;
+    long ts3 = ts1 + 2;
 
-      Put put1 = new Put(row1);
-      put1.add(family, qf1, ts3, valueLess);
-      put1.add(family, qf2, ts2, valueEqual);
-      put1.add(family, qf3, ts1, valueGreater);
-      table.put(put1);
+    Put put1 = new Put(row1);
+    put1.add(family, qf1, ts3, valueLess);
+    put1.add(family, qf2, ts2, valueEqual);
+    put1.add(family, qf3, ts1, valueGreater);
+    table.put(put1);
 
-      table.flushCommits();
-      admin.flush(TN);
+    table.flushCommits();
+    admin.flush(TN);
 
-      Scan scan = new Scan();
-      setScan(scan, reversed, true);
+    Scan scan = new Scan();
+    setScan(scan, reversed, true);
 
-      Cell cellLess= null;
-      Cell cellEqual = null;
-      Cell cellGreater = null;
-      ResultScanner results = table.getScanner(scan);
-      int count = 0;
-      for (Result res : results) {
-        List<Cell> cells = res.listCells();
-        for(Cell cell : cells) {
-          // Verify the value
-          String qf = Bytes.toString(CellUtil.cloneQualifier(cell));
-          if(qf.equals(Bytes.toString(qf1))) {
-            cellLess = cell;
-          }
-          if(qf.equals(Bytes.toString(qf2))) {
-            cellEqual = cell;
-          }
-          if(qf.equals(Bytes.toString(qf3))) {
-            cellGreater = cell;
-          }
-          count++;
+    Cell cellLess= null;
+    Cell cellEqual = null;
+    Cell cellGreater = null;
+    ResultScanner results = table.getScanner(scan);
+    int count = 0;
+    for (Result res : results) {
+      List<Cell> cells = res.listCells();
+      for(Cell cell : cells) {
+        // Verify the value
+        String qf = Bytes.toString(CellUtil.cloneQualifier(cell));
+        if(qf.equals(Bytes.toString(qf1))) {
+          cellLess = cell;
         }
+        if(qf.equals(Bytes.toString(qf2))) {
+          cellEqual = cell;
+        }
+        if(qf.equals(Bytes.toString(qf3))) {
+          cellGreater = cell;
+        }
+        count++;
       }
-      Assert.assertEquals(3, count);
-      assertNotMobReference(cellLess, row1, family, valueLess);
-      assertNotMobReference(cellEqual, row1, family, valueEqual);
-      assertIsMobReference(cellGreater, row1, family, valueGreater);
-      results.close();
-      tearDown();
-    } catch (MasterNotRunningException e) {
-      e.printStackTrace();
-    } catch (ZooKeeperConnectionException e) {
-      e.printStackTrace();
-    } catch (IOException e) {
-      e.printStackTrace();
     }
+    Assert.assertEquals(3, count);
+    assertNotMobReference(cellLess, row1, family, valueLess);
+    assertNotMobReference(cellEqual, row1, family, valueEqual);
+    assertIsMobReference(cellGreater, row1, family, valueGreater, TN);
+    results.close();
   }
 
   /**
@@ -346,7 +302,7 @@ public class TestMobStoreScanner {
    * Assert the value is store in mob.
    */
   private static void assertIsMobReference(Cell cell, byte[] row, byte[] family,
-      byte[] value) throws IOException {
+      byte[] value, String TN) throws IOException {
     Assert.assertEquals(Bytes.toString(row),
         Bytes.toString(CellUtil.cloneRow(cell)));
     Assert.assertEquals(Bytes.toString(family),
