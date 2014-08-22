@@ -31,8 +31,6 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
-import org.apache.hadoop.hbase.Tag;
-import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.mob.MobFileManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
@@ -163,8 +161,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         .getFamily().getCompression(), store.getRegionInfo().getStartKey());
     // the target path is {tableName}/.mob/{cfName}/mobFiles
     // the relative path is mobFiles
-    String relativePath = mobFileWriter.getPath().getName();
-    byte[] referenceValue = Bytes.toBytes(relativePath);
+    byte[] fileName = Bytes.toBytes(mobFileWriter.getPath().getName());
     try {
       List<Cell> kvs = new ArrayList<Cell>();
       boolean hasMore;
@@ -186,21 +183,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
               // append the tags to the KeyValue.
               // The key is same, the value is the filename of the mob file
-              List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(),
-                  kv.getTagsLength());
-              if (existingTags.isEmpty()) {
-                existingTags = new ArrayList<Tag>();
-              }
-              Tag mobRefTag = new Tag(TagType.MOB_REFERENCE_TAG_TYPE, HConstants.EMPTY_BYTE_ARRAY);
-              existingTags.add(mobRefTag);
-              long valueLength = kv.getValueLength();
-              byte[] newValue = Bytes.add(Bytes.toBytes(valueLength), referenceValue);
-              KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(),
-                  kv.getRowLength(), kv.getFamilyArray(), kv.getFamilyOffset(),
-                  kv.getFamilyLength(), kv.getQualifierArray(), kv.getQualifierOffset(),
-                  kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put, newValue, 0,
-                  newValue.length, existingTags);
-              reference.setSequenceId(kv.getSequenceId());
+              KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName);
               writer.append(reference);
             }
           }

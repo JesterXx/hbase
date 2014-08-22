@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.mob;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -30,6 +31,7 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
@@ -243,5 +245,31 @@ public class MobUtils {
    */
   public static int hexString2Int(String hex) {
     return (int)Long.parseLong(hex, 16);
+  }
+
+  /**
+   * Creates a mob reference KeyValue.
+   * The value of the mob reference KeyValue is mobCellValueSize + mobFileName.
+   * @param kv The original KeyValue.
+   * @param fileName The mob file name where the mob reference KeyValue is written.
+   * @return The mob reference KeyValue.
+   */
+  public static KeyValue createMobRefKeyValue(KeyValue kv, byte[] fileName) {
+    // append the tags to the KeyValue.
+    // The key is same, the value is the filename of the mob file
+    List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(), kv.getTagsLength());
+    if (existingTags.isEmpty()) {
+      existingTags = new ArrayList<Tag>();
+    }
+    Tag mobRefTag = new Tag(TagType.MOB_REFERENCE_TAG_TYPE, HConstants.EMPTY_BYTE_ARRAY);
+    existingTags.add(mobRefTag);
+    long valueLength = kv.getValueLength();
+    byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);
+    KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(), kv.getRowLength(),
+        kv.getFamilyArray(), kv.getFamilyOffset(), kv.getFamilyLength(), kv.getQualifierArray(),
+        kv.getQualifierOffset(), kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put,
+        refValue, 0, refValue.length, existingTags);
+    reference.setSequenceId(kv.getSequenceId());
+    return reference;
   }
 }
