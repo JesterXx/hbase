@@ -162,7 +162,7 @@ public class MobUtils {
 
   /**
    * Sets the attribute of caching blocks in the scan.
-   * 
+   *
    * @param scan
    *          The current scan.
    * @param cacheBlocks
@@ -218,7 +218,7 @@ public class MobUtils {
    */
   public static Path getMobFamilyPath(Path regionPath, String familyName) {
     return new Path(regionPath, familyName);
-  } 
+  }
 
   /**
    * Gets the HRegionInfo of the mob files.

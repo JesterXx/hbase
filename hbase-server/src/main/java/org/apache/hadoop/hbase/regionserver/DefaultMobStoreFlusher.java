@@ -39,7 +39,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 /**
  * An implementation of the StoreFlusher. It extends the DefaultStoreFlusher.
  * If the store is not a mob store, the flusher flushes the MemStore the same with
- * DefaultStoreFlusher, 
+ * DefaultStoreFlusher.
  * If the store is a mob store, the flusher flushes the MemStore into two places.
  * One is the store files of HBase, the other is the mob files.
  * <ol>
@@ -49,7 +49,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * <li>If the size of a cell value is smaller than or equal with a threshold, it'll be flushed to
  * HBase directly.</li>
  * </ol>
- * 
+ *
  */
 public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
@@ -74,8 +74,8 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   }
 
   /**
-   * Flushes the snapshot of the MemStore. 
-   * If this store is not a mob store, flush the cells in the snapshot to store files of HBase. 
+   * Flushes the snapshot of the MemStore.
+   * If this store is not a mob store, flush the cells in the snapshot to store files of HBase.
    * If the store is a mob one, the flusher flushes the MemStore into two places.
    * One is the store files of HBase, the other is the mob files.
    * <ol>
@@ -169,9 +169,6 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         hasMore = scanner.next(kvs, compactionKVMax);
         if (!kvs.isEmpty()) {
           for (Cell c : kvs) {
-            // If we know that this KV is going to be included always, then let us
-            // set its memstoreTS to 0. This will help us save space when writing to
-            // disk.
             KeyValue kv = KeyValueUtil.ensureKeyValue(c);
             if (kv.getValueLength() <= mobCellValueSizeThreshold || MobUtils.isMobReferenceCell(kv)
                 || kv.getTypeByte() != KeyValue.Type.Put.getCode()) {
