@@ -75,6 +75,7 @@ public class TestMobFileManager {
     HColumnDescriptor hcd = new HColumnDescriptor(FAMILY);
     hcd.setMaxVersions(4);
     hcd.setValue(MobConstants.IS_MOB, "true");
+    hcd.setValue(MobConstants.MOB_THRESHOLD, "3");
     init(conf, hcd);
   }
 
