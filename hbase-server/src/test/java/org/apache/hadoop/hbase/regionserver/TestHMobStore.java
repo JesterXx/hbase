@@ -115,6 +115,7 @@ public class TestHMobStore {
   throws IOException {
     hcd = new HColumnDescriptor(family);
     hcd.setValue(MobConstants.IS_MOB, "true");
+    hcd.setValue(MobConstants.MOB_THRESHOLD, "3");
     hcd.setMaxVersions(4);
     init(methodName, conf, hcd);
   }

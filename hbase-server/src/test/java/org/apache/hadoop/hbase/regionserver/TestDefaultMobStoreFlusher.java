@@ -143,6 +143,7 @@ public class TestDefaultMobStoreFlusher {
      HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(TN));
      HColumnDescriptor hcd = new HColumnDescriptor(family);
      hcd.setValue(MobConstants.IS_MOB, "true");
+     hcd.setValue(MobConstants.MOB_THRESHOLD, "3");
      hcd.setMaxVersions(4);
      desc.addFamily(hcd);
 

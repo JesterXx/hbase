@@ -119,7 +119,7 @@ public class TestCachedMobFile extends TestCase{
   @Test
   public void testReadKeyValue() throws Exception {
     FileSystem fs = FileSystem.get(conf);
-	Path testDir = FSUtils.getRootDir(conf);
+    Path testDir = FSUtils.getRootDir(conf);
     Path outputDir = new Path(new Path(testDir, TABLE), "familyname");
     HFileContext meta = new HFileContextBuilder().withBlockSize(8*1024).build();
     StoreFile.Writer writer = new StoreFile.WriterBuilder(conf, cacheConf, fs)

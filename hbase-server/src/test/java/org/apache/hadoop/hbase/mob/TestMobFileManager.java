@@ -35,8 +35,6 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.SmallTests;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.mob.MobConstants;
-import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -75,6 +73,7 @@ public class TestMobFileManager {
     HColumnDescriptor hcd = new HColumnDescriptor(FAMILY);
     hcd.setMaxVersions(4);
     hcd.setValue(MobConstants.IS_MOB, "true");
+    hcd.setValue(MobConstants.MOB_THRESHOLD, "3");
     init(conf, hcd);
   }
 
