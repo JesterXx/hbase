@@ -212,8 +212,12 @@ public class MobFileCache {
   public void closeFile(MobFile file) {
     IdLock.Entry lockEntry = null;
     try {
-      lockEntry = keyLock.getLockEntry(file.getName().hashCode());
-      file.close();
+      if (!isCacheEnabled) {
+        file.close();
+      } else {
+        lockEntry = keyLock.getLockEntry(file.getName().hashCode());
+        file.close();
+      }
     } catch (IOException e) {
       LOG.error("MobFileCache, Exception happen during close " + file.getName(), e);
     } finally {

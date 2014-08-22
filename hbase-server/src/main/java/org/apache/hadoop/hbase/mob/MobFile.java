@@ -57,7 +57,6 @@ public class MobFile {
   public StoreFileScanner getScanner() throws IOException {
     List<StoreFile> sfs = new ArrayList<StoreFile>();
     sfs.add(sf);
-    sf.createReader();
     List<StoreFileScanner> sfScanners = StoreFileScanner.getScannersForStoreFiles(sfs, false, true,
         false, null, sf.getMaxMemstoreTS());
 

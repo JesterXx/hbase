@@ -101,8 +101,12 @@ public class MobUtils {
    * @return True if the cell has a mob reference tag, false if it doesn't.
    */
   public static boolean isMobReferenceCell(Cell cell) {
-    List<Tag> tags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
-    return hasMobReferenceTag(tags);
+    if (cell.getTagsLength() > 0) {
+      List<Tag> tags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
+      return hasMobReferenceTag(tags);
+    } else {
+      return false;
+    }
   }
 
   /**
