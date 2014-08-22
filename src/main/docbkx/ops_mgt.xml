@@ -39,7 +39,48 @@
     xml:id="tools">
     <title>HBase Tools and Utilities</title>
 
-    <para>Here we list HBase tools for administration, analysis, fixup, and debugging.</para>
+    <para>HBase provides several tools for administration, analysis, and debugging of your cluster.
+      The entry-point to most of these tools is the <filename>bin/hbase</filename> command, though
+      some tools are available in the <filename>dev-support/</filename> directory.</para>
+    <para>To see usage instructions for <filename>bin/hbase</filename> command, run it with no
+      arguments, or with the <option>-h</option> argument. These are the usage instructions for
+      HBase 0.98.x. Some commands, such as <command>version</command>, <command>pe</command>,
+        <command>ltt</command>, <command>clean</command>, are not available in previous
+      versions.</para>
+    <screen>
+$ <userinput>bin/hbase</userinput>
+<![CDATA[Usage: hbase [<options>] <command> [<args>]]]>
+Options:
+  --config DIR    Configuration direction to use. Default: ./conf
+  --hosts HOSTS   Override the list in 'regionservers' file
+
+Commands:
+Some commands take arguments. Pass no args or -h for usage.
+  shell           Run the HBase shell
+  hbck            Run the hbase 'fsck' tool
+  hlog            Write-ahead-log analyzer
+  hfile           Store file analyzer
+  zkcli           Run the ZooKeeper shell
+  upgrade         Upgrade hbase
+  master          Run an HBase HMaster node
+  regionserver    Run an HBase HRegionServer node
+  zookeeper       Run a Zookeeper server
+  rest            Run an HBase REST server
+  thrift          Run the HBase Thrift server
+  thrift2         Run the HBase Thrift2 server
+  clean           Run the HBase clean up script
+  classpath       Dump hbase CLASSPATH
+  mapredcp        Dump CLASSPATH entries required by mapreduce
+  pe              Run PerformanceEvaluation
+  ltt             Run LoadTestTool
+  version         Print the version
+  CLASSNAME       Run the class named CLASSNAME      
+    </screen>
+    <para>Some of the tools and utilities below are Java classes which are passed directly to the
+        <filename>bin/hbase</filename> command, as referred to in the last line of the usage
+      instructions. Others, such as <command>hbase shell</command> (<xref linkend="shell"/>),
+        <command>hbase upgrade</command> (<xref linkend="upgrading"/>), and <command>hbase
+        thrift</command> (<xref linkend="thrift"/>), are documented elsewhere in this guide.</para>
     <section
       xml:id="canary">
       <title>Canary</title>
@@ -566,6 +607,32 @@ row10	c1	c2
       </para>
     </section>
 
+    <section>
+      <title><command>hbase clean</command></title>
+      <para>The <command>hbase clean</command> command cleans HBase data from ZooKeeper, HDFS, or
+        both. It is appropriate to use for testing. Run it with no options for usage instructions.
+        The <command>hbase clean</command> command was introduced in HBase 0.98.</para>
+      <screen>
+$ <userinput>bin/hbase clean</userinput>
+Usage: hbase clean (--cleanZk|--cleanHdfs|--cleanAll)
+Options:
+        --cleanZk   cleans hbase related data from zookeeper.
+        --cleanHdfs cleans hbase related data from hdfs.
+        --cleanAll  cleans hbase related data from both zookeeper and hdfs.        
+      </screen>
+    </section>
+    <section>
+      <title><command>hbase pe</command></title>
+      <para>The <command>hbase pe</command> command is a shortcut provided to run the
+          <code>org.apache.hadoop.hbase.PerformanceEvaluation</code> tool, which is used for
+        testing. The <command>hbase pe</command> command was introduced in HBase 0.98.</para>
+    </section>
+    <section>
+      <title><command>hbase ltt</command></title>
+      <para>The <command>hbase ltt</command> command is a shortcut provided to run the
+        <code>rg.apache.hadoop.hbase.util.LoadTestTool</code> utility, which is used for
+        testing. The <command>hbase ltt</command> command was introduced in HBase 0.98.</para>
+    </section>
   </section>
   <!--  tools -->
 
@@ -726,48 +793,138 @@ false
     <section
       xml:id="rolling">
       <title>Rolling Restart</title>
-      <para> You can also ask this script to restart a RegionServer after the shutdown AND move its
-        old regions back into place. The latter you might do to retain data locality. A primitive
-        rolling restart might be effected by running something like the following:</para>
-      <screen language="bourne">$ for i in `cat conf/regionservers|sort`; do ./bin/graceful_stop.sh --restart --reload --debug $i; done &amp;> /tmp/log.txt &amp;</screen>
-      <para> Tail the output of <filename>/tmp/log.txt</filename> to follow the scripts progress.
-        The above does RegionServers only. The script will also disable the load balancer before
-        moving the regions. You'd need to do the master update separately. Do it before you run the
-        above script. Here is a pseudo-script for how you might craft a rolling restart script: </para>
-      <orderedlist>
-        <listitem>
-          <para>Untar your release, make sure of its configuration and then rsync it across the
-            cluster. If this is 0.90.2, patch it with HBASE-3744 and HBASE-3756. </para>
-        </listitem>
-        <listitem>
-          <para>Run hbck to ensure the cluster consistent
-            <programlisting language="bourne">$ ./bin/hbase hbck</programlisting> Effect repairs if inconsistent.
-          </para>
-        </listitem>
-        <listitem>
-          <para>Restart the Master:
-            <programlisting language="bourne">$ ./bin/hbase-daemon.sh stop master; ./bin/hbase-daemon.sh start master</programlisting>
-          </para>
-        </listitem>
-        <listitem>
-          <para>Run the <filename>graceful_stop.sh</filename> script per RegionServer. For
-            example:</para>
-          <programlisting language="bourne">$ for i in `cat conf/regionservers|sort`; do ./bin/graceful_stop.sh --restart --reload --debug $i; done &amp;> /tmp/log.txt &amp;
-            </programlisting>
-          <para> If you are running thrift or rest servers on the RegionServer, pass --thrift or
-            --rest options (See usage for <filename>graceful_stop.sh</filename> script). </para>
-        </listitem>
-        <listitem>
-          <para>Restart the Master again. This will clear out dead servers list and reenable the
-            balancer. </para>
-        </listitem>
-        <listitem>
-          <para>Run hbck to ensure the cluster is consistent. </para>
-        </listitem>
-      </orderedlist>
-      <para>It is important to drain HBase regions slowly when restarting regionservers. Otherwise,
-        multiple regions go offline simultaneously as they are re-assigned to other nodes. Depending
-        on your usage patterns, this might not be desirable. </para>
+
+      <para>Some cluster configuration changes require either the entire cluster, or the
+          RegionServers, to be restarted in order to pick up the changes. In addition, rolling
+          restarts are supported for upgrading to a minor or maintenance release, and to a major
+          release if at all possible. See the release notes for release you want to upgrade to, to
+          find out about limitations to the ability to perform a rolling upgrade.</para>
+      <para>There are multiple ways to restart your cluster nodes, depending on your situation.
+        These methods are detailed below.</para>
+      <section>
+        <title>Using the <command>rolling-restart.sh</command> Script</title>
+        
+        <para>HBase ships with a script, <filename>bin/rolling-restart.sh</filename>, that allows
+          you to perform rolling restarts on the entire cluster, the master only, or the
+          RegionServers only. The script is provided as a template for your own script, and is not
+          explicitly tested. It requires password-less SSH login to be configured and assumes that
+          you have deployed using a tarball. The script requires you to set some environment
+          variables before running it. Examine the script and modify it to suit your needs.</para>
+        <example>
+          <title><filename>rolling-restart.sh</filename> General Usage</title>
+          <screen language="bourne">
+$ <userinput>./bin/rolling-restart.sh --help</userinput><![CDATA[
+Usage: rolling-restart.sh [--config <hbase-confdir>] [--rs-only] [--master-only] [--graceful] [--maxthreads xx]          
+        ]]></screen>
+        </example>
+        <variablelist>
+          <varlistentry>
+            <term>Rolling Restart on RegionServers Only</term>
+            <listitem>
+              <para>To perform a rolling restart on the RegionServers only, use the
+                  <code>--rs-only</code> option. This might be necessary if you need to reboot the
+                individual RegionServer or if you make a configuration change that only affects
+                RegionServers and not the other HBase processes.</para>
+              <para>If you need to restart only a single RegionServer, or if you need to do extra
+                actions during the restart, use the <filename>bin/graceful_stop.sh</filename>
+                command instead. See <xref linkend="rolling.restart.manual" />.</para>
+            </listitem>
+          </varlistentry>
+          <varlistentry>
+            <term>Rolling Restart on Masters Only</term>
+            <listitem>
+              <para>To perform a rolling restart on the active and backup Masters, use the
+                  <code>--master-only</code> option. You might use this if you know that your
+                configuration change only affects the Master and not the RegionServers, or if you
+                need to restart the server where the active Master is running.</para>
+              <para>If you are not running backup Masters, the Master is simply restarted. If you
+                are running backup Masters, they are all stopped before any are restarted, to avoid
+                a race condition in ZooKeeper to determine which is the new Master. First the main
+                Master is restarted, then the backup Masters are restarted. Directly after restart,
+                it checks for and cleans out any regions in transition before taking on its normal
+                workload.</para>
+            </listitem>
+          </varlistentry>
+          <varlistentry>
+            <term>Graceful Restart</term>
+            <listitem>
+              <para>If you specify the <code>--graceful</code> option, RegionServers are restarted
+                using the <filename>bin/graceful_stop.sh</filename> script, which moves regions off
+                a RegionServer before restarting it. This is safer, but can delay the
+                restart.</para>
+            </listitem>
+          </varlistentry>
+          <varlistentry>
+            <term>Limiting the Number of Threads</term>
+            <listitem>
+              <para>To limit the rolling restart to using only a specific number of threads, use the
+                  <code>--maxthreads</code> option.</para>
+            </listitem>
+          </varlistentry>
+        </variablelist>
+      </section>
+      <section xml:id="rolling.restart.manual">
+        <title>Manual Rolling Restart</title>
+        <para>To retain more control over the process, you may wish to manually do a rolling restart
+          across your cluster. This uses the <command>graceful-stop.sh</command> command <xref
+            linkend="decommission" />. In this method, you can restart each RegionServer
+          individually and then move its old regions back into place, retaining locality. If you
+          also need to restart the Master, you need to do it separately, and restart the Master
+          before restarting the RegionServers using this method. The following is an example of such
+          a command. You may need to tailor it to your environment. This script does a rolling
+          restart of RegionServers only. It disables the load balancer before moving the
+          regions.</para>
+        <screen><![CDATA[
+$ for i in `cat conf/regionservers|sort`; do ./bin/graceful_stop.sh --restart --reload --debug $i; done &> /tmp/log.txt &;     
+        ]]></screen>
+        <para>Monitor the output of the <filename>/tmp/log.txt</filename> file to follow the
+          progress of the script. </para>
+      </section>
+
+      <section>
+        <title>Logic for Crafting Your Own Rolling Restart Script</title>
+        <para>Use the following guidelines if you want to create your own rolling restart script.</para>
+        <orderedlist>
+          <listitem>
+            <para>Extract the new release, verify its configuration, and synchronize it to all nodes
+              of your cluster using <command>rsync</command>, <command>scp</command>, or another
+              secure synchronization mechanism.</para></listitem>
+          <listitem><para>Use the hbck utility to ensure that the cluster is consistent.</para>
+          <screen>
+$ ./bin/hbck            
+          </screen>
+            <para>Perform repairs if required. See <xref linkend="hbck" /> for details.</para>
+          </listitem>
+          <listitem><para>Restart the master first. You may need to modify these commands if your
+            new HBase directory is different from the old one, such as for an upgrade.</para>
+          <screen>
+$ ./bin/hbase-daemon.sh stop master; ./bin/hbase-daemon.sh start master            
+          </screen>
+          </listitem>
+          <listitem><para>Gracefully restart each RegionServer, using a script such as the
+            following, from the Master.</para>
+          <screen><![CDATA[
+$ for i in `cat conf/regionservers|sort`; do ./bin/graceful_stop.sh --restart --reload --debug $i; done &> /tmp/log.txt &            
+          ]]></screen>
+            <para>If you are running Thrift or REST servers, pass the --thrift or --rest options.
+              For other available options, run the <command>bin/graceful-stop.sh --help</command>
+              command.</para>
+            <para>It is important to drain HBase regions slowly when restarting multiple
+              RegionServers. Otherwise, multiple regions go offline simultaneously and must be
+              reassigned to other nodes, which may also go offline soon. This can negatively affect
+              performance. You can inject delays into the script above, for instance, by adding a
+              Shell command such as <command>sleep</command>. To wait for 5 minutes between each
+              RegionServer restart, modify the above script to the following:</para>
+            <screen><![CDATA[
+$ for i in `cat conf/regionservers|sort`; do ./bin/graceful_stop.sh --restart --reload --debug $i & sleep 5m; done &> /tmp/log.txt &            
+          ]]></screen>
+          </listitem>
+          <listitem><para>Restart the Master again, to clear out the dead servers list and re-enable
+          the load balancer.</para></listitem>
+          <listitem><para>Run the <command>hbck</command> utility again, to be sure the cluster is
+            consistent.</para></listitem>
+        </orderedlist>
+      </section>
     </section>
     <section
       xml:id="adding.new.node">
@@ -794,196 +951,132 @@ false
   </section>
   <!--  node mgt -->
 
-  <section
-    xml:id="hbase_metrics">
+  <section xml:id="hbase_metrics">
     <title>HBase Metrics</title>
-    <section
-      xml:id="metric_setup">
+    <para>HBase emits metrics which adhere to the <link
+        xlink:href="http://hadoop.apache.org/core/docs/current/api/org/apache/hadoop/metrics/package-summary.html"
+        >Hadoop metrics</link> API. Starting with HBase 0.95, HBase is configured to emit a default
+      set of metrics with a default sampling period of every 10 seconds. You can use HBase
+      metrics in conjunction with Ganglia. You can also filter which metrics are emitted and extend
+      the metrics framework to capture custom metrics appropriate for your environment.</para>
+    <section xml:id="metric_setup">
       <title>Metric Setup</title>
-      <para>See <link
-          xlink:href="http://hbase.apache.org/metrics.html">Metrics</link> for an introduction and
-        how to enable Metrics emission. Still valid for HBase 0.94.x. </para>
-      <para>For HBase 0.95.x and up, see <link
-          xlink:href="http://hadoop.apache.org/docs/current/api/org/apache/hadoop/metrics2/package-summary.html" />
+      <para>For HBase 0.95 and newer, HBase ships with a default metrics configuration, or
+          <firstterm>sink</firstterm>. This includes a wide variety of individual metrics, and emits
+        them every 10 seconds by default. To configure metrics for a given region server, edit the
+          <filename>conf/hadoop-metrics2-hbase.properties</filename> file. Restart the region server
+        for the changes to take effect.</para>
+      <para>To change the sampling rate for the default sink, edit the line beginning with
+          <literal>*.period</literal>. To filter which metrics are emitted or to extend the metrics
+        framework, see <link
+          xlink:href="http://hadoop.apache.org/docs/current/api/org/apache/hadoop/metrics2/package-summary.html"
+        />
       </para>
+      <note xml:id="rs_metrics_ganglia">
+        <title>HBase Metrics and Ganglia</title>
+        <para>By default, HBase emits a large number of metrics per region server. Ganglia may have
+          difficulty processing all these metrics. Consider increasing the capacity of the Ganglia
+          server or reducing the number of metrics emitted by HBase. See <link
+            xlink:href="http://hadoop.apache.org/docs/current/api/org/apache/hadoop/metrics2/package-summary.html#filtering"
+            >Metrics Filtering</link>.</para>
+      </note>
     </section>
-    <section
-      xml:id="rs_metrics_ganglia">
-      <title>Warning To Ganglia Users</title>
-      <para>Warning to Ganglia Users: by default, HBase will emit a LOT of metrics per RegionServer
-        which may swamp your installation. Options include either increasing Ganglia server
-        capacity, or configuring HBase to emit fewer metrics. </para>
+    <section>
+      <title>Disabling Metrics</title>
+      <para>To disable metrics for a region server, edit the
+          <filename>conf/hadoop-metrics2-hbase.properties</filename> file and comment out any
+        uncommented lines. Restart the region server for the changes to take effect.</para>
     </section>
-    <section
-      xml:id="rs_metrics">
-      <title>Most Important RegionServer Metrics</title>
-      <section
-        xml:id="hbase.regionserver.blockCacheHitCachingRatio">
-        <title><varname>blockCacheExpressCachingRatio (formerly
-          blockCacheHitCachingRatio)</varname></title>
-        <para>Block cache hit caching ratio (0 to 100). The cache-hit ratio for reads configured to
-          look in the cache (i.e., cacheBlocks=true). </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.callQueueLength">
-        <title><varname>callQueueLength</varname></title>
-        <para>Point in time length of the RegionServer call queue. If requests arrive faster than
-          the RegionServer handlers can process them they will back up in the callQueue.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.compactionQueueSize">
-        <title><varname>compactionQueueLength (formerly compactionQueueSize)</varname></title>
-        <para>Point in time length of the compaction queue. This is the number of Stores in the
-          RegionServer that have been targeted for compaction.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.flushQueueSize">
-        <title><varname>flushQueueSize</varname></title>
-        <para>Point in time number of enqueued regions in the MemStore awaiting flush.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.hdfsBlocksLocalityIndex">
-        <title><varname>hdfsBlocksLocalityIndex</varname></title>
-        <para>Point in time percentage of HDFS blocks that are local to this RegionServer. The
-          higher the better. </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.memstoreSizeMB">
-        <title><varname>memstoreSizeMB</varname></title>
-        <para>Point in time sum of all the memstore sizes in this RegionServer (MB). Watch for this
-          nearing or exceeding the configured high-watermark for MemStore memory in the
-          RegionServer. </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.regions">
-        <title><varname>numberOfOnlineRegions</varname></title>
-        <para>Point in time number of regions served by the RegionServer. This is an important
-          metric to track for RegionServer-Region density. </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.readRequestsCount">
-        <title><varname>readRequestsCount</varname></title>
-        <para>Number of read requests for this RegionServer since startup. Note: this is a 32-bit
-          integer and can roll. </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.slowHLogAppendCount">
-        <title><varname>slowHLogAppendCount</varname></title>
-        <para>Number of slow HLog append writes for this RegionServer since startup, where "slow" is
-          > 1 second. This is a good "canary" metric for HDFS. </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.usedHeapMB">
-        <title><varname>usedHeapMB</varname></title>
-        <para>Point in time amount of memory used by the RegionServer (MB).</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.writeRequestsCount">
-        <title><varname>writeRequestsCount</varname></title>
-        <para>Number of write requests for this RegionServer since startup. Note: this is a 32-bit
-          integer and can roll. </para>
-      </section>
 
+    <section>
+      <title>Discovering Available Metrics</title>
+      <para>Rather than listing each metric which HBase emits by default, you can browse through the
+        available metrics, either as a JSON output or via JMX. At this time, the JSON output does
+        not include the description field which is included in the JMX view. Different metrics are
+        exposed for the Master process and each region server process.</para>
+      <procedure>
+        <title>Access a JSON Output of Available Metrics</title>
+        <step>
+          <para>After starting HBase, access the region server's web UI, at
+              <literal>http://localhost:60030</literal> by default.</para>
+        </step>
+        <step>
+          <para>Click the <guilabel>Metrics Dump</guilabel> link near the top. The metrics for the region server are
+            presented as a dump of the JMX bean in JSON format.</para>
+        </step>
+        <step>
+          <para>To view metrics for the Master, connect to the Master's web UI instead (defaults to
+              <literal>http://localhost:60010</literal>) and click its <guilabel>Metrics
+              Dump</guilabel> link.</para>
+        </step>
+      </procedure>
+
+      <procedure>
+        <title>Browse the JMX Output of Available Metrics</title>
+        <para>You can use many different tools to view JMX content by browsing MBeans. This
+          procedure uses <command>jvisualvm</command>, which is an application usually available in the JDK.
+            </para>
+        <step>
+          <para>Start HBase, if it is not already running.</para>
+        </step>
+        <step>
+          <para>Run the command <command>jvisualvm</command> command on a host with a GUI display.
+            You can launch it from the command line or another method appropriate for your operating
+            system.</para>
+        </step>
+        <step>
+          <para>Be sure the <guilabel>VisualVM-MBeans</guilabel> plugin is installed. Browse to <menuchoice>
+              <guimenu>Tools</guimenu>
+              <guimenuitem>Plugins</guimenuitem>
+            </menuchoice>. Click <guilabel>Installed</guilabel> and check whether the plugin is
+            listed. If not, click <guilabel>Available Plugins</guilabel>, select it, and click
+              <guibutton>Install</guibutton>. When finished, click
+            <guibutton>Close</guibutton>.</para>
+        </step>
+        <step>
+          <para>To view details for a given HBase process, double-click the process in the
+              <guilabel>Local</guilabel> sub-tree in the left-hand panel. A detailed view opens in
+            the right-hand panel. Click the <guilabel>MBeans</guilabel> tab which appears as a tab
+            in the top of the right-hand panel.</para>
+        </step>
+        <step>
+          <para>To access the HBase metrics, navigate to the appropriate sub-bean:</para>
+          <itemizedlist>
+            <listitem>
+              <para>Master: <menuchoice>
+                  <guimenu>Hadoop</guimenu>
+                  <guisubmenu>HBase</guisubmenu>
+                  <guisubmenu>Master</guisubmenu>
+                  <guisubmenu>Server</guisubmenu>
+                </menuchoice></para>
+            </listitem>
+            <listitem>
+              <para>RegionServer: <menuchoice>
+                  <guimenu>Hadoop</guimenu>
+                  <guisubmenu>HBase</guisubmenu>
+                  <guisubmenu>RegionServer</guisubmenu>
+                  <guisubmenu>Server</guisubmenu>
+                </menuchoice></para>
+            </listitem>
+          </itemizedlist>
+        </step>
+        <step>
+          <para>The name of each metric and its current value is displayed in the
+              <guilabel>Attributes</guilabel> tab. For a view which includes more details, including
+            the description of each attribute, click the <guilabel>Metadata</guilabel> tab.</para>
+        </step>
+      </procedure>
     </section>
-    <section
-      xml:id="rs_metrics_other">
-      <title>Other RegionServer Metrics</title>
-      <section
-        xml:id="hbase.regionserver.blockCacheCount">
-        <title><varname>blockCacheCount</varname></title>
-        <para>Point in time block cache item count in memory. This is the number of blocks of
-          StoreFiles (HFiles) in the cache.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.blockCacheEvictedCount">
-        <title><varname>blockCacheEvictedCount</varname></title>
-        <para>Number of blocks that had to be evicted from the block cache due to heap size
-          constraints by RegionServer since startup.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.blockCacheFree">
-        <title><varname>blockCacheFreeMB</varname></title>
-        <para>Point in time block cache memory available (MB).</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.blockCacheHitCount">
-        <title><varname>blockCacheHitCount</varname></title>
-        <para>Number of blocks of StoreFiles (HFiles) read from the cache by RegionServer since
-          startup.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.blockCacheHitRatio">
-        <title><varname>blockCacheHitRatio</varname></title>
-        <para>Block cache hit ratio (0 to 100) from RegionServer startup. Includes all read
-          requests, although those with cacheBlocks=false will always read from disk and be counted
-          as a "cache miss", which means that full-scan MapReduce jobs can affect this metric
-          significantly.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.blockCacheMissCount">
-        <title><varname>blockCacheMissCount</varname></title>
-        <para>Number of blocks of StoreFiles (HFiles) requested but not read from the cache from
-          RegionServer startup.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.blockCacheSize">
-        <title><varname>blockCacheSizeMB</varname></title>
-        <para>Point in time block cache size in memory (MB). i.e., memory in use by the
-          BlockCache</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.fsPreadLatency">
-        <title><varname>fsPreadLatency*</varname></title>
-        <para>There are several filesystem positional read latency (ms) metrics, all measured from
-          RegionServer startup.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.fsReadLatency">
-        <title><varname>fsReadLatency*</varname></title>
-        <para>There are several filesystem read latency (ms) metrics, all measured from RegionServer
-          startup. The issue with interpretation is that ALL reads go into this metric (e.g.,
-          single-record Gets, full table Scans), including reads required for compactions. This
-          metric is only interesting "over time" when comparing major releases of HBase or your own
-          code.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.fsWriteLatency">
-        <title><varname>fsWriteLatency*</varname></title>
-        <para>There are several filesystem write latency (ms) metrics, all measured from
-          RegionServer startup. The issue with interpretation is that ALL writes go into this metric
-          (e.g., single-record Puts, full table re-writes due to compaction). This metric is only
-          interesting "over time" when comparing major releases of HBase or your own code.</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.stores">
-        <title><varname>NumberOfStores</varname></title>
-        <para>Point in time number of Stores open on the RegionServer. A Store corresponds to a
-          ColumnFamily. For example, if a table (which contains the column family) has 3 regions on
-          a RegionServer, there will be 3 stores open for that column family. </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.storeFiles">
-        <title><varname>NumberOfStorefiles</varname></title>
-        <para>Point in time number of StoreFiles open on the RegionServer. A store may have more
-          than one StoreFile (HFile).</para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.requests">
-        <title><varname>requestsPerSecond</varname></title>
-        <para>Point in time number of read and write requests. Requests correspond to RegionServer
-          RPC calls, thus a single Get will result in 1 request, but a Scan with caching set to 1000
-          will result in 1 request for each 'next' call (i.e., not each row). A bulk-load request
-          will constitute 1 request per HFile. This metric is less interesting than
-          readRequestsCount and writeRequestsCount in terms of measuring activity due to this metric
-          being periodic. </para>
-      </section>
-      <section
-        xml:id="hbase.regionserver.storeFileIndexSizeMB">
-        <title><varname>storeFileIndexSizeMB</varname></title>
-        <para>Point in time sum of all the StoreFile index sizes in this RegionServer (MB)</para>
-      </section>
+    <section xml:id="rs_metrics">
+      <title>Most Important RegionServer Metrics</title>
+      <para>Previously, this section contained a list of the most important RegionServer metrics.
+        However, the list was extremely out of date. In some cases, the name of a given metric has
+        changed. In other cases, the metric seems to no longer be exposed. An effort is underway to
+        create automatic documentation for each metric based upon information pulled from its
+        implementation.</para>
     </section>
-  </section>
+  </section>      
+
 
   <section
     xml:id="ops.monitoring">
@@ -1098,6 +1191,64 @@ false
           is simply a very large (on the order of 100MB) multiput, as we can tell by the "vlen," or
           value length, fields of each put in the multiPut. </para>
       </section>
+    </section>
+    <section>
+      <title>Block Cache Monitoring</title>
+      <para>Starting with HBase 0.98, the HBase Web UI includes the ability to monitor and report on
+        the performance of the block cache. To view the block cache reports, click <menuchoice>
+          <guimenu>Tasks</guimenu>
+          <guisubmenu>Show Non-RPC Tasks</guisubmenu>
+          <guimenuitem>Block Cache</guimenuitem>
+        </menuchoice>. Following are a few examples of the reporting capabilities.</para>
+      <figure>
+        <title>Basic Info</title>
+        <mediaobject>
+          <imageobject>
+            <imagedata fileref="bc_basic.png" width="100%"/>
+          </imageobject>
+          <textobject>
+            <para>Shows the cache implementation</para>
+          </textobject>
+        </mediaobject>
+      </figure>
+      <figure>
+        <title>Config</title>
+        <mediaobject>
+          <imageobject>
+            <imagedata fileref="bc_config.png" width="100%"/>
+          </imageobject>
+          <textobject>
+            <para>Shows all cache configuration options.</para>
+          </textobject>
+        </mediaobject>
+      </figure>
+      <figure>
+        <title>Stats</title>
+        <mediaobject>
+          <imageobject>
+            <imagedata fileref="bc_stats.png" width="100%"/>
+          </imageobject>
+          <textobject>
+            <para>Shows statistics about the performance of the cache.</para>
+          </textobject>
+        </mediaobject>
+      </figure>
+      <figure>
+        <title>L1 and L2</title>
+        <mediaobject>
+          <imageobject>
+            <imagedata fileref="bc_l1.png" width="100%"/>
+          </imageobject>
+          <imageobject>
+            <imagedata fileref="bc_l2_buckets.png" width="100%"/>
+          </imageobject>
+          <textobject>
+            <para>Shows information about the L1 and L2 caches.</para>
+          </textobject>
+        </mediaobject>
+      </figure>
+      <para>This is not an exhaustive list of all the screens and reports available. Have a look in
+        the Web UI.</para>
     </section>
 
 
@@ -1702,6 +1853,25 @@ false
 $ ./bin/hbase shell
 hbase> snapshot 'myTable', 'myTableSnapshot-122112'
         </screen>
+      <formalpara>
+        <title>Take a Snapshot Without Flushing</title>
+        <para>The default behavior is to perform a flush of data in memory before the snapshot is
+          taken. This means that data in memory is included in the snapshot. In most cases, this is
+          the desired behavior. However, if your set-up can tolerate data in memory being excluded
+          from the snapshot, you can use the <option>SKIP_FLUSH</option> option of the
+            <command>snapshot</command> command to disable and flushing while taking the
+          snapshot.</para>
+      </formalpara>
+      <screen>hbase> snapshot 'mytable', 'snapshot123', {SKIP_FLUSH => true}</screen>
+      <warning>
+        <para>There is no way to determine or predict whether a very concurrent insert or update
+          will be included in a given snapshot, whether flushing is enabled or disabled. A snapshot
+          is only a representation of a table during a window of time. The amount of time the
+          snapshot operation will take to reach each Region Server may vary from a few seconds to a
+          minute, depending on the resource load and speed of the hardware or network, among other
+          factors. There is also no way to know whether a given insert or update is in memory or has
+          been flushed.</para>
+      </warning>
     </section>
     <section
       xml:id="ops.snapshots.list">

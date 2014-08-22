@@ -156,13 +156,7 @@ public class ServerShutdownHandler extends EventHandler {
       while (!this.server.isStopped()) {
         try {
           server.getMetaTableLocator().waitMetaRegionLocation(server.getZooKeeper());
-          // Skip getting user regions if the server is stopped.
-          if (!this.server.isStopped()) {
-            hris = am.getRegionStates().getServerRegions(serverName);
-            if (hris != null) {
-              hris.remove(HRegionInfo.FIRST_META_REGIONINFO);
-            }
-          }
+          hris = am.getRegionStates().getServerRegions(serverName);
           break;
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
@@ -244,7 +238,7 @@ public class ServerShutdownHandler extends EventHandler {
               }
               toAssignRegions.add(hri);
             } else if (rit != null) {
-              if (rit.isPendingCloseOrClosing()
+              if ((rit.isPendingCloseOrClosing() || rit.isOffline())
                   && am.getTableStateManager().isTableState(hri.getTable(),
                   ZooKeeperProtos.Table.State.DISABLED, ZooKeeperProtos.Table.State.DISABLING) ||
                   am.getReplicasToClose().contains(hri)) {

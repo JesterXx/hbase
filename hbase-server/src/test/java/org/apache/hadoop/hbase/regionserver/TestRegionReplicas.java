@@ -18,6 +18,7 @@
 
 package org.apache.hadoop.hbase.regionserver;
 
+import static org.apache.hadoop.hbase.regionserver.TestRegionServerNoMaster.*;
 import java.io.IOException;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -32,16 +33,15 @@ import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.MediumTests;
-import org.apache.hadoop.hbase.NotServingRegionException;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TestMetaTableAccessor;
+import org.apache.hadoop.hbase.client.Consistency;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.RequestConverter;
-import org.apache.hadoop.hbase.protobuf.generated.AdminProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Threads;
@@ -101,53 +101,9 @@ public class TestRegionReplicas {
     return HTU.getMiniHBaseCluster().getRegionServer(0);
   }
 
-  private void openRegion(HRegionInfo hri) throws Exception {
-    // first version is '0'
-    AdminProtos.OpenRegionRequest orr = RequestConverter.buildOpenRegionRequest(getRS().getServerName(), hri, null, null);
-    AdminProtos.OpenRegionResponse responseOpen = getRS().getRSRpcServices().openRegion(null, orr);
-    Assert.assertTrue(responseOpen.getOpeningStateCount() == 1);
-    Assert.assertTrue(responseOpen.getOpeningState(0).
-        equals(AdminProtos.OpenRegionResponse.RegionOpeningState.OPENED));
-    checkRegionIsOpened(hri.getEncodedName());
-  }
-
-  private void closeRegion(HRegionInfo hri) throws Exception {
-    AdminProtos.CloseRegionRequest crr = RequestConverter.buildCloseRegionRequest(getRS().getServerName(),
-        hri.getEncodedName());
-    AdminProtos.CloseRegionResponse responseClose = getRS().getRSRpcServices().closeRegion(null, crr);
-    Assert.assertTrue(responseClose.getClosed());
-
-    checkRegionIsClosed(hri.getEncodedName());
-  }
-
-  private void checkRegionIsOpened(String encodedRegionName) throws Exception {
-
-    while (!getRS().getRegionsInTransitionInRS().isEmpty()) {
-      Thread.sleep(1);
-    }
-
-    Assert.assertTrue(getRS().getRegionByEncodedName(encodedRegionName).isAvailable());
-  }
-
-
-  private void checkRegionIsClosed(String encodedRegionName) throws Exception {
-
-    while (!getRS().getRegionsInTransitionInRS().isEmpty()) {
-      Thread.sleep(1);
-    }
-
-    try {
-      Assert.assertFalse(getRS().getRegionByEncodedName(encodedRegionName).isAvailable());
-    } catch (NotServingRegionException expected) {
-      // That's how it work: if the region is closed we have an exception.
-    }
-
-    // We don't delete the znode here, because there is not always a znode.
-  }
-
   @Test(timeout = 60000)
   public void testOpenRegionReplica() throws Exception {
-    openRegion(hriSecondary);
+    openRegion(HTU, getRS(), hriSecondary);
     try {
       //load some data to primary
       HTU.loadNumericRows(table, f, 0, 1000);
@@ -156,14 +112,14 @@ public class TestRegionReplicas {
       Assert.assertEquals(1000, HTU.countRows(table));
     } finally {
       HTU.deleteNumericRows(table, f, 0, 1000);
-      closeRegion(hriSecondary);
+      closeRegion(HTU, getRS(), hriSecondary);
     }
   }
 
   /** Tests that the meta location is saved for secondary regions */
   @Test(timeout = 60000)
   public void testRegionReplicaUpdatesMetaLocation() throws Exception {
-    openRegion(hriSecondary);
+    openRegion(HTU, getRS(), hriSecondary);
     HTable meta = null;
     try {
       meta = new HTable(HTU.getConfiguration(), TableName.META_TABLE_NAME);
@@ -171,7 +127,7 @@ public class TestRegionReplicas {
         , getRS().getServerName(), -1, 1, false);
     } finally {
       if (meta != null ) meta.close();
-      closeRegion(hriSecondary);
+      closeRegion(HTU, getRS(), hriSecondary);
     }
   }
 
@@ -185,7 +141,7 @@ public class TestRegionReplicas {
       // flush so that region replica can read
       getRS().getRegionByEncodedName(hriPrimary.getEncodedName()).flushcache();
 
-      openRegion(hriSecondary);
+      openRegion(HTU, getRS(), hriSecondary);
 
       // first try directly against region
       HRegion region = getRS().getFromOnlineRegions(hriSecondary.getEncodedName());
@@ -194,7 +150,32 @@ public class TestRegionReplicas {
       assertGetRpc(hriSecondary, 42, true);
     } finally {
       HTU.deleteNumericRows(table, HConstants.CATALOG_FAMILY, 0, 1000);
-      closeRegion(hriSecondary);
+      closeRegion(HTU, getRS(), hriSecondary);
+    }
+  }
+
+  @Test(timeout = 60000)
+  public void testGetOnTargetRegionReplica() throws Exception {
+    try {
+      //load some data to primary
+      HTU.loadNumericRows(table, f, 0, 1000);
+      // assert that we can read back from primary
+      Assert.assertEquals(1000, HTU.countRows(table));
+      // flush so that region replica can read
+      getRS().getRegionByEncodedName(hriPrimary.getEncodedName()).flushcache();
+
+      openRegion(HTU, getRS(), hriSecondary);
+
+      // try directly Get against region replica
+      byte[] row = Bytes.toBytes(String.valueOf(42));
+      Get get = new Get(row);
+      get.setConsistency(Consistency.TIMELINE);
+      get.setReplicaId(1);
+      Result result = table.get(get);
+      Assert.assertArrayEquals(row, result.getValue(f, null));
+    } finally {
+      HTU.deleteNumericRows(table, HConstants.CATALOG_FAMILY, 0, 1000);
+      closeRegion(HTU, getRS(), hriSecondary);
     }
   }
 
@@ -210,7 +191,8 @@ public class TestRegionReplicas {
   }
 
   // build a mock rpc
-  private void assertGetRpc(HRegionInfo info, int value, boolean expect) throws IOException, ServiceException {
+  private void assertGetRpc(HRegionInfo info, int value, boolean expect)
+      throws IOException, ServiceException {
     byte[] row = Bytes.toBytes(String.valueOf(value));
     Get get = new Get(row);
     ClientProtos.GetRequest getReq = RequestConverter.buildGetRequest(info.getRegionName(), get);
@@ -233,13 +215,14 @@ public class TestRegionReplicas {
     // enable store file refreshing
     final int refreshPeriod = 2000; // 2 sec
     HTU.getConfiguration().setInt("hbase.hstore.compactionThreshold", 100);
-    HTU.getConfiguration().setInt(StorefileRefresherChore.REGIONSERVER_STOREFILE_REFRESH_PERIOD, refreshPeriod);
+    HTU.getConfiguration().setInt(StorefileRefresherChore.REGIONSERVER_STOREFILE_REFRESH_PERIOD,
+      refreshPeriod);
     // restart the region server so that it starts the refresher chore
     restartRegionServer();
 
     try {
       LOG.info("Opening the secondary region " + hriSecondary.getEncodedName());
-      openRegion(hriSecondary);
+      openRegion(HTU, getRS(), hriSecondary);
 
       //load some data to primary
       LOG.info("Loading data to primary region");
@@ -295,7 +278,7 @@ public class TestRegionReplicas {
 
     } finally {
       HTU.deleteNumericRows(table, HConstants.CATALOG_FAMILY, 0, 1000);
-      closeRegion(hriSecondary);
+      closeRegion(HTU, getRS(), hriSecondary);
     }
   }
 
@@ -312,7 +295,7 @@ public class TestRegionReplicas {
     final int startKey = 0, endKey = 1000;
 
     try {
-      openRegion(hriSecondary);
+      openRegion(HTU, getRS(), hriSecondary);
 
       //load some data to primary so that reader won't fail
       HTU.loadNumericRows(table, f, startKey, endKey);
@@ -376,13 +359,13 @@ public class TestRegionReplicas {
               // whether to do a close and open
               if (random.nextInt(10) == 0) {
                 try {
-                  closeRegion(hriSecondary);
+                  closeRegion(HTU, getRS(), hriSecondary);
                 } catch (Exception ex) {
                   LOG.warn("Failed closing the region " + hriSecondary + " "  + StringUtils.stringifyException(ex));
                   exceptions[2].compareAndSet(null, ex);
                 }
                 try {
-                  openRegion(hriSecondary);
+                  openRegion(HTU, getRS(), hriSecondary);
                 } catch (Exception ex) {
                   LOG.warn("Failed opening the region " + hriSecondary + " "  + StringUtils.stringifyException(ex));
                   exceptions[2].compareAndSet(null, ex);
@@ -417,7 +400,7 @@ public class TestRegionReplicas {
 
     } finally {
       HTU.deleteNumericRows(table, HConstants.CATALOG_FAMILY, startKey, endKey);
-      closeRegion(hriSecondary);
+      closeRegion(HTU, getRS(), hriSecondary);
     }
   }
 }

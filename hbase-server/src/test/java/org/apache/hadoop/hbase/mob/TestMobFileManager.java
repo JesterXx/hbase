@@ -27,21 +27,25 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HBaseTestCase;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.SmallTests;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.mob.MobConstants;
+import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSUtils;
+import org.junit.Assert;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 @Category(SmallTests.class)
-public class TestMobFileManager extends HBaseTestCase {
+public class TestMobFileManager {
   public static final Log LOG = LogFactory.getLog(TestMobFileManager.class);
 
   private MobFileManager mobFileManager;
@@ -63,24 +67,24 @@ public class TestMobFileManager extends HBaseTestCase {
   private final byte[] QF2 = Bytes.toBytes("qf2");
   private final byte[] QF3 = Bytes.toBytes("qf3");
 
-  private void init(String methodName) throws IOException {
-    init(methodName, HBaseConfiguration.create());
+  private void init() throws IOException {
+    init(HBaseConfiguration.create());
   }
 
-  private void init(String methodName, Configuration conf) throws IOException {
+  private void init(Configuration conf) throws IOException {
     HColumnDescriptor hcd = new HColumnDescriptor(FAMILY);
     hcd.setMaxVersions(4);
     hcd.setValue(MobConstants.IS_MOB, "true");
-    init(methodName, conf, hcd);
+    init(conf, hcd);
   }
 
-  private void init(String methodName, Configuration conf, HColumnDescriptor hcd)
+  private void init(Configuration conf, HColumnDescriptor hcd)
       throws IOException {
     // Setting up a Store
-    Path basedir = this.testDir;
+    Path basedir = FSUtils.getRootDir(conf);
     fs = FileSystem.get(conf);
 
-    HTableDescriptor htd = new HTableDescriptor(TABLE);
+    HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(TABLE));
     htd.addFamily(hcd);
     Path homePath = new Path(basedir, Bytes.toString(TABLE) + Path.SEPARATOR
         + Bytes.toString(FAMILY));
@@ -92,7 +96,7 @@ public class TestMobFileManager extends HBaseTestCase {
     KeyValue key3 = new KeyValue(ROW2, FAMILY, QF3, 1, VALUE2);
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
-    HRegionInfo region = new HRegionInfo();
+    HRegionInfo region = new HRegionInfo(TableName.valueOf(TABLE));
     StoreFile.Writer mobWriter = mobFileManager.createWriterInTmp(currentDate,
         maxKeyCount, hcd.getCompactionCompression(), region.getStartKey());
     mobFilePath = mobWriter.getPath();
@@ -119,31 +123,33 @@ public class TestMobFileManager extends HBaseTestCase {
 
   @Test
   public void testCommitFile() throws Exception {
-    init(getName());
+    init();
     String targetPathName = MobUtils.formatDate(new Date());
     Path targetPath = new Path(mobFileManager.getPath(), (targetPathName
         + Path.SEPARATOR + mobFilePath.getName()));
-    fs.delete(targetPath);
-    assertFalse(fs.exists(targetPath));
+    fs.delete(targetPath, true);
+    Assert.assertFalse(fs.exists(targetPath));
     //commit file
     mobFileManager.commitFile(mobFilePath, targetPath);
-    assertTrue(fs.exists(targetPath));
+    Assert.assertTrue(fs.exists(targetPath));
   }
 
   @Test
-  @SuppressWarnings("deprecation")
   public void testResolve() throws Exception {
-    init(getName());
+    init();
     String targetPathName = MobUtils.formatDate(currentDate);
     Path targetPath = new Path(mobFileManager.getPath(), targetPathName);
     mobFileManager.commitFile(mobFilePath, targetPath);
     //resolve
-    Cell resultKey1 = mobFileManager.resolve(seekKey1, false);
-    Cell resultKey2 = mobFileManager.resolve(seekKey2, false);
-    Cell resultKey3 = mobFileManager.resolve(seekKey3, false);
+    Cell resultCell1 = mobFileManager.resolve(seekKey1, false);
+    Cell resultCell2 = mobFileManager.resolve(seekKey2, false);
+    Cell resultCell3 = mobFileManager.resolve(seekKey3, false);
     //compare
-    assertEquals(VALUE, resultKey1.getValue());
-    assertEquals(VALUE, resultKey2.getValue());
-    assertEquals(VALUE2, resultKey3.getValue());
+    Assert.assertEquals(Bytes.toString(VALUE),
+        Bytes.toString(CellUtil.cloneValue(resultCell1)));
+    Assert.assertEquals(Bytes.toString(VALUE),
+        Bytes.toString(CellUtil.cloneValue(resultCell2)));
+    Assert.assertEquals(Bytes.toString(VALUE2),
+        Bytes.toString(CellUtil.cloneValue(resultCell3)));
   }
 }

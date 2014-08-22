@@ -131,8 +131,8 @@
       <name>Andrew Purtell</name>
       <email>apurtell@apache.org</email>
       <timezone>-8</timezone>
-      <organization>Intel</organization>
-      <organizationUrl>http://www.intel.com</organizationUrl>
+      <organization>Salesforce.com</organization>
+      <organizationUrl>http://www.salesforce.com/</organizationUrl>
     </developer>
     <developer>
       <id>anoopsamjohn</id>
@@ -307,8 +307,8 @@
       <name>Ryan Rawson</name>
       <email>rawson@apache.org</email>
       <timezone>-8</timezone>
-      <organization>DrawnToScale</organization>
-      <organizationUrl>http://drawntoscale.com/</organizationUrl>
+      <organization>WANdisco</organization>
+      <organizationUrl>http://www.wandisco.com/</organizationUrl>
     </developer>
     <developer>
       <id>sershe</id>
@@ -790,7 +790,7 @@
         </dependencies>
         <configuration>
           <highlightSource>1</highlightSource>
-          <imgSrcPath>${basedir}/src/main/site/resources/images/</imgSrcPath>
+          <imgSrcPath>images/</imgSrcPath>
           <sourceDirectory>${basedir}/src/main/docbkx</sourceDirectory>
           <xincludeSupported>true</xincludeSupported>
           <useIdAsFilename>true</useIdAsFilename>

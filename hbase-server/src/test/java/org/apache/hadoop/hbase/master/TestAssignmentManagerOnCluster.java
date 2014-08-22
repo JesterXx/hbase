@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.master;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -57,6 +58,7 @@ import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.coprocessor.RegionObserver;
 import org.apache.hadoop.hbase.master.RegionState.State;
 import org.apache.hadoop.hbase.master.balancer.StochasticLoadBalancer;
+import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.RegionStateTransition.TransitionCode;
 import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -100,6 +102,51 @@ public class TestAssignmentManagerOnCluster {
   }
 
   /**
+   * This tests restarting meta regionserver
+   */
+  @Test (timeout=180000)
+  public void testRestartMetaRegionServer() throws Exception {
+    MiniHBaseCluster cluster = TEST_UTIL.getHBaseCluster();
+    boolean stoppedARegionServer = false;
+    try {
+      HMaster master = cluster.getMaster();
+      RegionStates regionStates = master.getAssignmentManager().getRegionStates();
+      ServerName metaServerName = regionStates.getRegionServerOfRegion(
+        HRegionInfo.FIRST_META_REGIONINFO);
+      if (master.getServerName().equals(metaServerName)) {
+        // Move meta off master
+        metaServerName = cluster.getLiveRegionServerThreads()
+          .get(0).getRegionServer().getServerName();
+        master.move(HRegionInfo.FIRST_META_REGIONINFO.getEncodedNameAsBytes(),
+          Bytes.toBytes(metaServerName.getServerName()));
+        TEST_UTIL.waitUntilNoRegionsInTransition(60000);
+      }
+      assertNotEquals("Meta should be moved off master",
+        metaServerName, master.getServerName());
+      cluster.killRegionServer(metaServerName);
+      stoppedARegionServer = true;
+      cluster.waitForRegionServerToStop(metaServerName, 60000);
+
+      // Wait for SSH to finish
+      final ServerManager serverManager = master.getServerManager();
+      TEST_UTIL.waitFor(120000, 200, new Waiter.Predicate<Exception>() {
+        @Override
+        public boolean evaluate() throws Exception {
+          return !serverManager.areDeadServersInProgress();
+        }
+      });
+
+      // Now, make sure meta is assigned
+      assertTrue("Meta should be assigned",
+        regionStates.isRegionOnline(HRegionInfo.FIRST_META_REGIONINFO));
+    } finally {
+      if (stoppedARegionServer) {
+        cluster.startRegionServer();
+      }
+    }
+  }
+
+  /**
    * This tests region assignment
    */
   @Test (timeout=60000)
@@ -136,7 +183,7 @@ public class TestAssignmentManagerOnCluster {
       TEST_UTIL.deleteTable(Bytes.toBytes(table));
     }
   }
-
+  
   /**
    * This tests region assignment on a simulated restarted server
    */
@@ -381,7 +428,7 @@ public class TestAssignmentManagerOnCluster {
       assertEquals(RegionState.State.FAILED_CLOSE, state.getState());
 
       MyRegionObserver.preCloseEnabled.set(false);
-      am.unassign(hri, true);
+      am.unassign(hri);
 
       // region is closing now, will be re-assigned automatically.
       // now, let's forcefully assign it again. it should be
@@ -428,7 +475,7 @@ public class TestAssignmentManagerOnCluster {
       assertEquals(RegionState.State.FAILED_CLOSE, state.getState());
 
       MyRegionObserver.preCloseEnabled.set(false);
-      am.unassign(hri, true);
+      am.unassign(hri);
 
       // region may still be assigned now since it's closing,
       // let's check if it's assigned after it's out of transition
@@ -600,14 +647,13 @@ public class TestAssignmentManagerOnCluster {
       MyRegionObserver.postCloseEnabled.set(true);
       am.unassign(hri);
       // Now region should pending_close or closing
-      // Unassign it again forcefully so that we can trigger already
+      // Unassign it again so that we can trigger already
       // in transition exception. This test is to make sure this scenario
       // is handled properly.
       am.server.getConfiguration().setLong(
         AssignmentManager.ALREADY_IN_TRANSITION_WAITTIME, 1000);
-      am.unassign(hri, true);
-      RegionState state = am.getRegionStates().getRegionState(hri);
-      assertEquals(RegionState.State.FAILED_CLOSE, state.getState());
+      am.getRegionStates().updateRegionState(hri, RegionState.State.FAILED_CLOSE);
+      am.unassign(hri);
 
       // Let region closing move ahead. The region should be closed
       // properly and re-assigned automatically
@@ -751,7 +797,7 @@ public class TestAssignmentManagerOnCluster {
       assertTrue(state.isFailedClose());
 
       // You can't unassign a dead region before SSH either
-      am.unassign(hri, true);
+      am.unassign(hri);
       assertTrue(state.isFailedClose());
 
       // Enable SSH so that log can be split
@@ -808,7 +854,7 @@ public class TestAssignmentManagerOnCluster {
       assertTrue(regionStates.isRegionOffline(hri));
 
       // You can't unassign a disabled region either
-      am.unassign(hri, true);
+      am.unassign(hri);
       assertTrue(regionStates.isRegionOffline(hri));
     } finally {
       TEST_UTIL.deleteTable(table);
@@ -864,7 +910,7 @@ public class TestAssignmentManagerOnCluster {
       assertEquals(oldServerName, regionStates.getRegionServerOfRegion(hri));
 
       // Try to unassign the dead region before SSH
-      am.unassign(hri, false);
+      am.unassign(hri);
       // The region should be moved to offline since the server is dead
       RegionState state = regionStates.getRegionState(hri);
       assertTrue(state.isOffline());
@@ -943,7 +989,7 @@ public class TestAssignmentManagerOnCluster {
       assertEquals(oldServerName, regionStates.getRegionServerOfRegion(hri));
 
       // Try to unassign the dead region before SSH
-      am.unassign(hri, false);
+      am.unassign(hri);
       // The region should be moved to offline since the server is dead
       RegionState state = regionStates.getRegionState(hri);
       assertTrue(state.isOffline());
@@ -968,6 +1014,40 @@ public class TestAssignmentManagerOnCluster {
       MyRegionServer.abortedServer = null;
       TEST_UTIL.deleteTable(Bytes.toBytes(table));
       cluster.startRegionServer();
+    }
+  }
+  
+  /**
+   * Test that region state transition call is idempotent
+   */
+  @Test(timeout = 60000)
+  public void testReportRegionStateTransition() throws Exception {
+    String table = "testReportRegionStateTransition";
+    try {
+      MyRegionServer.simulateRetry = true;
+      HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(table));
+      desc.addFamily(new HColumnDescriptor(FAMILY));
+      admin.createTable(desc);
+      HTable meta = new HTable(conf, TableName.META_TABLE_NAME);
+      HRegionInfo hri =
+          new HRegionInfo(desc.getTableName(), Bytes.toBytes("A"), Bytes.toBytes("Z"));
+      MetaTableAccessor.addRegionToMeta(meta, hri);
+      HMaster master = TEST_UTIL.getHBaseCluster().getMaster();
+      master.assignRegion(hri);
+      AssignmentManager am = master.getAssignmentManager();
+      am.waitForAssignment(hri);
+      RegionStates regionStates = am.getRegionStates();
+      ServerName serverName = regionStates.getRegionServerOfRegion(hri);
+      // Assert the the region is actually open on the server
+      TEST_UTIL.assertRegionOnServer(hri, serverName, 200);
+      // Closing region should just work fine
+      admin.disableTable(TableName.valueOf(table));
+      assertTrue(regionStates.isRegionOffline(hri));
+      List<HRegionInfo> regions = TEST_UTIL.getHBaseAdmin().getOnlineRegions(serverName);
+      assertTrue(!regions.contains(hri));
+    } finally {
+      MyRegionServer.simulateRetry = false;
+      TEST_UTIL.deleteTable(Bytes.toBytes(table));
     }
   }
 
@@ -1009,11 +1089,23 @@ public class TestAssignmentManagerOnCluster {
 
   public static class MyRegionServer extends MiniHBaseClusterRegionServer {
     static volatile ServerName abortedServer = null;
+    static volatile boolean simulateRetry = false;
 
     public MyRegionServer(Configuration conf, CoordinatedStateManager cp)
       throws IOException, KeeperException,
         InterruptedException {
       super(conf, cp);
+    }
+
+    @Override
+    public boolean reportRegionStateTransition(TransitionCode code, long openSeqNum,
+        HRegionInfo... hris) {
+      if (simulateRetry) {
+        // Simulate retry by calling the method twice
+        super.reportRegionStateTransition(code, openSeqNum, hris);
+        return super.reportRegionStateTransition(code, openSeqNum, hris);
+      }
+      return super.reportRegionStateTransition(code, openSeqNum, hris);
     }
 
     @Override

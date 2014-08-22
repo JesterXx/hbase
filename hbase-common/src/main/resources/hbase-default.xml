@@ -187,13 +187,50 @@ possible configurations would overwhelm and obscure the important.
       A value of 0 means a single queue shared between all the handlers.
       A value of 1 means that each handler has its own queue.</description>
   </property>
-  <property>
-    <name>hbase.ipc.server.callqueue.read.share</name>
+<property>
+    <name>hbase.ipc.server.callqueue.read.ratio</name>
     <value>0</value>
     <description>Split the call queues into read and write queues.
-      A value of 0 indicate to not split the call queues.
-      A value of 0.5 means there will be the same number of read and write queues
+      The specified interval (which should be between 0.0 and 1.0)
+      will be multiplied by the number of call queues.
+      A value of 0 indicate to not split the call queues, meaning that both read and write
+      requests will be pushed to the same set of queues.
+      A value lower than 0.5 means that there will be less read queues than write queues.
+      A value of 0.5 means there will be the same number of read and write queues.
+      A value greater than 0.5 means that there will be more read queues than write queues.
       A value of 1.0 means that all the queues except one are used to dispatch read requests.
+
+      Example: Given the total number of call queues being 10
+      a read.ratio of 0 means that: the 10 queues will contain both read/write requests.
+      a read.ratio of 0.3 means that: 3 queues will contain only read requests
+      and 7 queues will contain only write requests.
+      a read.ratio of 0.5 means that: 5 queues will contain only read requests
+      and 5 queues will contain only write requests.
+      a read.ratio of 0.8 means that: 8 queues will contain only read requests
+      and 2 queues will contain only write requests.
+      a read.ratio of 1 means that: 9 queues will contain only read requests
+      and 1 queues will contain only write requests.
+    </description>
+  </property>
+  <property>
+    <name>hbase.ipc.server.callqueue.scan.ratio</name>
+    <value>0</value>
+    <description>Given the number of read call queues, calculated from the total number
+      of call queues multiplied by the callqueue.read.ratio, the scan.ratio property
+      will split the read call queues into small-read and long-read queues.
+      A value lower than 0.5 means that there will be less long-read queues than short-read queues.
+      A value of 0.5 means that there will be the same number of short-read and long-read queues.
+      A value greater than 0.5 means that there will be more long-read queues than short-read queues
+      A value of 0 or 1 indicate to use the same set of queues for gets and scans.
+
+      Example: Given the total number of read call queues being 8
+      a scan.ratio of 0 or 1 means that: 8 queues will contain both long and short read requests.
+      a scan.ratio of 0.3 means that: 2 queues will contain only long-read requests
+      and 6 queues will contain only short-read requests.
+      a scan.ratio of 0.5 means that: 4 queues will contain only long-read requests
+      and 4 queues will contain only short-read requests.
+      a scan.ratio of 0.8 means that: 6 queues will contain only long-read requests
+      and 2 queues will contain only short-read requests.
     </description>
   </property>
   <property>
@@ -717,6 +754,15 @@ possible configurations would overwhelm and obscure the important.
       hbase.offpeak.end.hour are also enabled.</description>
   </property>
   <property>
+    <name>hbase.hstore.time.to.purge.deletes</name>
+    <value>0</value>
+    <description>The amount of time to delay purging of delete markers with future timestamps. If 
+      unset, or set to 0, all delete markers, including those with future timestamps, are purged 
+      during the next major compaction. Otherwise, a delete marker is kept until the major compaction 
+      which occurs after the marker's timestamp plus the value of this setting, in milliseconds.
+    </description>
+  </property>
+  <property>
     <name>hbase.offpeak.start.hour</name>
     <value>-1</value>
     <description>The start of off-peak hours, expressed as an integer between 0 and 23, inclusive.
@@ -779,6 +825,33 @@ possible configurations would overwhelm and obscure the important.
       <description>When the size of a leaf-level, intermediate-level, or root-level
           index block in a multi-level block index grows to this size, the
           block is written out and a new block is started.</description>
+  </property>
+    <property>
+    <name>hbase.bucketcache.ioengine</name>
+    <value></value>
+    <description>Where to store the contents of the bucketcache. One of: onheap, 
+      offheap, or file. If a file, set it to file:PATH_TO_FILE. See https://hbase.apache.org/apidocs/org/apache/hadoop/hbase/io/hfile/CacheConfig.html for more information.
+    </description>
+  </property>
+  <property>
+    <name>hbase.bucketcache.combinedcache.enabled</name>
+    <value>true</value>
+    <description>Whether or not the bucketcache is used in league with the LRU 
+      on-heap block cache. In this mode, indices and blooms are kept in the LRU 
+      blockcache and the data blocks are kept in the bucketcache.</description>
+  </property>
+  <property>
+    <name>hbase.bucketcache.size</name>
+    <value>65536</value>
+    <description>The size of the buckets for the bucketcache if you only use a single size. 
+      Defaults to the default blocksize, which is 64 * 1024.</description>
+  </property>
+  <property>
+    <name>hbase.bucketcache.sizes</name>
+    <value></value>
+    <description>A comma-separated list of sizes for buckets for the bucketcache 
+      if you use multiple sizes. Should be a list of block sizes in order from smallest 
+      to largest. The sizes you use will depend on your data access patterns.</description>
   </property>
   <property>
       <name>hfile.format.version</name>
@@ -1064,15 +1137,6 @@ possible configurations would overwhelm and obscure the important.
     <description>Use Thrift TCompactProtocol binary serialization protocol.</description>
   </property>
   <property>
-    <name>hbase.offheapcache.percentage</name>
-    <value>0</value>
-    <description>The percentage of the off heap space (-XX:MaxDirectMemorySize) to be
-     allocated towards the experimental off heap "SlabCache" (This is different to
-     the BucketCache -- see the package javadoc for org.apache.hadoop.hbase.io.hfile
-     for more on your options). If you desire the cache to be disabled, simply set this
-      value to 0.</description>
-  </property>
-  <property>
     <name>hbase.data.umask.enable</name>
     <value>false</value>
     <description>Enable, if true, that file permissions should be assigned
@@ -1323,6 +1387,20 @@ possible configurations would overwhelm and obscure the important.
       extra Namenode pressure. If the files cannot be refreshed for longer than HFile TTL
       (hbase.master.hfilecleaner.ttl) the requests are rejected. Configuring HFile TTL to a larger
       value is also recommended with this setting.
+    </description>
+  </property>
+  <property>
+    <name>hbase.region.replica.replication.enabled</name>
+    <value>false</value>
+    <description>
+      Whether asynchronous WAL replication to the secondary region replicas is enabled or not.
+      If this is enabled, a replication peer named "region_replica_replication" will be created
+      which will tail the logs and replicate the mutatations to region replicas for tables that
+      have region replication > 1. If this is enabled once, disabling this replication also
+      requires disabling the replication peer using shell or ReplicationAdmin java class.
+      Replication to secondary region replicas works over standard inter-cluster replication. 
+      So replication, if disabled explicitly, also has to be enabled by setting "hbase.replication" 
+      to true for this feature to work.
     </description>
   </property>
   <property>

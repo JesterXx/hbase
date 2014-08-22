@@ -76,7 +76,7 @@ public class TestHMobStore {
   byte [] qf6 = Bytes.toBytes("qf6");
 
   byte[] value = Bytes.toBytes("value");
-  
+
   HColumnDescriptor hcd;
   FileSystem fs;
 
@@ -125,7 +125,6 @@ public class TestHMobStore {
     init(methodName, conf, htd, hcd);
   }
 
-  @SuppressWarnings("deprecation")
   private void init(String methodName, Configuration conf, HTableDescriptor htd,
       HColumnDescriptor hcd) throws IOException {
     //Setting up a Store
@@ -331,7 +330,7 @@ public class TestHMobStore {
     final Configuration conf = HBaseConfiguration.create();
     conf.setClass(DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
         DefaultMobStoreFlusher.class, StoreFlusher.class);
-    
+
     HColumnDescriptor hcd;
     hcd = new HColumnDescriptor(family);
     hcd.setValue(MobConstants.IS_MOB, "true");

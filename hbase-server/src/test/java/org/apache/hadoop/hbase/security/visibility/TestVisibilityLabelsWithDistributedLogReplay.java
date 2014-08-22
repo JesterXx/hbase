@@ -29,7 +29,8 @@ import org.junit.experimental.categories.Category;
  * Test class that tests the visibility labels with distributed log replay feature ON.
  */
 @Category(MediumTests.class)
-public class TestVisibilityLabelsWithDistributedLogReplay extends TestVisibilityLabels {
+public class TestVisibilityLabelsWithDistributedLogReplay extends
+    TestVisibilityLabelsWithDefaultVisLabelService {
 
   @BeforeClass
   public static void setupBeforeClass() throws Exception {
@@ -43,6 +44,7 @@ public class TestVisibilityLabelsWithDistributedLogReplay extends TestVisibility
     conf.set("hbase.superuser", "admin");
     TEST_UTIL.startMiniCluster(2);
     SUPERUSER = User.createUserForTesting(conf, "admin", new String[] { "supergroup" });
+    USER1 = User.createUserForTesting(conf, "user1", new String[] {});
 
     // Wait for the labels table to become available
     TEST_UTIL.waitTableEnabled(LABELS_TABLE_NAME.getName(), 50000);
