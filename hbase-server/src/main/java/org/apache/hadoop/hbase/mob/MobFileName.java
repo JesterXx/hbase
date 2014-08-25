@@ -61,7 +61,7 @@ public class MobFileName {
     this.startKey = startKey;
     this.uuid = uuid;
     this.date = date;
-    this.fileName = MobUtils.int2HexString(startKey) + date + uuid;
+    this.fileName = Integer.toHexString(startKey) + date + uuid;
   }
 
   /**
@@ -75,7 +75,7 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String startKey, String date, String uuid) {
-    return new MobFileName(MobUtils.hexString2Int(startKey), date, uuid);
+    return new MobFileName((int)Long.parseLong(startKey), date, uuid);
   }
 
   /**
@@ -84,7 +84,7 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String fileName) {
-    int startKey = MobUtils.hexString2Int(fileName.substring(0, 8));
+    int startKey = (int)Long.parseLong(fileName.substring(0, 8));
     String date = fileName.substring(8, 16);
     String uuid = fileName.substring(16);
     return new MobFileName(startKey, date, uuid);
@@ -95,7 +95,7 @@ public class MobFileName {
    * @return The hex string of the checksum for a start key.
    */
   public String getStartKey() {
-    return MobUtils.int2HexString(startKey);
+    return Integer.toHexString(startKey);
   }
 
   /**

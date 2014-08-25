@@ -35,7 +35,6 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.io.compress.Compression;
-import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
@@ -93,7 +92,7 @@ public class MobFileManager {
     String familyName = family.getNameAsString();
     if (!MobUtils.isMobFamily(family)) {
       LOG.warn("failed to create the MobFileStore because the family [" + familyName
-          + "] in table [" + tableName + "] is not a mob one!");
+          + "] in table [" + tableName + "] is not a mob-enabled column family!");
       return null;
     }
     return new MobFileManager(conf, fs, tableName, family);
@@ -181,7 +180,7 @@ public class MobFileManager {
     CRC32 crc = new CRC32();
     crc.update(startKey);
     int checksum = (int) crc.getValue();
-    return createWriterInTmp(date, maxKeyCount, compression, MobUtils.int2HexString(checksum));
+    return createWriterInTmp(date, maxKeyCount, compression, Integer.toHexString(checksum));
   }
 
   /**
@@ -219,7 +218,7 @@ public class MobFileManager {
         .withChecksumType(HFile.DEFAULT_CHECKSUM_TYPE)
         .withBytesPerCheckSum(HFile.DEFAULT_BYTES_PER_CHECKSUM)
         .withBlockSize(family.getBlocksize())
-        .withHBaseCheckSum(true).withDataBlockEncoding(DataBlockEncoding.NONE).build();
+        .withHBaseCheckSum(true).withDataBlockEncoding(family.getDataBlockEncoding()).build();
 
     StoreFile.Writer w = new StoreFile.WriterBuilder(conf, writerCacheConf, fs)
         .withFilePath(new Path(basePath, mobFileName.getFileName()))
@@ -301,6 +300,8 @@ public class MobFileManager {
           cacheConf.getMobFileCache().closeFile(file);
         }
       }
+    } else {
+      LOG.warn("Invalid reference to mob, " + reference.getValueLength() + " bytes is too short");
     }
 
     if (result == null) {

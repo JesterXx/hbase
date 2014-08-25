@@ -234,24 +234,6 @@ public class MobUtils {
   }
 
   /**
-   * Converts an integer to a hex string.
-   * @param i An integer.
-   * @return A hex string.
-   */
-  public static String int2HexString(int i) {
-    return Integer.toHexString(i);
-  }
-
-  /**
-   * Converts a hex string to an integer.
-   * @param hex A hex string.
-   * @return An integer.
-   */
-  public static int hexString2Int(String hex) {
-    return (int)Long.parseLong(hex, 16);
-  }
-
-  /**
    * Creates a mob reference KeyValue.
    * The value of the mob reference KeyValue is mobCellValueSize + mobFileName.
    * @param kv The original KeyValue.

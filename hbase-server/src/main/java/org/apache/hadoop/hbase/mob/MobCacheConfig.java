@@ -18,6 +18,7 @@
  */
 package org.apache.hadoop.hbase.mob;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
@@ -25,6 +26,7 @@ import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 /**
  * The cache configuration for the mob.
  */
+@InterfaceAudience.Private
 public class MobCacheConfig extends CacheConfig {
 
   private static MobFileCache mobFileCache;

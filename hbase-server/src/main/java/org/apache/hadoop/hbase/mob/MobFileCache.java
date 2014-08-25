@@ -43,6 +43,8 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 /**
  * The cache for mob files.
  * This cache doesn't cache the mob file blocks. It only caches the references of mob files.
+ * We are doing this to avoid opening and closing mob files all the time. We just keep
+ * references open.
  */
 @InterfaceAudience.Private
 public class MobFileCache {
@@ -69,42 +71,49 @@ public class MobFileCache {
     }
   }
 
+  //accesses to this map are guarded by the evictionLock
   private Map<String, CachedMobFile> map = null;
-  /* Cache access count (sequential ID) */
+  // caches access count (sequential ID)
   private final AtomicLong count;
   private final AtomicLong miss;
 
   private final ReentrantLock evictionLock = new ReentrantLock(true);
 
+  //stripes lock on each mob file based on its hash.
   private IdLock keyLock = new IdLock();
 
   private final ScheduledExecutorService scheduleThreadPool = Executors.newScheduledThreadPool(1,
       new ThreadFactoryBuilder().setNameFormat("MobFileCache #%d").setDaemon(true).build());
   private Configuration conf;
 
-  private static final float DEFAULT_EVICT_REMAIN_RATIO = 0.5f;
-
   // the count of the cached references to mob files
-  private int mobFileCacheSize;
+  private int mobFileMaxCacheSize;
   private boolean isCacheEnabled = false;
   private float evictRemainRatio;
 
   public MobFileCache(Configuration conf) {
     this.conf = conf;
-    this.mobFileCacheSize = conf.getInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY,
+    this.mobFileMaxCacheSize = conf.getInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY,
         MobConstants.DEFAULT_MOB_FILE_CACHE_SIZE);
-    isCacheEnabled = (mobFileCacheSize > 0);
-    map = new ConcurrentHashMap<String, CachedMobFile>(mobFileCacheSize);
+    isCacheEnabled = (mobFileMaxCacheSize > 0);
+    map = new ConcurrentHashMap<String, CachedMobFile>(mobFileMaxCacheSize);
     this.count = new AtomicLong(0);
     this.miss = new AtomicLong(0);
     if (isCacheEnabled) {
-      long period = conf.getInt(MobConstants.MOB_CACHE_EVICT_PERIOD, 3600); // in seconds
+      long period = conf.getLong(MobConstants.MOB_CACHE_EVICT_PERIOD,
+          MobConstants.DEFAULT_MOB_CACHE_EVICT_PERIOD); // in seconds
       evictRemainRatio = conf.getFloat(MobConstants.MOB_CACHE_EVICT_REMAIN_RATIO,
-          DEFAULT_EVICT_REMAIN_RATIO);
+          MobConstants.DEFAULT_EVICT_REMAIN_RATIO);
+      if (evictRemainRatio < 0.0 || evictRemainRatio > 1.0) {
+        evictRemainRatio = MobConstants.DEFAULT_EVICT_REMAIN_RATIO;
+        LOG.warn(MobConstants.MOB_CACHE_EVICT_REMAIN_RATIO
+            + " is not in the range [0.0, 1.0], the default value "
+            + MobConstants.DEFAULT_EVICT_REMAIN_RATIO + " is used.");
+      }
       this.scheduleThreadPool.scheduleAtFixedRate(new EvictionThread(this), period, period,
           TimeUnit.SECONDS);
     }
-    LOG.info("MobFileCache is initialized, and the cache size is " + mobFileCacheSize);
+    LOG.info("MobFileCache is initialized, and the cache size is " + mobFileMaxCacheSize);
   }
 
   /**
@@ -118,29 +127,28 @@ public class MobFileCache {
       if (!evictionLock.tryLock()) {
         return;
       }
+      List<CachedMobFile> deletedFiles = new ArrayList<>();
       try {
-        if (map.size() <= mobFileCacheSize) {
+        if (map.size() <= mobFileMaxCacheSize) {
           return;
         }
-        List<CachedMobFile> files = new ArrayList<CachedMobFile>(map.size());
-        for (CachedMobFile file : map.values()) {
-          files.add(file);
-        }
+        List<CachedMobFile> files = new ArrayList<CachedMobFile>(map.values());
         Collections.sort(files);
-        int start = (int) (mobFileCacheSize * evictRemainRatio);
-        for (int i = start; i < files.size(); i++) {
-          String name = files.get(i).getName();
-          CachedMobFile deletedFile = map.remove(name);
-          if (null != deletedFile) {
-            try {
-              deletedFile.close();
-            } catch (IOException e) {
-              LOG.error(e.getMessage(), e);
+        int start = (int) (mobFileMaxCacheSize * evictRemainRatio);
+        if (start >= 0) {
+          for (int i = start; i < files.size(); i++) {
+            String name = files.get(i).getName();
+            CachedMobFile deletedFile = map.remove(name);
+            if (null != deletedFile) {
+              deletedFiles.add(deletedFile);
             }
           }
         }
       } finally {
         evictionLock.unlock();
+      }
+      for (CachedMobFile deletedFile : deletedFiles) {
+        closeFile(deletedFile);
       }
     }
   }
@@ -187,7 +195,7 @@ public class MobFileCache {
         if (null == cached) {
           cached = map.get(fileName);
           if (null == cached) {
-            if (map.size() > mobFileCacheSize) {
+            if (map.size() > mobFileMaxCacheSize) {
               evict();
             }
             cached = CachedMobFile.create(fs, path, conf, cacheConf);
@@ -215,11 +223,11 @@ public class MobFileCache {
       if (!isCacheEnabled) {
         file.close();
       } else {
-        lockEntry = keyLock.getLockEntry(file.getName().hashCode());
+        lockEntry = keyLock.getLockEntry(file.getFileName().hashCode());
         file.close();
       }
     } catch (IOException e) {
-      LOG.error("MobFileCache, Exception happen during close " + file.getName(), e);
+      LOG.error("MobFileCache, Exception happen during close " + file.getFileName(), e);
     } finally {
       if (lockEntry != null) {
         keyLock.releaseLockEntry(lockEntry);

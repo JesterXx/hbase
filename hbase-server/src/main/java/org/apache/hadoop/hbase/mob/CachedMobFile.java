@@ -34,7 +34,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 @InterfaceAudience.Private
 public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> {
 
-  private long accessTime;
+  private long accessCount;
   private MobFile file;
   private AtomicLong reference = new AtomicLong(0);
 
@@ -48,21 +48,22 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
     return new CachedMobFile(file);
   }
 
-  public void access(long time) {
-    this.accessTime = time;
+  public void access(long accessCount) {
+    this.accessCount = accessCount;
   }
 
   public int compareTo(CachedMobFile that) {
-    if (this.accessTime == that.accessTime)
+    if (this.accessCount == that.accessCount)
       return 0;
-    return this.accessTime < that.accessTime ? 1 : -1;
+    return this.accessCount < that.accessCount ? 1 : -1;
   }
 
   /**
    * Opens the mob file if it's not opened yet and increases the reference.
+   * It's not thread-safe. Use MobFileCache.openFile() instead.
    * The reader of the mob file is just opened when it's not opened no matter how many times
    * this open() method is invoked.
-   * The reference is a counter that how many times times this reader is referenced. When the
+   * The reference is a counter that how many times this reader is referenced. When the
    * reference is 0, this reader is closed.
    */
   @Override
@@ -73,6 +74,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
 
   /**
    * Decreases the reference of the underlying reader for the mob file.
+   * It's not thread-safe. Use MobFileCache.closeFile() instead.
    * This underlying reader isn't closed until the reference is 0.
    */
   @Override
