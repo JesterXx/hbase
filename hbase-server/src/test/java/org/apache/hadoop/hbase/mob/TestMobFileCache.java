@@ -105,19 +105,12 @@ public class TestMobFileCache extends TestCase {
     // Setting up a Store
     FileSystem fs = FileSystem.get(conf);
     Path testDir = FSUtils.getRootDir(conf);
-    Path basedir = testDir;
     fs = FileSystem.get(conf);
 
     HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(TABLE));
     htd.addFamily(hcd);
-    Path homePath = new Path(basedir, TABLE + Path.SEPARATOR
-        + Bytes.toString(hcd.getName()));
     MobFileManager mobFileManager = MobFileManager.create(conf, fs,
         TableName.valueOf(TABLE), hcd);
-    if (mobFileManager == null) {
-      fs.mkdirs(homePath);
-      mobFileManager = MobFileManager.create(conf, fs, TableName.valueOf(TABLE), hcd);
-    }
 
     KeyValue key1 = new KeyValue(ROW, hcd.getName(), QF1, 1, VALUE);
     KeyValue key2 = new KeyValue(ROW, hcd.getName(), QF2, 1, VALUE);
