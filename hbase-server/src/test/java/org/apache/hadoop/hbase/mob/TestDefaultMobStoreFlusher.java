@@ -16,7 +16,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package org.apache.hadoop.hbase.regionserver;
+package org.apache.hadoop.hbase.mob;
 
 import java.io.IOException;
 import java.util.List;
@@ -37,6 +37,8 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.mob.MobConstants;
+import org.apache.hadoop.hbase.regionserver.DefaultStoreEngine;
+import org.apache.hadoop.hbase.regionserver.DefaultStoreFlusher;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -63,7 +65,7 @@ public class TestDefaultMobStoreFlusher {
    // Set the DefaultMobStoreFlusher as the default store flush
    TEST_UTIL.getConfiguration().setClass(
        DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-       DefaultMobStoreFlusher.class, StoreFlusher.class);
+       DefaultMobStoreFlusher.class, DefaultStoreFlusher.class);
 
    TEST_UTIL.startMiniCluster(1);
  }
