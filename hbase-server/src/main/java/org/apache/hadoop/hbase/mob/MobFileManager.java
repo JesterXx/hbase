@@ -83,16 +83,17 @@ public class MobFileManager {
    *         A null is returned if this column family is null or it doesn't have a mob flag.
    */
   public static MobFileManager create(Configuration conf, FileSystem fs, TableName tableName,
-      HColumnDescriptor family) throws IOException {
+      HColumnDescriptor family) {
     if (null == family) {
-      throw new IOException(
+      throw new IllegalArgumentException(
           "Failed to create the MobFileStore because the family is null in table [" + tableName
               + "]!");
     }
     String familyName = family.getNameAsString();
     if (!MobUtils.isMobFamily(family)) {
-      throw new IOException("Failed to create the MobFileStore because the family [" + familyName
+      LOG.warn("failed to create the MobFileStore because the family [" + familyName
           + "] in table [" + tableName + "] is not a mob-enabled column family!");
+      return null;
     }
     return new MobFileManager(conf, fs, tableName, family);
   }
