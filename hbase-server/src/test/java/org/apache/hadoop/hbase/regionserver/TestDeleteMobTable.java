@@ -113,10 +113,10 @@ public class TestDeleteMobTable {
       String fileName = assertHasOneMobRow(table, tn, hcd.getNameAsString());
       Assert.assertFalse(mobArchiveExist(tn, hcd.getNameAsString(), fileName));
       table.close();
-      
+
       admin.disableTable(tn);
       admin.deleteTable(tn);
-      
+
       Assert.assertFalse(admin.tableExists(tn));
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(1, countArchiveMobFiles(tn, hcd.getNameAsString()));
@@ -155,10 +155,10 @@ public class TestDeleteMobTable {
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(0, countArchiveMobFiles(tn, hcd.getNameAsString()));
       table.close();
-      
+
       admin.disableTable(tn);
       admin.deleteTable(tn);
-      
+
       Assert.assertFalse(admin.tableExists(tn));
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(0, countArchiveMobFiles(tn, hcd.getNameAsString()));
