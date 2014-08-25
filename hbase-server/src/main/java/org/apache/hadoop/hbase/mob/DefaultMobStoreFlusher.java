@@ -123,19 +123,10 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
           } else {
             // It's a mob store, flush the cells in a mob way. This is the difference of flushing
             // between a normal and a mob store.
-            try {
             performMobFlush(snapshot, cacheFlushId, scanner, writer, status);
-            } catch(IOException ioe) {
-              // got an error
-              e = ioe;
-              throw ioe;
-            }
           }
         } finally {
-          if (e == null) {
-            // Finalise only if there was no exception from the mob file flushing
-            finalizeWriter(writer, cacheFlushId, status);
-          }
+          finalizeWriter(writer, cacheFlushId, status);
         }
       }
     } finally {
