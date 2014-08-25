@@ -86,7 +86,7 @@ public class TestDeleteMobTable {
   public void testDeleteMobTable() throws Exception {
     byte[] tableName = Bytes.toBytes("testDeleteMobTable");
     TableName tn = TableName.valueOf(tableName);
-    HTableDescriptor htd = new HTableDescriptor();
+    HTableDescriptor htd = new HTableDescriptor(tn);
     HColumnDescriptor hcd = new HColumnDescriptor(FAMILY);
     hcd.setValue(MobConstants.IS_MOB, "true");
     hcd.setValue(MobConstants.MOB_THRESHOLD, Long.toString(0));
@@ -132,7 +132,7 @@ public class TestDeleteMobTable {
   public void testDeleteNonMobTable() throws Exception {
     byte[] tableName = Bytes.toBytes("testDeleteNonMobTable");
     TableName tn = TableName.valueOf(tableName);
-    HTableDescriptor htd = new HTableDescriptor();
+    HTableDescriptor htd = new HTableDescriptor(tn);
     HColumnDescriptor hcd = new HColumnDescriptor(FAMILY);
     htd.addFamily(hcd);
     HBaseAdmin admin = null;
