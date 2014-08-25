@@ -72,7 +72,8 @@ public class MobUtils {
    */
   public static long getMobThreshold(HColumnDescriptor hcd) {
     String threshold = hcd.getValue(MobConstants.MOB_THRESHOLD);
-    return Strings.isEmpty(threshold) ? 102400 : Long.parseLong(threshold);
+    return Strings.isEmpty(threshold) ? MobConstants.DEFAULT_MOB_THRESHOLD : Long
+        .parseLong(threshold);
   }
 
   /**
@@ -149,7 +150,7 @@ public class MobUtils {
    * Indicates whether the scan contains the information of caching blocks.
    * The information is set in the attribute "hbase.mob.cache.blocks" of scan.
    * @param scan The current scan.
-   * @return True if the scan contains the information of caching blocks.
+   * @return True when the Scan attribute specifies to cache the MOB blocks.
    */
   public static boolean isCacheMobBlocks(Scan scan) {
     byte[] cache = scan.getAttribute(MobConstants.MOB_CACHE_BLOCKS);
@@ -168,6 +169,7 @@ public class MobUtils {
    * @param cacheBlocks
    *          True, set the attribute of caching blocks into the scan, the scanner with this scan
    *          caches blocks.
+   *          False, the scanner doesn't cache blocks for this scan.
    */
   public static void setCacheMobBlocks(Scan scan, boolean cacheBlocks) {
     scan.setAttribute(MobConstants.MOB_CACHE_BLOCKS, Bytes.toBytes(cacheBlocks));

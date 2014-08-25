@@ -25,6 +25,7 @@ import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
@@ -56,6 +57,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * </ol>
  * 
  */
+@InterfaceAudience.Private
 public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
   private static final Log LOG = LogFactory.getLog(DefaultMobStoreFlusher.class);
@@ -172,12 +174,12 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
     try {
       Tag mobSrcTableName = new Tag(TagType.MOB_SRC_TABLE_NAME_TAG_TYPE, store.getTableName()
           .getName());
-      List<Cell> kvs = new ArrayList<Cell>();
+      List<Cell> cells = new ArrayList<Cell>();
       boolean hasMore;
       do {
-        hasMore = scanner.next(kvs, compactionKVMax);
-        if (!kvs.isEmpty()) {
-          for (Cell c : kvs) {
+        hasMore = scanner.next(cells, compactionKVMax);
+        if (!cells.isEmpty()) {
+          for (Cell c : cells) {
             // If we know that this KV is going to be included always, then let us
             // set its memstoreTS to 0. This will help us save space when writing to
             // disk.
@@ -196,7 +198,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
               writer.append(reference);
             }
           }
-          kvs.clear();
+          cells.clear();
         }
       } while (hasMore);
     } finally {

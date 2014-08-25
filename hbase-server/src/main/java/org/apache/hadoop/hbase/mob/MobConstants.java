@@ -32,6 +32,7 @@ public class MobConstants {
 
   public static final String IS_MOB = "isMob";
   public static final String MOB_THRESHOLD = "mobThreshold";
+  public static final long DEFAULT_MOB_THRESHOLD = 102400;
 
   public static final String MOB_SCAN_RAW = "hbase.mob.scan.raw";
   public static final String MOB_CACHE_BLOCKS = "hbase.mob.cache.blocks";

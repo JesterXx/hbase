@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.NavigableSet;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.mob.MobFileManager;
@@ -32,6 +33,7 @@ import org.apache.hadoop.hbase.mob.MobUtils;
  * reversed scanning in both the memstore and the MOB store.
  *
  */
+@InterfaceAudience.Private
 public class ReversedMobStoreScanner extends ReversedStoreScanner {
 
   private boolean cacheMobBlocks = false;

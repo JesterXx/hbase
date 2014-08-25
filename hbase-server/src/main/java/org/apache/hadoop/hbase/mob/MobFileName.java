@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.mob;
 
 import java.security.InvalidParameterException;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
@@ -39,6 +40,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * Has the latest timestamp of cells in the file name in order to clean the expired mob files by
  * TTL easily. If this timestamp is older than the TTL, it's regarded as expired.
  */
+@InterfaceAudience.Private
 public class MobFileName {
 
   private final String date;

@@ -25,6 +25,7 @@ import java.util.zip.CRC32;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -48,6 +49,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * It provides the information of the MOB column family in HBase, validates the mob files and
  * reads the MOB cells from the MOB files.
  */
+@InterfaceAudience.Private
 public class MobFileManager {
 
   private static final Log LOG = LogFactory.getLog(MobFileManager.class);

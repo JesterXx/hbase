@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.regionserver;
 import java.io.IOException;
 import java.util.NavigableSet;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.client.Scan;
@@ -36,6 +37,7 @@ import org.apache.hadoop.hbase.mob.MobFileManager;
  * In these scanners, a additional seeks in the mob files should be performed after the seek
  * in HBase is done.
  */
+@InterfaceAudience.Private
 public class HMobStore extends HStore {
 
   private MobFileManager mobFileManager;
