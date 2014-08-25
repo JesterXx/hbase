@@ -31,6 +31,8 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
+import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.regionserver.DefaultStoreFlusher;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
@@ -113,7 +115,6 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         writer = store.createWriterInTmp(cellsCount, store.getFamily().getCompression(),
             false, true, true);
         writer.setTimeRangeTracker(snapshot.getTimeRangeTracker());
-        IOException e = null;
         try {
           if (!isMob) {
             // It's not a mob store, flush the cells in a normal way
@@ -161,12 +162,13 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         HConstants.COMPACTION_KV_MAX_DEFAULT);
     long mobKVCount = 0;
     long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
-    mobFileWriter = mobFileManager.createWriterInTmp(new Date(time), snapshot.getCellsCount(), store
-        .getFamily().getCompression(), store.getRegionInfo().getStartKey());
+    mobFileWriter = mobFileManager.createWriterInTmp(new Date(time), snapshot.getCellsCount(),
+        store.getFamily().getCompression(), store.getRegionInfo().getStartKey());
     // the target path is {tableName}/.mob/{cfName}/mobFiles
     // the relative path is mobFiles
     byte[] fileName = Bytes.toBytes(mobFileWriter.getPath().getName());
     try {
+      Tag mobSrcTableName = new Tag(TagType.MOB_SRC_TABLE_NAME, store.getTableName().getName());
       List<Cell> kvs = new ArrayList<Cell>();
       boolean hasMore;
       do {
@@ -187,7 +189,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
               // append the tags to the KeyValue.
               // The key is same, the value is the filename of the mob file
-              KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName);
+              KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName, mobSrcTableName);
               writer.append(reference);
             }
           }
