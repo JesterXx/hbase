@@ -262,11 +262,7 @@ public class MobUtils {
     // append the tags to the KeyValue.
     // The key is same, the value is the filename of the mob file
     List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(), kv.getTagsLength());
-    if (existingTags.isEmpty()) {
-      existingTags = new ArrayList<Tag>();
-    }
-    Tag mobRefTag = new Tag(TagType.MOB_REFERENCE_TAG_TYPE, HConstants.EMPTY_BYTE_ARRAY);
-    existingTags.add(mobRefTag);
+    existingTags.add(MobConstants.MOB_REF_TAG);
     long valueLength = kv.getValueLength();
     byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);
     KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(), kv.getRowLength(),

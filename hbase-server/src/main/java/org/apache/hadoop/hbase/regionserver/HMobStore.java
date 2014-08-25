@@ -50,24 +50,15 @@ public class HMobStore extends HStore {
   /**
    * Gets the MobStoreScanner or MobReversedStoreScanner. In these scanners, a additional seeks in
    * the mob files should be performed after the seek in HBase is done.
-   */
+   */  
   @Override
-  public KeyValueScanner getScanner(Scan scan, NavigableSet<byte[]> targetCols, long readPt)
-      throws IOException {
-    lock.readLock().lock();
-    try {
-      KeyValueScanner scanner = null;
-      if (this.getCoprocessorHost() != null) {
-        scanner = this.getCoprocessorHost().preStoreScannerOpen(this, scan, targetCols);
-      }
-      if (scanner == null) {
-        scanner = scan.isReversed() ? new ReversedMobStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileManager) : new MobStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileManager);
-      }
-      return scanner;
-    } finally {
-      lock.readLock().unlock();
+  protected KeyValueScanner createScanner(Scan scan, final NavigableSet<byte[]> targetCols,
+      long readPt, KeyValueScanner scanner) throws IOException {
+    if (scanner == null) {
+      scanner = scan.isReversed() ? new ReversedMobStoreScanner(this, getScanInfo(), scan,
+          targetCols, readPt, mobFileManager) : new MobStoreScanner(this, getScanInfo(), scan,
+          targetCols, readPt, mobFileManager);
     }
+    return scanner;
   }
 }

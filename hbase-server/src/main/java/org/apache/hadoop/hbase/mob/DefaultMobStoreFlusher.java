@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.regionserver;
+package org.apache.hadoop.hbase.mob;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -34,12 +34,17 @@ import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.mob.MobFileManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
+import org.apache.hadoop.hbase.regionserver.DefaultStoreFlusher;
+import org.apache.hadoop.hbase.regionserver.InternalScanner;
+import org.apache.hadoop.hbase.regionserver.MemStoreSnapshot;
+import org.apache.hadoop.hbase.regionserver.Store;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * An implementation of the StoreFlusher. It extends the DefaultStoreFlusher.
  * If the store is not a mob store, the flusher flushes the MemStore the same with
- * DefaultStoreFlusher.
+ * DefaultStoreFlusher, 
  * If the store is a mob store, the flusher flushes the MemStore into two places.
  * One is the store files of HBase, the other is the mob files.
  * <ol>
@@ -49,7 +54,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * <li>If the size of a cell value is smaller than or equal with a threshold, it'll be flushed to
  * HBase directly.</li>
  * </ol>
- *
+ * 
  */
 public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
@@ -74,8 +79,8 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   }
 
   /**
-   * Flushes the snapshot of the MemStore.
-   * If this store is not a mob store, flush the cells in the snapshot to store files of HBase.
+   * Flushes the snapshot of the MemStore. 
+   * If this store is not a mob store, flush the cells in the snapshot to store files of HBase. 
    * If the store is a mob one, the flusher flushes the MemStore into two places.
    * One is the store files of HBase, the other is the mob files.
    * <ol>
@@ -110,6 +115,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         writer = store.createWriterInTmp(cellsCount, store.getFamily().getCompression(),
             false, true, true);
         writer.setTimeRangeTracker(snapshot.getTimeRangeTracker());
+        IOException e = null;
         try {
           if (!isMob) {
             // It's not a mob store, flush the cells in a normal way
@@ -117,10 +123,19 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
           } else {
             // It's a mob store, flush the cells in a mob way. This is the difference of flushing
             // between a normal and a mob store.
+            try {
             performMobFlush(snapshot, cacheFlushId, scanner, writer, status);
+            } catch(IOException ioe) {
+              // got an error
+              e = ioe;
+              throw ioe;
+            }
           }
         } finally {
-          finalizeWriter(writer, cacheFlushId, status);
+          if (e == null) {
+            // Finalise only if there was no exception from the mob file flushing
+            finalizeWriter(writer, cacheFlushId, status);
+          }
         }
       }
     } finally {
@@ -169,6 +184,9 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         hasMore = scanner.next(kvs, compactionKVMax);
         if (!kvs.isEmpty()) {
           for (Cell c : kvs) {
+            // If we know that this KV is going to be included always, then let us
+            // set its memstoreTS to 0. This will help us save space when writing to
+            // disk.
             KeyValue kv = KeyValueUtil.ensureKeyValue(c);
             if (kv.getValueLength() <= mobCellValueSizeThreshold || MobUtils.isMobReferenceCell(kv)
                 || kv.getTypeByte() != KeyValue.Type.Put.getCode()) {
