@@ -137,7 +137,7 @@ public class MobFileCache {
         int start = (int) (mobFileMaxCacheSize * evictRemainRatio);
         if (start >= 0) {
           for (int i = start; i < files.size(); i++) {
-            String name = files.get(i).getName();
+            String name = files.get(i).getFileName();
             CachedMobFile deletedFile = map.remove(name);
             if (null != deletedFile) {
               deletedFiles.add(deletedFile);

@@ -102,8 +102,8 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
    * @return The file name.
    */
   @Override
-  public String getName() {
-    return file.getName();
+  public String getFileName() {
+    return file.getFileName();
   }
 
   /**
