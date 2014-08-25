@@ -170,7 +170,8 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
     // the relative path is mobFiles
     byte[] fileName = Bytes.toBytes(mobFileWriter.getPath().getName());
     try {
-      Tag mobSrcTableName = new Tag(TagType.MOB_SRC_TABLE_NAME, store.getTableName().getName());
+      Tag mobSrcTableName = new Tag(TagType.MOB_SRC_TABLE_NAME_TAG_TYPE, store.getTableName()
+          .getName());
       List<Cell> kvs = new ArrayList<Cell>();
       boolean hasMore;
       do {
