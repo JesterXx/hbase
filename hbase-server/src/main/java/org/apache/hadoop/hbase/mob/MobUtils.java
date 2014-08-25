@@ -262,7 +262,7 @@ public class MobUtils {
     return regionInfo == null ? false : getMobRegionInfo(regionInfo.getTable()).getEncodedName()
         .equals(regionInfo.getEncodedName());
   }
-  
+
   /**
    * Archives the mob files.
    * @param conf The current configuration.
@@ -402,7 +402,11 @@ public class MobUtils {
    * @param fileName The name of the file to be evicted.
    */
   private static void evictFile(MobCacheConfig cacheConf, String fileName) {
-    cacheConf.getMobFileCache().evictFile(fileName);
+    try {
+      cacheConf.getMobFileCache().evictFile(fileName);
+    } catch (IOException e) {
+      LOG.error("Fail to evict the file " + fileName, e);
+    }
   }
 
   /**
