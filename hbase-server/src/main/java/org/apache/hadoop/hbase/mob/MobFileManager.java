@@ -91,9 +91,8 @@ public class MobFileManager {
     }
     String familyName = family.getNameAsString();
     if (!MobUtils.isMobFamily(family)) {
-      LOG.warn("failed to create the MobFileStore because the family [" + familyName
-          + "] in table [" + tableName + "] is not a mob-enabled column family!");
-      return null;
+      throw new IllegalArgumentException("failed to create the MobFileStore because the family ["
+          + familyName + "] in table [" + tableName + "] is not a mob-enabled column family!");
     }
     return new MobFileManager(conf, fs, tableName, family);
   }

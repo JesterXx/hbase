@@ -71,15 +71,15 @@ public class TestCachedMobFile extends TestCase{
         new StoreFile(fs, writer.getPath(), conf, cacheConf,
             BloomType.NONE)));
 
-    Assert.assertEquals(EXPECTED_REFERENCE_ZERO, cachedMobFile.getReference());
+    Assert.assertEquals(EXPECTED_REFERENCE_ZERO, cachedMobFile.getReferenceCount());
     cachedMobFile.open();
-    Assert.assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile.getReference());
+    Assert.assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile.getReferenceCount());
     cachedMobFile.open();
-    Assert.assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile.getReference());
+    Assert.assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile.getReferenceCount());
     cachedMobFile.close();
-    Assert.assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile.getReference());
+    Assert.assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile.getReferenceCount());
     cachedMobFile.close();
-    Assert.assertEquals(EXPECTED_REFERENCE_ZERO, cachedMobFile.getReference());
+    Assert.assertEquals(EXPECTED_REFERENCE_ZERO, cachedMobFile.getReferenceCount());
   }
 
   @Test

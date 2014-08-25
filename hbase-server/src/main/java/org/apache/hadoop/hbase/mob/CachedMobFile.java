@@ -36,7 +36,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
 
   private long accessCount;
   private MobFile file;
-  private AtomicLong reference = new AtomicLong(0);
+  private AtomicLong referenceCount = new AtomicLong(0);
 
   public CachedMobFile(MobFile file) {
     this.file = file;
@@ -69,7 +69,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
   @Override
   public void open() throws IOException {
     file.open();
-    reference.incrementAndGet();
+    referenceCount.incrementAndGet();
   }
 
   /**
@@ -79,7 +79,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
    */
   @Override
   public void close() throws IOException {
-    long refs = reference.decrementAndGet();
+    long refs = referenceCount.decrementAndGet();
     if (refs == 0) {
       this.file.close();
     }
@@ -119,10 +119,10 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
 
   /**
    * Gets the reference of the current mob file.
-   *
+   * Internal usage, currently it's for testing.
    * @return The reference of the current mob file.
    */
-  public long getReference() {
-    return this.reference.longValue();
+  public long getReferenceCount() {
+    return this.referenceCount.longValue();
   }
 }

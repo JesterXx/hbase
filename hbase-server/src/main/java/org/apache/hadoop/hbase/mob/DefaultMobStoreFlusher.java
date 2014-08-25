@@ -68,14 +68,16 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException{
     super(conf, store);
     isMob = MobUtils.isMobFamily(store.getFamily());
-    mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
-    this.targetPath = MobUtils.getMobFamilyPath(conf, store.getTableName(),
-        store.getColumnFamilyName());
-    if (!this.store.getFileSystem().exists(targetPath)) {
-      this.store.getFileSystem().mkdirs(targetPath);
+    if (isMob) {
+      mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
+      this.targetPath = MobUtils.getMobFamilyPath(conf, store.getTableName(),
+          store.getColumnFamilyName());
+      if (!this.store.getFileSystem().exists(targetPath)) {
+        this.store.getFileSystem().mkdirs(targetPath);
+      }
+      mobFileManager = MobFileManager.create(conf, this.store.getFileSystem(),
+          this.store.getTableName(), this.store.getFamily());
     }
-    mobFileManager = MobFileManager.create(conf, this.store.getFileSystem(),
-        this.store.getTableName(), this.store.getFamily());
   }
 
   /**

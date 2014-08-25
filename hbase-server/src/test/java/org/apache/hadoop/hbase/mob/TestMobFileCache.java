@@ -104,7 +104,6 @@ public class TestMobFileCache extends TestCase {
       throws IOException {
     // Setting up a Store
     FileSystem fs = FileSystem.get(conf);
-    Path testDir = FSUtils.getRootDir(conf);
     fs = FileSystem.get(conf);
 
     HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(TABLE));
@@ -148,18 +147,18 @@ public class TestMobFileCache extends TestCase {
         fs, file1Path, mobCacheConf);
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
     assertNotNull(cachedMobFile1);
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReferenceCount());
 
     // The evict is also managed by a schedule thread pool.
     // And its check period is set as 3600 seconds by default.
     // This evict should get the lock at the most time
     mobFileCache.evict();  // Cache not full, evict it
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReferenceCount());
 
     mobFileCache.evictFile(file1Path.getName());  // Evict one file
     assertEquals(EXPECTED_CACHE_SIZE_ZERO, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReference());
+    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReferenceCount());
 
     cachedMobFile1.close();  // Close the cached mob file
 
@@ -175,13 +174,13 @@ public class TestMobFileCache extends TestCase {
     // Before the evict
     // Evict the cache, should clost the first file 1
     assertEquals(EXPECTED_CACHE_SIZE_THREE, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile2.getReference());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReference());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile2.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReferenceCount());
     mobFileCache.evict();
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReference());
-    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile2.getReference());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReference());
+    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile2.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReferenceCount());
   }
 }
