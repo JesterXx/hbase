@@ -117,7 +117,7 @@ public class TestDeleteMobTable {
       admin.disableTable(tn);
       admin.deleteTable(tn);
       
-      Assert.assertTrue(admin.tableExists(tn));
+      Assert.assertFalse(admin.tableExists(tn));
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(1, countArchiveMobFiles(tn, hcd.getNameAsString()));
       Assert.assertTrue(mobArchiveExist(tn, hcd.getNameAsString(), fileName));
@@ -159,7 +159,7 @@ public class TestDeleteMobTable {
       admin.disableTable(tn);
       admin.deleteTable(tn);
       
-      Assert.assertTrue(admin.tableExists(tn));
+      Assert.assertFalse(admin.tableExists(tn));
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(0, countArchiveMobFiles(tn, hcd.getNameAsString()));
     } finally {
