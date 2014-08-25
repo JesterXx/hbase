@@ -63,7 +63,7 @@ public class MobFileName {
     this.startKey = startKey;
     this.uuid = uuid;
     this.date = date;
-    this.fileName = Integer.toHexString(startKey) + date + uuid;
+    this.fileName = Integer.toString(startKey) + date + uuid;
   }
 
   /**
@@ -97,7 +97,7 @@ public class MobFileName {
    * @return The hex string of the checksum for a start key.
    */
   public String getStartKey() {
-    return Integer.toHexString(startKey);
+    return Integer.toString(startKey);
   }
 
   /**
