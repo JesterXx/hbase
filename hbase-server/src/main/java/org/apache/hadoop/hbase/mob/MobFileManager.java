@@ -47,7 +47,9 @@ import org.apache.hadoop.hbase.util.Bytes;
 /**
  * A manager of mob files.
  * It provides the information of the MOB column family in HBase, validates the mob files and
- * reads the MOB cells from the MOB files.
+ * reads the MOB cells from the MOB files. It's store-specific.
+ * It could be instantiated for multiple times in a single store, there's no need to have it as
+ * a singleton.
  */
 @InterfaceAudience.Private
 public class MobFileManager {

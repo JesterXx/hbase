@@ -71,15 +71,17 @@ public class MobFileCache {
     }
   }
 
-  //accesses to this map are guarded by the evictionLock
+  // a ConcurrentHashMap, accesses to this map are synchronized.  
   private Map<String, CachedMobFile> map = null;
-  // caches access count (sequential ID)
+  // caches access count
   private final AtomicLong count;
   private final AtomicLong miss;
 
+  // a lock to sync the evict to guarantee the eviction occurs in sequence.
+  // the method evictFile is not sync by this lock, the ConcurrentHashMap does the sync there.
   private final ReentrantLock evictionLock = new ReentrantLock(true);
 
-  //stripes lock on each mob file based on its hash.
+  //stripes lock on each mob file based on its hash. Sync the openFile/closeFile operations.
   private IdLock keyLock = new IdLock();
 
   private final ScheduledExecutorService scheduleThreadPool = Executors.newScheduledThreadPool(1,
@@ -104,11 +106,12 @@ public class MobFileCache {
           MobConstants.DEFAULT_MOB_CACHE_EVICT_PERIOD); // in seconds
       evictRemainRatio = conf.getFloat(MobConstants.MOB_CACHE_EVICT_REMAIN_RATIO,
           MobConstants.DEFAULT_EVICT_REMAIN_RATIO);
-      if (evictRemainRatio < 0.0 || evictRemainRatio > 1.0) {
-        evictRemainRatio = MobConstants.DEFAULT_EVICT_REMAIN_RATIO;
-        LOG.warn(MobConstants.MOB_CACHE_EVICT_REMAIN_RATIO
-            + " is not in the range [0.0, 1.0], the default value "
-            + MobConstants.DEFAULT_EVICT_REMAIN_RATIO + " is used.");
+      if (evictRemainRatio < 0.0) {
+        evictRemainRatio = 0.0f;
+        LOG.warn(MobConstants.MOB_CACHE_EVICT_REMAIN_RATIO + " is less than 0.0, 0.0 is used.");
+      } else if (evictRemainRatio > 1.0) {
+        evictRemainRatio = 1.0f;
+        LOG.warn(MobConstants.MOB_CACHE_EVICT_REMAIN_RATIO + " is larger than 1.0, 1.0 is used.");
       }
       this.scheduleThreadPool.scheduleAtFixedRate(new EvictionThread(this), period, period,
           TimeUnit.SECONDS);
@@ -127,7 +130,7 @@ public class MobFileCache {
       if (!evictionLock.tryLock()) {
         return;
       }
-      List<CachedMobFile> deletedFiles = new ArrayList<>();
+      List<CachedMobFile> evictedFiles = new ArrayList<>();
       try {
         if (map.size() <= mobFileMaxCacheSize) {
           return;
@@ -138,17 +141,19 @@ public class MobFileCache {
         if (start >= 0) {
           for (int i = start; i < files.size(); i++) {
             String name = files.get(i).getFileName();
-            CachedMobFile deletedFile = map.remove(name);
-            if (null != deletedFile) {
-              deletedFiles.add(deletedFile);
+            CachedMobFile evictedFile = map.remove(name);
+            if (null != evictedFile) {
+              evictedFiles.add(evictedFile);
             }
           }
         }
       } finally {
         evictionLock.unlock();
       }
-      for (CachedMobFile deletedFile : deletedFiles) {
-        closeFile(deletedFile);
+      // EvictionLock is released. Close the evicted files one by one.
+      // The closes are sync in the closeFile method.
+      for (CachedMobFile evictedFile : evictedFiles) {
+        closeFile(evictedFile);
       }
     }
   }
@@ -161,10 +166,11 @@ public class MobFileCache {
     if (isCacheEnabled) {
       IdLock.Entry lockEntry = null;
       try {
+        // obtains the lock to close the cached file.
         lockEntry = keyLock.getLockEntry(fileName.hashCode());
-        CachedMobFile deletedFile = map.remove(fileName);
-        if (null != deletedFile) {
-          deletedFile.close();
+        CachedMobFile evictedFile = map.remove(fileName);
+        if (null != evictedFile) {
+          evictedFile.close();
         }
       } catch (IOException e) {
         LOG.error("Fail to evict the file " + fileName, e);
