@@ -25,8 +25,8 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hbase.Cell;
-import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
+import org.apache.hadoop.hbase.regionserver.BloomType;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 
 /**
  * Cached mob file.
@@ -35,17 +35,16 @@ import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> {
 
   private long accessCount;
-  private MobFile file;
   private AtomicLong referenceCount = new AtomicLong(0);
 
-  public CachedMobFile(MobFile file) {
-    this.file = file;
+  public CachedMobFile(StoreFile sf) {
+    super(sf);
   }
 
   public static CachedMobFile create(FileSystem fs, Path path, Configuration conf,
       MobCacheConfig cacheConf) throws IOException {
-    MobFile file = MobFile.create(fs, path, conf, cacheConf);
-    return new CachedMobFile(file);
+    StoreFile sf = new StoreFile(fs, path, conf, cacheConf, BloomType.NONE);
+    return new CachedMobFile(sf);
   }
 
   public void access(long accessCount) {
@@ -53,8 +52,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
   }
 
   public int compareTo(CachedMobFile that) {
-    if (this.accessCount == that.accessCount)
-      return 0;
+    if (this.accessCount == that.accessCount) return 0;
     return this.accessCount < that.accessCount ? 1 : -1;
   }
 
@@ -68,7 +66,7 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
    */
   @Override
   public void open() throws IOException {
-    file.open();
+    super.open();
     referenceCount.incrementAndGet();
   }
 
@@ -81,40 +79,8 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
   public void close() throws IOException {
     long refs = referenceCount.decrementAndGet();
     if (refs == 0) {
-      this.file.close();
+      super.close();
     }
-  }
-
-  /**
-   * Reads a cell from the mob file.
-   * @param search The cell need to be searched in the mob file.
-   * @param cacheMobBlocks Whether should this scanner cache blocks.
-   * @return The cell in the mob file.
-   * @throws IOException
-   */
-  @Override
-  public Cell readCell(Cell search, boolean cacheMobBlocks) throws IOException {
-    return file.readCell(search, cacheMobBlocks);
-  }
-
-  /**
-   * Gets the file name.
-   * @return The file name.
-   */
-  @Override
-  public String getFileName() {
-    return file.getFileName();
-  }
-
-  /**
-   * Internal use only. This is used by the sweeper.
-   *
-   * @return The store file scanner.
-   * @throws IOException
-   */
-  @Override
-  public StoreFileScanner getScanner() throws IOException {
-    return file.getScanner();
   }
 
   /**
