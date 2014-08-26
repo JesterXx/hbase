@@ -37,7 +37,6 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.mob.DefaultMobStoreFlusher;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -67,9 +66,6 @@ public class TestMobStoreScanner {
   public static void setUpBeforeClass() throws Exception {
     TEST_UTIL.getConfiguration().setInt("hbase.master.info.port", 0);
     TEST_UTIL.getConfiguration().setBoolean("hbase.regionserver.info.port.auto", true);
-    TEST_UTIL.getConfiguration().setClass(
-        DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-        DefaultMobStoreFlusher.class, StoreFlusher.class);
 
     TEST_UTIL.startMiniCluster(1);
   }
