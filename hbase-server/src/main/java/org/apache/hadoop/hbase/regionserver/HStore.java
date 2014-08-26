@@ -263,7 +263,7 @@ public class HStore implements Store {
           "hbase.hstore.close.check.interval", 10*1000*1000 /* 10 MB */);
     }
 
-    this.storeEngine = StoreEngine.create(this, this.conf, this.comparator);
+    this.storeEngine = createStoreEngine();
     this.storeEngine.getStoreFileManager().loadFiles(loadStoreFiles());
 
     // Initialize checksum type from name. The names are CRC32, CRC32C, etc.
@@ -335,6 +335,14 @@ public class HStore implements Store {
       cryptoContext.setCipher(cipher);
       cryptoContext.setKey(key);
     }
+  }
+
+  /**
+   * Creates the store engine configured for the given Store.
+   * @return StoreEngine to use.
+   */
+  protected StoreEngine<?, ?, ?, ?> createStoreEngine() throws IOException {
+    return StoreEngine.create(this, this.conf, this.comparator);
   }
 
   /**

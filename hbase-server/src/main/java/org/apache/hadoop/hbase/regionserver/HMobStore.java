@@ -26,6 +26,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.mob.MobFileManager;
+import org.apache.hadoop.hbase.mob.MobStoreEngine;
 
 /**
  * The store implementation to save MOBs (medium objects), it extends the HStore.
@@ -62,5 +63,13 @@ public class HMobStore extends HStore {
           targetCols, readPt, mobFileManager);
     }
     return scanner;
+  }
+
+  /**
+   * Creates the mob store engine.
+   */
+  @Override
+  protected StoreEngine<?, ?, ?, ?> createStoreEngine() throws IOException {
+    return new MobStoreEngine();
   }
 }
