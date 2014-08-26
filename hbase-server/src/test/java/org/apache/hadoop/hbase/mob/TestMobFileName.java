@@ -71,7 +71,7 @@ public class TestMobFileName extends TestCase {
     int[] ints = { -1, 0, 123, Integer.MIN_VALUE, Integer.MAX_VALUE };
     for (int i = 0; i < ints.length; i++) {
       assertEquals(ints[i],
-          (int)Long.parseLong(Integer.toHexString(ints[i])));
+          (int)Long.parseLong(Integer.toHexString(ints[i]), 16));
     }
   }
 

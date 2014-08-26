@@ -77,7 +77,7 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String startKey, String date, String uuid) {
-    return new MobFileName((int)Long.parseLong(startKey), date, uuid);
+    return new MobFileName((int)Long.parseLong(startKey, 16), date, uuid);
   }
 
   /**
@@ -86,7 +86,7 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String fileName) {
-    int startKey = (int)Long.parseLong(fileName.substring(0, 8));
+    int startKey = (int)Long.parseLong(fileName.substring(0, 8), 16);
     String date = fileName.substring(8, 16);
     String uuid = fileName.substring(16);
     return new MobFileName(startKey, date, uuid);
