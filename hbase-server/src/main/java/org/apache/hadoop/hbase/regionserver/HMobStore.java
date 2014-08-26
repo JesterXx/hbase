@@ -84,7 +84,7 @@ public class HMobStore extends HStore {
    */
   @Override
   protected void createCacheConf(HColumnDescriptor family) {
-    this.mobCacheConfig = new MobCacheConfig(conf, family);
+    cacheConf = new MobCacheConfig(conf, family);
   }
 
   /**
