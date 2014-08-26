@@ -24,6 +24,7 @@ import java.util.NavigableSet;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.KeyValue.KVComparator;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.mob.MobFileManager;
 import org.apache.hadoop.hbase.mob.MobStoreEngine;
@@ -69,7 +70,10 @@ public class HMobStore extends HStore {
    * Creates the mob store engine.
    */
   @Override
-  protected StoreEngine<?, ?, ?, ?> createStoreEngine() throws IOException {
-    return new MobStoreEngine();
+  protected StoreEngine<?, ?, ?, ?> createStoreEngine(Store store, Configuration conf,
+      KVComparator kvComparator) throws IOException {
+    MobStoreEngine engine = new MobStoreEngine();
+    engine.createComponents(conf, store, kvComparator);
+    return engine;
   }
 }
