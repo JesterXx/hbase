@@ -19,6 +19,7 @@
 package org.apache.hadoop.hbase.mob;
 
 import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
@@ -28,6 +29,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * The constants used in mob.
  */
 @InterfaceAudience.Public
+@InterfaceStability.Stable
 public class MobConstants {
 
   public static final String IS_MOB = "isMob";

@@ -130,7 +130,7 @@ public class MobFileCache {
       if (!evictionLock.tryLock()) {
         return;
       }
-      List<CachedMobFile> evictedFiles = new ArrayList<>();
+      List<CachedMobFile> evictedFiles = new ArrayList<CachedMobFile>();
       try {
         if (map.size() <= mobFileMaxCacheSize) {
           return;
