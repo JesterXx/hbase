@@ -36,6 +36,7 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.regionserver.DefaultStoreFlusher;
+import org.apache.hadoop.hbase.regionserver.HMobStore;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.MemStoreSnapshot;
 import org.apache.hadoop.hbase.regionserver.Store;
@@ -65,7 +66,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   private boolean isMob = false;
   private long mobCellValueSizeThreshold = 0;
   private Path targetPath;
-  private MobFileManager mobFileManager;
+  private HMobStore mobStore;
 
   public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException{
     super(conf, store);
@@ -77,8 +78,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
       if (!this.store.getFileSystem().exists(targetPath)) {
         this.store.getFileSystem().mkdirs(targetPath);
       }
-      mobFileManager = MobFileManager.create(conf, this.store.getFileSystem(),
-          this.store.getTableName(), this.store.getFamily());
+      this.mobStore = (HMobStore) store;
     }
   }
 
@@ -166,7 +166,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         HConstants.COMPACTION_KV_MAX_DEFAULT);
     long mobKVCount = 0;
     long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
-    mobFileWriter = mobFileManager.createWriterInTmp(new Date(time), snapshot.getCellsCount(),
+    mobFileWriter = mobStore.createWriterInTmp(new Date(time), snapshot.getCellsCount(),
         store.getFamily().getCompression(), store.getRegionInfo().getStartKey());
     // the target path is {tableName}/.mob/{cfName}/mobFiles
     // the relative path is mobFiles
@@ -213,7 +213,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
       // If the mob file is committed successfully but the store file is not,
       // the committed mob file will be handled by the sweep tool as an unused
       // file.
-      mobFileManager.commitFile(mobFileWriter.getPath(), targetPath);
+      mobStore.commitFile(mobFileWriter.getPath(), targetPath);
     } else {
       try {
         // If the mob file is empty, delete it instead of committing.

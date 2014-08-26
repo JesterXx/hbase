@@ -133,11 +133,11 @@ public class HStore implements Store {
 
   protected final MemStore memstore;
   // This stores directory in the filesystem.
-  private final HRegion region;
+  protected final HRegion region;
   private final HColumnDescriptor family;
   private final HRegionFileSystem fs;
-  private final Configuration conf;
-  private final CacheConfig cacheConf;
+  protected final Configuration conf;
+  private CacheConfig cacheConf = null;
   private long lastCompactSize = 0;
   volatile boolean forceMajor = false;
   /* how many bytes to write between status checks */
@@ -245,7 +245,7 @@ public class HStore implements Store {
     this.offPeakHours = OffPeakHours.getInstance(conf);
 
     // Setting up cache configuration for this family
-    this.cacheConf = new CacheConfig(conf, family);
+    createCacheConf(family);
 
     this.verifyBulkLoads = conf.getBoolean("hbase.hstore.bulkload.verify", false);
 
@@ -336,6 +336,14 @@ public class HStore implements Store {
       cryptoContext.setCipher(cipher);
       cryptoContext.setKey(key);
     }
+  }
+
+  /**
+   * Creates the cache config.
+   * @param family The current column family.
+   */
+  protected void createCacheConf(final HColumnDescriptor family) {
+    this.cacheConf = new CacheConfig(conf, family);
   }
 
   /**

@@ -25,7 +25,6 @@ import java.util.NavigableSet;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.mob.MobFileManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 
 /**
@@ -37,13 +36,11 @@ import org.apache.hadoop.hbase.mob.MobUtils;
 public class ReversedMobStoreScanner extends ReversedStoreScanner {
 
   private boolean cacheMobBlocks = false;
-  private MobFileManager mobFileManager;
 
   ReversedMobStoreScanner(Store store, ScanInfo scanInfo, Scan scan, NavigableSet<byte[]> columns,
-      long readPt, MobFileManager mobFileStore) throws IOException {
+      long readPt) throws IOException {
     super(store, scanInfo, scan, columns, readPt);
     cacheMobBlocks = MobUtils.isCacheMobBlocks(scan);
-    this.mobFileManager = mobFileStore;
   }
 
   /**
@@ -59,10 +56,11 @@ public class ReversedMobStoreScanner extends ReversedStoreScanner {
       if (outResult.isEmpty()) {
         return result;
       }
+      HMobStore mobStore = (HMobStore) store;
       for (int i = 0; i < outResult.size(); i++) {
         Cell cell = outResult.get(i);
         if (MobUtils.isMobReferenceCell(cell)) {
-          outResult.set(i, mobFileManager.resolve(cell, cacheMobBlocks));
+          outResult.set(i, mobStore.resolve(cell, cacheMobBlocks));
         }
       }
     }
