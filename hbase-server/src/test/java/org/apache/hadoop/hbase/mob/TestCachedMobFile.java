@@ -33,7 +33,6 @@ import org.apache.hadoop.hbase.SmallTests;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
-import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -63,14 +62,9 @@ public class TestCachedMobFile extends TestCase{
         FAMILY);
     HFileContext meta = new HFileContextBuilder().withBlockSize(8*1024).build();
     StoreFile.Writer writer = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-    .withOutputDir(outputDir)
-    .withFileContext(meta)
-    .build();
+        .withOutputDir(outputDir).withFileContext(meta).build();
     MobTestUtil.writeStoreFile(writer, caseName);
-    CachedMobFile cachedMobFile = new CachedMobFile(new MobFile(
-        new StoreFile(fs, writer.getPath(), conf, cacheConf,
-            BloomType.NONE)));
-
+    CachedMobFile cachedMobFile = CachedMobFile.create(fs, writer.getPath(), conf, cacheConf);
     Assert.assertEquals(EXPECTED_REFERENCE_ZERO, cachedMobFile.getReferenceCount());
     cachedMobFile.open();
     Assert.assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile.getReferenceCount());
@@ -89,16 +83,11 @@ public class TestCachedMobFile extends TestCase{
     Path testDir = FSUtils.getRootDir(conf);
     Path outputDir1 = new Path(new Path(testDir, TABLE),
         FAMILY1);
-    HFileContext meta = new HFileContextBuilder().withBlockSize(8*1024).build();
+    HFileContext meta = new HFileContextBuilder().withBlockSize(8 * 1024).build();
     StoreFile.Writer writer1 = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-    .withOutputDir(outputDir1)
-    .withFileContext(meta)
-    .build();
+        .withOutputDir(outputDir1).withFileContext(meta).build();
     MobTestUtil.writeStoreFile(writer1, caseName);
-    CachedMobFile cachedMobFile1 = new CachedMobFile(new MobFile(
-        new StoreFile(fs, writer1.getPath(), conf, cacheConf,
-            BloomType.NONE)));
-
+    CachedMobFile cachedMobFile1 = CachedMobFile.create(fs, writer1.getPath(), conf, cacheConf);
     Path outputDir2 = new Path(new Path(testDir, TABLE),
         FAMILY2);
     StoreFile.Writer writer2 = new StoreFile.WriterBuilder(conf, cacheConf, fs)
@@ -106,9 +95,7 @@ public class TestCachedMobFile extends TestCase{
     .withFileContext(meta)
     .build();
     MobTestUtil.writeStoreFile(writer2, caseName);
-    CachedMobFile cachedMobFile2 = new CachedMobFile(new MobFile(
-        new StoreFile(fs, writer2.getPath(), conf, cacheConf,
-            BloomType.NONE)));
+    CachedMobFile cachedMobFile2 = CachedMobFile.create(fs, writer2.getPath(), conf, cacheConf);
     cachedMobFile1.access(1);
     cachedMobFile2.access(2);
     Assert.assertEquals(cachedMobFile1.compareTo(cachedMobFile2), 1);
@@ -121,20 +108,14 @@ public class TestCachedMobFile extends TestCase{
     FileSystem fs = FileSystem.get(conf);
     Path testDir = FSUtils.getRootDir(conf);
     Path outputDir = new Path(new Path(testDir, TABLE), "familyname");
-    HFileContext meta = new HFileContextBuilder().withBlockSize(8*1024).build();
+    HFileContext meta = new HFileContextBuilder().withBlockSize(8 * 1024).build();
     StoreFile.Writer writer = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-    .withOutputDir(outputDir)
-    .withFileContext(meta)
-    .build();
+        .withOutputDir(outputDir).withFileContext(meta).build();
     String caseName = getName();
     MobTestUtil.writeStoreFile(writer, caseName);
-    MobFile mobFile = new MobFile(new StoreFile(fs, writer.getPath(),
-        conf, cacheConf, BloomType.NONE));
-    CachedMobFile cachedMobFile = new CachedMobFile(mobFile);
-
+    CachedMobFile cachedMobFile = CachedMobFile.create(fs, writer.getPath(), conf, cacheConf);
     byte[] family = Bytes.toBytes(caseName);
     byte[] qualify = Bytes.toBytes(caseName);
-
     // Test the start key
     byte[] startKey = Bytes.toBytes("aa");  // The start key bytes
     KeyValue expectedKey =
