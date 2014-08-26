@@ -313,8 +313,6 @@ public class TestHMobStore {
     Collections.sort(results, KeyValue.COMPARATOR);
     scanner.close();
 
-    System.out.println(expected);
-    System.out.println(results);
     //Compare
     Assert.assertEquals(expected.size(), results.size());
     for(int i=0; i<results.size(); i++) {
