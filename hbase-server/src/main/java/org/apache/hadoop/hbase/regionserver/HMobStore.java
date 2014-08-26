@@ -65,7 +65,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 @InterfaceAudience.Private
 public class HMobStore extends HStore {
 
-  private MobCacheConfig cacheConf;
+  private MobCacheConfig mobCacheConfig;
   private Path homePath;
   private Path mobFamilyPath;
   private final static String TMP = ".tmp";
@@ -73,6 +73,7 @@ public class HMobStore extends HStore {
   public HMobStore(final HRegion region, final HColumnDescriptor family,
       final Configuration confParam) throws IOException {
     super(region, family, confParam);
+    this.mobCacheConfig = (MobCacheConfig) cacheConf;
     this.homePath = MobUtils.getMobHome(conf);
     this.mobFamilyPath = MobUtils.getMobFamilyPath(conf, this.getTableName(),
         family.getNameAsString());
@@ -83,7 +84,7 @@ public class HMobStore extends HStore {
    */
   @Override
   protected void createCacheConf(HColumnDescriptor family) {
-    this.cacheConf = new MobCacheConfig(conf, family);
+    this.mobCacheConfig = new MobCacheConfig(conf, family);
   }
 
   /**
@@ -169,7 +170,7 @@ public class HMobStore extends HStore {
       Compression.Algorithm compression, String startKey) throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID()
         .toString().replaceAll("-", ""));
-    final CacheConfig writerCacheConf = cacheConf;
+    final CacheConfig writerCacheConf = mobCacheConfig;
     HFileContext hFileContext = new HFileContextBuilder().withCompression(compression)
         .withIncludesMvcc(false).withIncludesTags(true)
         .withChecksumType(HFile.DEFAULT_CHECKSUM_TYPE)
@@ -216,7 +217,7 @@ public class HMobStore extends HStore {
     StoreFile storeFile = null;
     try {
       storeFile =
-          new StoreFile(region.getFilesystem(), path, conf, this.cacheConf, BloomType.NONE);
+          new StoreFile(region.getFilesystem(), path, conf, this.mobCacheConfig, BloomType.NONE);
       storeFile.createReader();
     } catch (IOException e) {
       LOG.error("Fail to open mob store file[" + path + "], keeping it in tmp location["
@@ -244,7 +245,7 @@ public class HMobStore extends HStore {
       Path targetPath = new Path(mobFamilyPath, fileName);
       MobFile file = null;
       try {
-        file = cacheConf.getMobFileCache().openFile(region.getFilesystem(), targetPath, cacheConf);
+        file = mobCacheConfig.getMobFileCache().openFile(region.getFilesystem(), targetPath, mobCacheConfig);
         result = file.readCell(reference, cacheBlocks);
       } catch (IOException e) {
         LOG.error("Fail to open/read the mob file " + targetPath.toString(), e);
@@ -255,7 +256,7 @@ public class HMobStore extends HStore {
             + " since it's already deleted", e);
       } finally {
         if (file != null) {
-          cacheConf.getMobFileCache().closeFile(file);
+          mobCacheConfig.getMobFileCache().closeFile(file);
         }
       }
     } else {
