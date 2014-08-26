@@ -47,36 +47,53 @@ public class TestMobFileName extends TestCase {
   @Test
   public void testHashCode() {
     assertEquals(
-      MobFileName.create(Integer.toString(startKey),
+      MobFileName.create(Integer.toHexString(startKey),
         dateStr, uuid).hashCode(),
-      MobFileName.create(Integer.toString(startKey),
+      MobFileName.create(Integer.toHexString(startKey),
         dateStr, uuid).hashCode());
     assertNotSame(
-      MobFileName.create(Integer.toString(startKey),
+      MobFileName.create(Integer.toHexString(startKey),
         dateStr, uuid).hashCode(),
-      MobFileName.create(Integer.toString(startKey),
+      MobFileName.create(Integer.toHexString(startKey),
         dateStr, uuid).hashCode());
+  }
+
+  @Test
+  public void testCreate() {
+    MobFileName mobFileName = MobFileName.create(
+        Integer.toHexString(startKey), dateStr, uuid);
+    assertEquals(mobFileName,
+      MobFileName.create(mobFileName.getFileName()));
+  }
+
+  @Test
+  public void testSwitchHexStringInt() {
+    int[] ints = { -1, 0, 123, Integer.MIN_VALUE, Integer.MAX_VALUE };
+    for (int i = 0; i < ints.length; i++) {
+      assertEquals(ints[i],
+          (int)Long.parseLong(Integer.toHexString(ints[i])));
+    }
   }
 
   @Test
   public void testGet() {
     MobFileName mobFileName = MobFileName.create(
-        Integer.toString(startKey), dateStr, uuid);
-    assertEquals(Integer.toString(startKey),
+        Integer.toHexString(startKey), dateStr, uuid);
+    assertEquals(Integer.toHexString(startKey),
       mobFileName.getStartKey()); // getStartKey
     assertEquals(dateStr, mobFileName.getDate()); // getDate
     assertEquals(
       mobFileName.getFileName(),
-      Integer.toString(startKey) + dateStr + uuid); // getFileName
+      Integer.toHexString(startKey) + dateStr + uuid); // getFileName
   }
 
   @Test
   public void testEquals() {
     MobFileName mobFileName = MobFileName.create(
-        Integer.toString(startKey), dateStr, uuid);
+        Integer.toHexString(startKey), dateStr, uuid);
     assertTrue(mobFileName.equals(mobFileName));
     assertFalse(mobFileName.equals(this));
     assertTrue(mobFileName.equals(MobFileName.create(
-        Integer.toString(startKey), dateStr, uuid)));
+        Integer.toHexString(startKey), dateStr, uuid)));
   }
 }
