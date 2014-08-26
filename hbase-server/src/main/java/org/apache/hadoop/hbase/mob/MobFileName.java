@@ -18,10 +18,7 @@
  */
 package org.apache.hadoop.hbase.mob;
 
-import java.security.InvalidParameterException;
-
 import org.apache.hadoop.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * The mob file name.
@@ -48,9 +45,6 @@ public class MobFileName {
   private final String uuid;
   private String fileName;
 
-  private final static char[] digits = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a',
-      'b', 'c', 'd', 'e', 'f' };
-
   /**
    * @param startKey
    *          The checksum of the start key.
@@ -63,7 +57,7 @@ public class MobFileName {
     this.startKey = startKey;
     this.uuid = uuid;
     this.date = date;
-    this.fileName = Integer.toHexString(startKey) + date + uuid;
+    this.fileName = MobUtils.int2HexString(startKey) + date + uuid;
   }
 
   /**
@@ -77,7 +71,7 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String startKey, String date, String uuid) {
-    return new MobFileName((int)Long.parseLong(startKey, 16), date, uuid);
+    return new MobFileName(MobUtils.hexString2Int(startKey), date, uuid);
   }
 
   /**
@@ -86,7 +80,7 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String fileName) {
-    int startKey = (int)Long.parseLong(fileName.substring(0, 8), 16);
+    int startKey = MobUtils.hexString2Int(fileName.substring(0, 8));
     String date = fileName.substring(8, 16);
     String uuid = fileName.substring(16);
     return new MobFileName(startKey, date, uuid);
@@ -97,7 +91,7 @@ public class MobFileName {
    * @return The hex string of the checksum for a start key.
    */
   public String getStartKey() {
-    return Integer.toHexString(startKey);
+    return MobUtils.int2HexString(startKey);
   }
 
   /**
