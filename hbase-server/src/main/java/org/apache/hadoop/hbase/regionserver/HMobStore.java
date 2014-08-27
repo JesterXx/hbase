@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.NavigableSet;
 import java.util.UUID;
-import java.util.zip.CRC32;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
@@ -134,24 +133,6 @@ public class HMobStore extends HStore {
     if (null == startKey) {
       startKey = HConstants.EMPTY_START_ROW;
     }
-
-    CRC32 crc = new CRC32();
-    crc.update(startKey);
-    int checksum = (int) crc.getValue();
-    return createWriterInTmp(date, maxKeyCount, compression, MobUtils.int2HexString(checksum));
-  }
-
-  /**
-   * Creates the temp directory of mob files for flushing.
-   * @param date The latest date of cells in the flushing.
-   * @param maxKeyCount The key count.
-   * @param compression The compression algorithm.
-   * @param startKey The hex string of the checksum for the start key.
-   * @return The writer for the mob file.
-   * @throws IOException
-   */
-  public StoreFile.Writer createWriterInTmp(Date date, long maxKeyCount,
-      Compression.Algorithm compression, String startKey) throws IOException {
     Path path = getTmpDir();
     return createWriterInTmp(MobUtils.formatDate(date), path, maxKeyCount, compression, startKey);
   }
@@ -162,12 +143,12 @@ public class HMobStore extends HStore {
    * @param basePath The basic path for a temp directory.
    * @param maxKeyCount The key count.
    * @param compression The compression algorithm.
-   * @param startKey The hex string of the checksum for the start key.
+   * @param startKey The start key.
    * @return The writer for the mob file.
    * @throws IOException
    */
   public StoreFile.Writer createWriterInTmp(String date, Path basePath, long maxKeyCount,
-      Compression.Algorithm compression, String startKey) throws IOException {
+      Compression.Algorithm compression, byte[] startKey) throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID()
         .toString().replaceAll("-", ""));
     final CacheConfig writerCacheConf = mobCacheConfig;

@@ -46,9 +46,6 @@ import org.apache.hadoop.hbase.util.Strings;
 @InterfaceAudience.Private
 public class MobUtils {
 
-  private final static char[] digits = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a',
-    'b', 'c', 'd', 'e', 'f' };
-
   private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT =
       new ThreadLocal<SimpleDateFormat>() {
     @Override
@@ -237,52 +234,6 @@ public class MobUtils {
     HRegionInfo info = new HRegionInfo(tableName, MobConstants.MOB_REGION_NAME_BYTES,
         HConstants.EMPTY_END_ROW, false, 0);
     return info;
-  }
-
-  /**
-   * Converts an integer to a hex string.
-   * @param i An integer.
-   * @return A hex string.
-   */
-  public static String int2HexString(int i) {
-    int shift = 4;
-    char[] buf = new char[8];
-
-    int charPos = 8;
-    int mask = 15;
-    do {
-      buf[--charPos] = digits[i & mask];
-      i >>>= shift;
-    } while (charPos > 0);
-
-    return new String(buf);
-  }
-
-  /**
-   * Converts a hex string to an integer.
-   * @param hex A hex string.
-   * @return An integer.
-   */
-  public static int hexString2Int(String hex) {
-    byte[] buffer = Bytes.toBytes(hex);
-    if (buffer.length != 8) {
-      throw new InvalidParameterException("hexString2Int length not valid");
-    }
-
-    for (int i = 0; i < buffer.length; i++) {
-      byte ch = buffer[i];
-      if (ch >= 'a' && ch <= 'f') {
-        buffer[i] = (byte) (ch - 'a' + 10);
-      } else {
-        buffer[i] = (byte) (ch - '0');
-      }
-    }
-
-    buffer[0] = (byte) ((buffer[0] << 4) ^ buffer[1]);
-    buffer[1] = (byte) ((buffer[2] << 4) ^ buffer[3]);
-    buffer[2] = (byte) ((buffer[4] << 4) ^ buffer[5]);
-    buffer[3] = (byte) ((buffer[6] << 4) ^ buffer[7]);
-    return Bytes.toInt(buffer, 0, 4);
   }
 
   /**
