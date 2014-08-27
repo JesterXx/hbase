@@ -88,6 +88,13 @@ public class HMobStore extends HStore {
   }
 
   /**
+   * Gets current config.
+   */
+  public Configuration getConfiguration() {
+    return this.conf;
+  }
+
+  /**
    * Gets the MobStoreScanner or MobReversedStoreScanner. In these scanners, a additional seeks in
    * the mob files should be performed after the seek in HBase is done.
    */  
@@ -243,25 +250,16 @@ public class HMobStore extends HStore {
       String fileName = Bytes.toString(reference.getValueArray(), reference.getValueOffset()
           + Bytes.SIZEOF_LONG, reference.getValueLength() - Bytes.SIZEOF_LONG);
       Path targetPath = new Path(mobFamilyPath, fileName);
-      MobFile file = null;
-      try {
-        file = mobCacheConfig.getMobFileCache().openFile(region.getFilesystem(), targetPath,
-            mobCacheConfig);
-        result = file.readCell(reference, cacheBlocks);
-      } catch (IOException e) {
-        LOG.error("Fail to open/read the mob file " + targetPath.toString(), e);
-      } catch (NullPointerException e) {
-        // When delete the file during the scan, the hdfs getBlockRange will
-        // throw NullPointerException, catch it and manage it.
-        LOG.error("Fail to read the mob file " + targetPath.toString()
-            + " since it's already deleted", e);
-      } finally {
-        if (file != null) {
+      MobFile file = MobUtils.openExistFile(this, targetPath);
+      if (file != null) {
+        try {
+          result = MobUtils.readCellFromExistFile(this, file, reference, cacheBlocks);
+        } finally {
           mobCacheConfig.getMobFileCache().closeFile(file);
         }
+      } else {
+        LOG.warn("Fail to find the mob file " + targetPath);
       }
-    } else {
-      LOG.warn("Invalid reference to mob, " + reference.getValueLength() + " bytes is too short");
     }
 
     if (result == null) {

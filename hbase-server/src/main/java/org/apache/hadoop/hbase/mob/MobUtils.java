@@ -43,6 +43,7 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.backup.HFileArchiver;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.regionserver.HMobStore;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -297,10 +298,10 @@ public class MobUtils {
    * @return The opened MobFile.
    * @throws IOException
    */
-  public static MobFile openExistFile(MobFileManager manager, Path path) throws IOException {
+  public static MobFile openExistFile(HMobStore store, Path path) throws IOException {
     boolean findArchive = false;
-    MobCacheConfig cacheConf = manager.getCacheConfig();
-    FileSystem fs = manager.getFileSystem();
+    MobCacheConfig cacheConf = (MobCacheConfig)store.getCacheConfig();
+    FileSystem fs = store.getFileSystem();
     try {
       return cacheConf.getMobFileCache().openFile(fs, path, cacheConf);
     } catch (IOException e) {
@@ -316,9 +317,9 @@ public class MobUtils {
       // Evict the cached file
       String fileName = path.getName();
       evictFile(cacheConf, fileName);
-      Path archivePath = HFileArchiveUtil.getStoreArchivePath(manager.getConfiguration(),
-          manager.getTableName(), getMobRegionInfo(manager.getTableName())
-              .getEncodedName(), manager.getColumnDescriptor().getName());
+      Path archivePath = HFileArchiveUtil.getStoreArchivePath(store.getConfiguration(),
+          store.getTableName(), getMobRegionInfo(store.getTableName())
+              .getEncodedName(), store.getFamily().getName());
       try {
         // Open and cache
         return cacheConf.getMobFileCache().openFile(fs, archivePath, cacheConf);
@@ -346,11 +347,11 @@ public class MobUtils {
    * @return The found cell.
    * @throws IOException
    */
-  public static Cell readCellFromExistFile(MobFileManager manager, MobFile file, Cell search,
+  public static Cell readCellFromExistFile(HMobStore store, MobFile file, Cell search,
       boolean cacheMobBlocks) throws IOException {
     boolean findArchive = false;
-    MobCacheConfig cacheConf = manager.getCacheConfig();
-    FileSystem fs = manager.getFileSystem();
+    MobCacheConfig cacheConf = (MobCacheConfig)store.getCacheConfig();
+    FileSystem fs = store.getFileSystem();
     try {
       return file.readCell(search, cacheMobBlocks);
     } catch (IOException e) {
@@ -364,23 +365,23 @@ public class MobUtils {
       findArchive = true;
     }
     if (findArchive) {
-      evictFile(cacheConf, file.getName());
-      Path archivePath = HFileArchiveUtil.getStoreArchivePath(manager.getConfiguration(),
-          manager.getTableName(), getMobRegionInfo(manager.getTableName())
-              .getEncodedName(), manager.getColumnDescriptor().getName());
+      evictFile(cacheConf, file.getFileName());
+      Path archivePath = HFileArchiveUtil.getStoreArchivePath(store.getConfiguration(),
+          store.getTableName(), getMobRegionInfo(store.getTableName())
+              .getEncodedName(), store.getFamily().getName());
       try {
         MobFile archive = cacheConf.getMobFileCache().openFile(fs, archivePath, cacheConf);
         return archive.readCell(search, cacheMobBlocks);
       } catch (IOException e) {
         if (e.getCause() instanceof FileNotFoundException) {
           logFileNotFoundException(e.getCause());
-          evictFile(cacheConf, file.getName());
+          evictFile(cacheConf, file.getFileName());
           return null;
         }
         throw e;
       } catch (NullPointerException e) {
         logNullPointerException(e);
-        evictFile(cacheConf, file.getName());
+        evictFile(cacheConf, file.getFileName());
         return null;
       }
     }
