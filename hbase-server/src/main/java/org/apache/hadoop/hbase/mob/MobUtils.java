@@ -249,9 +249,10 @@ public class MobUtils {
     // The key is same, the value is the filename of the mob file
     List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(), kv.getTagsLength());
     existingTags.add(MobConstants.MOB_REF_TAG);
-    // Add the tag of the source table name, this table name is where this mob file is flushed from.
+    // Add the tag of the source table name, this table name is where this mob file is flushed
+    // from.
     // It's very useful in cloning the snapshot. When reading from the cloning table, we need to
-    // find the original mob files by the this table name. For details please see the cloning
+    // find the original mob files by the this table name. For details please see cloning
     // snapshot for mob files.
     existingTags.add(mobSrcTableName);
     long valueLength = kv.getValueLength();
