@@ -26,6 +26,7 @@ import junit.framework.TestCase;
 
 import org.apache.hadoop.hbase.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.MD5Hash;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -62,9 +63,9 @@ public class TestMobFileName extends TestCase {
   @Test
   public void testGet() {
     MobFileName mobFileName = MobFileName.create(startKey, dateStr, uuid);
-    assertEquals(startKey, mobFileName.getStartKey()); // getStartKey
-    assertEquals(dateStr, mobFileName.getDate()); // getDate
-    assertEquals(mobFileName.getFileName(), startKey + dateStr + uuid); // getFileName
+    assertEquals(MD5Hash.getMD5AsHex(startKey, 0, startKey.length), mobFileName.getStartKey());
+    assertEquals(dateStr, mobFileName.getDate());
+    assertEquals(mobFileName.getFileName(), startKey + dateStr + uuid);
   }
 
   @Test
