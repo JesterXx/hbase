@@ -57,7 +57,6 @@ public class MobFile {
   public StoreFileScanner getScanner() throws IOException {
     List<StoreFile> sfs = new ArrayList<StoreFile>();
     sfs.add(sf);
-    sf.createReader();
     List<StoreFileScanner> sfScanners = StoreFileScanner.getScannersForStoreFiles(sfs, false, true,
         false, null, sf.getMaxMemstoreTS());
 
@@ -77,7 +76,6 @@ public class MobFile {
     List<StoreFile> sfs = new ArrayList<StoreFile>();
     sfs.add(sf);
     try {
-      sf.createReader();
       List<StoreFileScanner> sfScanners = StoreFileScanner.getScannersForStoreFiles(sfs,
           cacheMobBlocks, true, false, null, sf.getMaxMemstoreTS());
       if (!sfScanners.isEmpty()) {
@@ -98,12 +96,13 @@ public class MobFile {
    * Gets the file name.
    * @return The file name.
    */
-  public String getName() {
+  public String getFileName() {
     return sf.getPath().getName();
   }
 
   /**
    * Opens the underlying reader.
+   * It's not thread-safe. Use MobFileCache.openFile() instead.
    * @throws IOException
    */
   public void open() throws IOException {
@@ -114,7 +113,7 @@ public class MobFile {
 
   /**
    * Closes the underlying reader, but do no evict blocks belonging to this file.
-   *
+   * It's not thread-safe. Use MobFileCache.closeFile() instead.
    * @throws IOException
    */
   public void close() throws IOException {

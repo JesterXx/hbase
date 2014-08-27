@@ -1,5 +1,4 @@
 /**
- *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,39 +17,24 @@
  */
 package org.apache.hadoop.hbase.mob;
 
+import java.io.IOException;
+
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.HColumnDescriptor;
-import org.apache.hadoop.hbase.io.hfile.CacheConfig;
+import org.apache.hadoop.hbase.regionserver.DefaultStoreEngine;
+import org.apache.hadoop.hbase.regionserver.Store;
 
 /**
- * The cache configuration for the mob.
+ * MobStoreEngine creates the mob specific compactor, and store flusher.
  */
 @InterfaceAudience.Private
-public class MobCacheConfig extends CacheConfig {
+public class MobStoreEngine extends DefaultStoreEngine {
 
-  private static MobFileCache mobFileCache;
-
-  public MobCacheConfig(Configuration conf, HColumnDescriptor family) {
-    super(conf, family);
-    instantiateMobFileCache(conf);
-  }
-
-  /**
-   * Instantiates the MobFileCache.
-   * @param conf The current configuration.
-   */
-  public static synchronized void instantiateMobFileCache(Configuration conf) {
-    if (mobFileCache == null) {
-      mobFileCache = new MobFileCache(conf);
-    }
-  }
-
-  /**
-   * Gets the MobFileCache.
-   * @return The MobFileCache.
-   */
-  public MobFileCache getMobFileCache() {
-    return mobFileCache;
+  @Override
+  protected void createStoreFlusher(Configuration conf, Store store) throws IOException {
+    // When using MOB, we use DefaultMobStoreFlusher always
+    // Just use the compactor and compaction policy as that in DefaultStoreEngine. We can have MOB
+    // specific compactor and policy when that is implemented.
+    storeFlusher = new DefaultMobStoreFlusher(conf, store);
   }
 }

@@ -19,12 +19,32 @@
 package org.apache.hadoop.hbase.regionserver;
 
 import java.io.IOException;
+import java.util.Date;
 import java.util.NavigableSet;
+import java.util.UUID;
+import java.util.zip.CRC32;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.KeyValue.KVComparator;
+import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.mob.MobFileManager;
+import org.apache.hadoop.hbase.io.compress.Compression;
+import org.apache.hadoop.hbase.io.hfile.CacheConfig;
+import org.apache.hadoop.hbase.io.hfile.HFile;
+import org.apache.hadoop.hbase.io.hfile.HFileContext;
+import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
+import org.apache.hadoop.hbase.mob.MobCacheConfig;
+import org.apache.hadoop.hbase.mob.MobFile;
+import org.apache.hadoop.hbase.mob.MobFileName;
+import org.apache.hadoop.hbase.mob.MobStoreEngine;
+import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * The store implementation to save MOBs (medium objects), it extends the HStore.
@@ -35,39 +55,234 @@ import org.apache.hadoop.hbase.mob.MobFileManager;
  * In the method of getScanner, the MobStoreScanner and MobReversedStoreScanner are returned.
  * In these scanners, a additional seeks in the mob files should be performed after the seek
  * in HBase is done.
+ * The store implementation to save MOBs (medium objects), it extends the HStore. When a descriptor
+ * of a column family has the value "isMob", it means this column family is a mob one. When a
+ * HRegion instantiate a store for this column family, the HMobStore is created. HMobStore is
+ * almost the same with the HStore except using different types of scanners. In the method of
+ * getScanner, the MobStoreScanner and MobReversedStoreScanner are returned. In these scanners, a
+ * additional seeks in the mob files should be performed after the seek in HBase is done.
  */
+@InterfaceAudience.Private
 public class HMobStore extends HStore {
 
-  private MobFileManager mobFileManager;
+  private MobCacheConfig mobCacheConfig;
+  private Path homePath;
+  private Path mobFamilyPath;
+  private final static String TMP = ".tmp";
 
   public HMobStore(final HRegion region, final HColumnDescriptor family,
       final Configuration confParam) throws IOException {
     super(region, family, confParam);
-    mobFileManager = MobFileManager.create(region.conf, region.getFilesystem(),
-        this.getTableName(), this.getFamily());
+    this.mobCacheConfig = (MobCacheConfig) cacheConf;
+    this.homePath = MobUtils.getMobHome(conf);
+    this.mobFamilyPath = MobUtils.getMobFamilyPath(conf, this.getTableName(),
+        family.getNameAsString());
+  }
+
+  /**
+   * Creates the mob cache config.
+   */
+  @Override
+  protected void createCacheConf(HColumnDescriptor family) {
+    cacheConf = new MobCacheConfig(conf, family);
   }
 
   /**
    * Gets the MobStoreScanner or MobReversedStoreScanner. In these scanners, a additional seeks in
    * the mob files should be performed after the seek in HBase is done.
+   */  
+  @Override
+  protected KeyValueScanner createScanner(Scan scan, final NavigableSet<byte[]> targetCols,
+      long readPt, KeyValueScanner scanner) throws IOException {
+    if (scanner == null) {
+      scanner = scan.isReversed() ? new ReversedMobStoreScanner(this, getScanInfo(), scan,
+          targetCols, readPt) : new MobStoreScanner(this, getScanInfo(), scan, targetCols, readPt);
+    }
+    return scanner;
+  }
+
+  /**
+   * Creates the mob store engine.
    */
   @Override
-  public KeyValueScanner getScanner(Scan scan, NavigableSet<byte[]> targetCols, long readPt)
-      throws IOException {
-    lock.readLock().lock();
-    try {
-      KeyValueScanner scanner = null;
-      if (this.getCoprocessorHost() != null) {
-        scanner = this.getCoprocessorHost().preStoreScannerOpen(this, scan, targetCols);
-      }
-      if (scanner == null) {
-        scanner = scan.isReversed() ? new ReversedMobStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileManager) : new MobStoreScanner(this, getScanInfo(), scan,
-            targetCols, readPt, mobFileManager);
-      }
-      return scanner;
-    } finally {
-      lock.readLock().unlock();
+  protected StoreEngine<?, ?, ?, ?> createStoreEngine(Store store, Configuration conf,
+      KVComparator kvComparator) throws IOException {
+    MobStoreEngine engine = new MobStoreEngine();
+    engine.createComponents(conf, store, kvComparator);
+    return engine;
+  }
+
+  /**
+   * Gets the temp directory.
+   * @return The temp directory.
+   */
+  private Path getTmpDir() {
+    return new Path(homePath, TMP);
+  }
+
+  /**
+   * Creates the temp directory of mob files for flushing.
+   * @param date The latest date of cells in the flushing.
+   * @param maxKeyCount The key count.
+   * @param compression The compression algorithm.
+   * @param startKey The start key.
+   * @return The writer for the mob file.
+   * @throws IOException
+   */
+  public StoreFile.Writer createWriterInTmp(Date date, long maxKeyCount,
+      Compression.Algorithm compression, byte[] startKey) throws IOException {
+    if (null == startKey) {
+      startKey = HConstants.EMPTY_START_ROW;
     }
+
+    CRC32 crc = new CRC32();
+    crc.update(startKey);
+    int checksum = (int) crc.getValue();
+    return createWriterInTmp(date, maxKeyCount, compression, MobUtils.int2HexString(checksum));
+  }
+
+  /**
+   * Creates the temp directory of mob files for flushing.
+   * @param date The latest date of cells in the flushing.
+   * @param maxKeyCount The key count.
+   * @param compression The compression algorithm.
+   * @param startKey The hex string of the checksum for the start key.
+   * @return The writer for the mob file.
+   * @throws IOException
+   */
+  public StoreFile.Writer createWriterInTmp(Date date, long maxKeyCount,
+      Compression.Algorithm compression, String startKey) throws IOException {
+    Path path = getTmpDir();
+    return createWriterInTmp(MobUtils.formatDate(date), path, maxKeyCount, compression, startKey);
+  }
+
+  /**
+   * Creates the temp directory of mob files for flushing.
+   * @param date The date string, its format is yyyymmmdd.
+   * @param basePath The basic path for a temp directory.
+   * @param maxKeyCount The key count.
+   * @param compression The compression algorithm.
+   * @param startKey The hex string of the checksum for the start key.
+   * @return The writer for the mob file.
+   * @throws IOException
+   */
+  public StoreFile.Writer createWriterInTmp(String date, Path basePath, long maxKeyCount,
+      Compression.Algorithm compression, String startKey) throws IOException {
+    MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID()
+        .toString().replaceAll("-", ""));
+    final CacheConfig writerCacheConf = mobCacheConfig;
+    HFileContext hFileContext = new HFileContextBuilder().withCompression(compression)
+        .withIncludesMvcc(false).withIncludesTags(true)
+        .withChecksumType(HFile.DEFAULT_CHECKSUM_TYPE)
+        .withBytesPerCheckSum(HFile.DEFAULT_BYTES_PER_CHECKSUM)
+        .withBlockSize(getFamily().getBlocksize())
+        .withHBaseCheckSum(true).withDataBlockEncoding(getFamily().getDataBlockEncoding()).build();
+
+    StoreFile.Writer w = new StoreFile.WriterBuilder(conf, writerCacheConf, region.getFilesystem())
+        .withFilePath(new Path(basePath, mobFileName.getFileName()))
+        .withComparator(KeyValue.COMPARATOR).withBloomType(BloomType.NONE)
+        .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
+    return w;
+  }
+  
+  /**
+   * Commits the mob file.
+   * @param sourceFile The source file.
+   * @param targetPath The directory path where the source file is renamed to.
+   * @throws IOException
+   */
+  public void commitFile(final Path sourceFile, Path targetPath) throws IOException {
+    if (sourceFile == null) {
+      return;
+    }
+    Path dstPath = new Path(targetPath, sourceFile.getName());
+    validateMobFile(sourceFile);
+    String msg = "Renaming flushed file from " + sourceFile + " to " + dstPath;
+    LOG.info(msg);
+    Path parent = dstPath.getParent();
+    if (!region.getFilesystem().exists(parent)) {
+      region.getFilesystem().mkdirs(parent);
+    }
+    if (!region.getFilesystem().rename(sourceFile, dstPath)) {
+      LOG.warn("Unable to rename " + sourceFile + " to " + dstPath);
+    }
+  }
+
+  /**
+   * Validates a mob file by opening and closing it.
+   *
+   * @param path the path to the mob file
+   */
+  private void validateMobFile(Path path) throws IOException {
+    StoreFile storeFile = null;
+    try {
+      storeFile =
+          new StoreFile(region.getFilesystem(), path, conf, this.mobCacheConfig, BloomType.NONE);
+      storeFile.createReader();
+    } catch (IOException e) {
+      LOG.error("Fail to open mob store file[" + path + "], keeping it in tmp location["
+          + getTmpDir() + "].", e);
+      throw e;
+    } finally {
+      if (storeFile != null) {
+        storeFile.closeReader(false);
+      }
+    }
+  }
+
+  /**
+   * Reads the cell from the mob file.
+   * @param reference The cell found in the HBase, its value is a path to a mob file.
+   * @param cacheBlocks Whether the scanner should cache blocks.
+   * @return The cell found in the mob file.
+   * @throws IOException
+   */
+  public Cell resolve(Cell reference, boolean cacheBlocks) throws IOException {
+    Cell result = null;
+    if (reference.getValueLength() > Bytes.SIZEOF_LONG) {
+      String fileName = Bytes.toString(reference.getValueArray(), reference.getValueOffset()
+          + Bytes.SIZEOF_LONG, reference.getValueLength() - Bytes.SIZEOF_LONG);
+      Path targetPath = new Path(mobFamilyPath, fileName);
+      MobFile file = null;
+      try {
+        file = mobCacheConfig.getMobFileCache().openFile(region.getFilesystem(), targetPath,
+            mobCacheConfig);
+        result = file.readCell(reference, cacheBlocks);
+      } catch (IOException e) {
+        LOG.error("Fail to open/read the mob file " + targetPath.toString(), e);
+      } catch (NullPointerException e) {
+        // When delete the file during the scan, the hdfs getBlockRange will
+        // throw NullPointerException, catch it and manage it.
+        LOG.error("Fail to read the mob file " + targetPath.toString()
+            + " since it's already deleted", e);
+      } finally {
+        if (file != null) {
+          mobCacheConfig.getMobFileCache().closeFile(file);
+        }
+      }
+    } else {
+      LOG.warn("Invalid reference to mob, " + reference.getValueLength() + " bytes is too short");
+    }
+
+    if (result == null) {
+      LOG.warn("The KeyValue result is null, assemble a new KeyValue with the same row,family,"
+          + "qualifier,timestamp,type and tags but with an empty value to return.");
+      result = new KeyValue(reference.getRowArray(), reference.getRowOffset(),
+          reference.getRowLength(), reference.getFamilyArray(), reference.getFamilyOffset(),
+          reference.getFamilyLength(), reference.getQualifierArray(),
+          reference.getQualifierOffset(), reference.getQualifierLength(), reference.getTimestamp(),
+          Type.codeToType(reference.getTypeByte()), HConstants.EMPTY_BYTE_ARRAY,
+          reference.getValueOffset(), 0, reference.getTagsArray(), reference.getTagsOffset(),
+          reference.getTagsLength());
+    }
+    return result;
+  }
+
+  /**
+   * Gets the mob file path.
+   * @return The mob file path.
+   */
+  public Path getPath() {
+    return mobFamilyPath;
   }
 }

@@ -19,16 +19,22 @@
 package org.apache.hadoop.hbase.mob;
 
 import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.classification.InterfaceStability;
+import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * The constants used in mob.
  */
 @InterfaceAudience.Public
+@InterfaceStability.Stable
 public class MobConstants {
 
   public static final String IS_MOB = "isMob";
   public static final String MOB_THRESHOLD = "mobThreshold";
+  public static final long DEFAULT_MOB_THRESHOLD = 102400;
 
   public static final String MOB_SCAN_RAW = "hbase.mob.scan.raw";
   public static final String MOB_CACHE_BLOCKS = "hbase.mob.cache.blocks";
@@ -42,7 +48,11 @@ public class MobConstants {
 
   public static final String MOB_CACHE_EVICT_PERIOD = "hbase.mob.cache.evict.period";
   public static final String MOB_CACHE_EVICT_REMAIN_RATIO = "hbase.mob.cache.evict.remain.ratio";
+  public static final Tag MOB_REF_TAG = new Tag(TagType.MOB_REFERENCE_TAG_TYPE,
+      HConstants.EMPTY_BYTE_ARRAY);
 
+  public static final float DEFAULT_EVICT_REMAIN_RATIO = 0.5f;
+  public static final long DEFAULT_MOB_CACHE_EVICT_PERIOD = 3600l;
   private MobConstants() {
 
   }

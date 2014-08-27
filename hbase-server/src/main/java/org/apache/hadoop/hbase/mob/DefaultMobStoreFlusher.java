@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.regionserver;
+package org.apache.hadoop.hbase.mob;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -25,6 +25,7 @@ import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
@@ -33,9 +34,13 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
-import org.apache.hadoop.hbase.mob.MobFileManager;
-import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
+import org.apache.hadoop.hbase.regionserver.DefaultStoreFlusher;
+import org.apache.hadoop.hbase.regionserver.HMobStore;
+import org.apache.hadoop.hbase.regionserver.InternalScanner;
+import org.apache.hadoop.hbase.regionserver.MemStoreSnapshot;
+import org.apache.hadoop.hbase.regionserver.Store;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
@@ -53,6 +58,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * </ol>
  * 
  */
+@InterfaceAudience.Private
 public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
   private static final Log LOG = LogFactory.getLog(DefaultMobStoreFlusher.class);
@@ -60,19 +66,20 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   private boolean isMob = false;
   private long mobCellValueSizeThreshold = 0;
   private Path targetPath;
-  private MobFileManager mobFileManager;
+  private HMobStore mobStore;
 
   public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException{
     super(conf, store);
     isMob = MobUtils.isMobFamily(store.getFamily());
-    mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
-    this.targetPath = MobUtils.getMobFamilyPath(conf, store.getTableName(),
-        store.getColumnFamilyName());
-    if (!this.store.getFileSystem().exists(targetPath)) {
-      this.store.getFileSystem().mkdirs(targetPath);
+    if (isMob) {
+      mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
+      this.targetPath = MobUtils.getMobFamilyPath(conf, store.getTableName(),
+          store.getColumnFamilyName());
+      if (!this.store.getFileSystem().exists(targetPath)) {
+        this.store.getFileSystem().mkdirs(targetPath);
+      }
+      this.mobStore = (HMobStore) store;
     }
-    mobFileManager = MobFileManager.create(conf, this.store.getFileSystem(),
-        this.store.getTableName(), this.store.getFamily());
   }
 
   /**
@@ -159,19 +166,20 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
         HConstants.COMPACTION_KV_MAX_DEFAULT);
     long mobKVCount = 0;
     long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
-    mobFileWriter = mobFileManager.createWriterInTmp(new Date(time), snapshot.getCellsCount(), store
-        .getFamily().getCompression(), store.getRegionInfo().getStartKey());
+    mobFileWriter = mobStore.createWriterInTmp(new Date(time), snapshot.getCellsCount(),
+        store.getFamily().getCompression(), store.getRegionInfo().getStartKey());
     // the target path is {tableName}/.mob/{cfName}/mobFiles
     // the relative path is mobFiles
-    String relativePath = mobFileWriter.getPath().getName();
-    byte[] referenceValue = Bytes.toBytes(relativePath);
+    byte[] fileName = Bytes.toBytes(mobFileWriter.getPath().getName());
     try {
-      List<Cell> kvs = new ArrayList<Cell>();
+      Tag mobSrcTableName = new Tag(TagType.MOB_SRC_TABLE_NAME_TAG_TYPE, store.getTableName()
+          .getName());
+      List<Cell> cells = new ArrayList<Cell>();
       boolean hasMore;
       do {
-        hasMore = scanner.next(kvs, compactionKVMax);
-        if (!kvs.isEmpty()) {
-          for (Cell c : kvs) {
+        hasMore = scanner.next(cells, compactionKVMax);
+        if (!cells.isEmpty()) {
+          for (Cell c : cells) {
             // If we know that this KV is going to be included always, then let us
             // set its memstoreTS to 0. This will help us save space when writing to
             // disk.
@@ -186,25 +194,11 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
               // append the tags to the KeyValue.
               // The key is same, the value is the filename of the mob file
-              List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(),
-                  kv.getTagsLength());
-              if (existingTags.isEmpty()) {
-                existingTags = new ArrayList<Tag>();
-              }
-              Tag mobRefTag = new Tag(TagType.MOB_REFERENCE_TAG_TYPE, HConstants.EMPTY_BYTE_ARRAY);
-              existingTags.add(mobRefTag);
-              long valueLength = kv.getValueLength();
-              byte[] newValue = Bytes.add(Bytes.toBytes(valueLength), referenceValue);
-              KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(),
-                  kv.getRowLength(), kv.getFamilyArray(), kv.getFamilyOffset(),
-                  kv.getFamilyLength(), kv.getQualifierArray(), kv.getQualifierOffset(),
-                  kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put, newValue, 0,
-                  newValue.length, existingTags);
-              reference.setSequenceId(kv.getSequenceId());
+              KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName, mobSrcTableName);
               writer.append(reference);
             }
           }
-          kvs.clear();
+          cells.clear();
         }
       } while (hasMore);
     } finally {
@@ -219,7 +213,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
       // If the mob file is committed successfully but the store file is not,
       // the committed mob file will be handled by the sweep tool as an unused
       // file.
-      mobFileManager.commitFile(mobFileWriter.getPath(), targetPath);
+      mobStore.commitFile(mobFileWriter.getPath(), targetPath);
     } else {
       try {
         // If the mob file is empty, delete it instead of committing.

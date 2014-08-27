@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.regionserver;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
@@ -32,6 +33,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
@@ -63,6 +65,7 @@ public class TestHMobStore {
   @Rule public TestName name = new TestName();
 
   HMobStore store;
+  HRegion region;
   byte [] table = Bytes.toBytes("table");
   byte [] family = Bytes.toBytes("family");
 
@@ -76,6 +79,12 @@ public class TestHMobStore {
   byte [] qf6 = Bytes.toBytes("qf6");
 
   byte[] value = Bytes.toBytes("value");
+  byte[] value2 = Bytes.toBytes("value2");
+  private Path mobFilePath;
+  private Date currentDate = new Date();
+  private KeyValue seekKey1;
+  private KeyValue seekKey2;
+  private KeyValue seekKey3;
 
   HColumnDescriptor hcd;
   FileSystem fs;
@@ -111,22 +120,23 @@ public class TestHMobStore {
     }
   }
 
-  private void init(String methodName, Configuration conf)
+  private void init(String methodName, Configuration conf, boolean testStore)
   throws IOException {
     hcd = new HColumnDescriptor(family);
     hcd.setValue(MobConstants.IS_MOB, "true");
+    hcd.setValue(MobConstants.MOB_THRESHOLD, "3");
     hcd.setMaxVersions(4);
-    init(methodName, conf, hcd);
+    init(methodName, conf, hcd, testStore);
   }
 
   private void init(String methodName, Configuration conf,
-      HColumnDescriptor hcd) throws IOException {
+      HColumnDescriptor hcd, boolean testStore) throws IOException {
     HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(table));
-    init(methodName, conf, htd, hcd);
+    init(methodName, conf, htd, hcd, testStore);
   }
 
   private void init(String methodName, Configuration conf, HTableDescriptor htd,
-      HColumnDescriptor hcd) throws IOException {
+      HColumnDescriptor hcd, boolean testStore) throws IOException {
     //Setting up a Store
     Path basedir = new Path(DIR+methodName);
     Path tableDir = FSUtils.getTableDir(basedir, htd.getTableName());
@@ -138,8 +148,50 @@ public class TestHMobStore {
     htd.addFamily(hcd);
     HRegionInfo info = new HRegionInfo(htd.getTableName(), null, null, false);
     HLog hlog = HLogFactory.createHLog(fs, basedir, logName, conf);
-    HRegion region = new HRegion(tableDir, hlog, fs, conf, info, htd, null);
+    region = new HRegion(tableDir, hlog, fs, conf, info, htd, null);
     store = new HMobStore(region, hcd, conf);
+    if(testStore) {
+      init(conf, hcd);
+    }
+  }
+
+  private void init(Configuration conf, HColumnDescriptor hcd)
+      throws IOException {
+    // Setting up a Store
+    Path basedir = FSUtils.getRootDir(conf);
+    fs = FileSystem.get(conf);
+
+    Path homePath = new Path(basedir, Bytes.toString(family) + Path.SEPARATOR
+        + Bytes.toString(family));
+    fs.mkdirs(homePath);
+
+    KeyValue key1 = new KeyValue(row, family, qf1, 1, value);
+    KeyValue key2 = new KeyValue(row, family, qf2, 1, value);
+    KeyValue key3 = new KeyValue(row2, family, qf3, 1, value2);
+    KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
+    int maxKeyCount = keys.length;
+    StoreFile.Writer mobWriter = store.createWriterInTmp(currentDate,
+        maxKeyCount, hcd.getCompactionCompression(), region.getStartKey());
+    mobFilePath = mobWriter.getPath();
+
+    mobWriter.append(key1);
+    mobWriter.append(key2);
+    mobWriter.append(key3);
+    mobWriter.close();
+    String targetPathName = MobUtils.formatDate(currentDate);
+
+    long valueLength1 = key1.getValueLength();
+    long valueLength2 = key2.getValueLength();
+    long valueLength3 = key3.getValueLength();
+    byte[] referenceValue =
+            Bytes.toBytes(targetPathName + Path.SEPARATOR
+                + mobFilePath.getName());
+    byte[] newReferenceValue1 = Bytes.add(Bytes.toBytes(valueLength1), referenceValue);
+    byte[] newReferenceValue2 = Bytes.add(Bytes.toBytes(valueLength2), referenceValue);
+    byte[] newReferenceValue3 = Bytes.add(Bytes.toBytes(valueLength3), referenceValue);
+    seekKey1 = new KeyValue(row, family, qf1, Long.MAX_VALUE, newReferenceValue1);
+    seekKey2 = new KeyValue(row, family, qf2, Long.MAX_VALUE, newReferenceValue2);
+    seekKey3 = new KeyValue(row2, family, qf3, Long.MAX_VALUE, newReferenceValue3);
   }
 
   /**
@@ -149,9 +201,7 @@ public class TestHMobStore {
   @Test
   public void testGetFromMemStore() throws IOException {
     final Configuration conf = HBaseConfiguration.create();
-    conf.setClass(DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-        DefaultMobStoreFlusher.class, StoreFlusher.class);
-    init(name.getMethodName(), conf);
+    init(name.getMethodName(), conf, false);
 
     //Put data in memstore
     this.store.add(new KeyValue(row, family, qf1, 1, value));
@@ -186,9 +236,7 @@ public class TestHMobStore {
   @Test
   public void testGetFromFiles() throws IOException {
     final Configuration conf = TEST_UTIL.getConfiguration();
-    conf.setClass(DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-        DefaultMobStoreFlusher.class, StoreFlusher.class);
-    init(name.getMethodName(), conf);
+    init(name.getMethodName(), conf, false);
 
     //Put data in memstore
     this.store.add(new KeyValue(row, family, qf1, 1, value));
@@ -232,9 +280,7 @@ public class TestHMobStore {
   @Test
   public void testGetReferencesFromFiles() throws IOException {
     final Configuration conf = HBaseConfiguration.create();
-    conf.setClass(DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-        DefaultMobStoreFlusher.class, StoreFlusher.class);
-    init(name.getMethodName(), conf);
+    init(name.getMethodName(), conf, false);
 
     //Put data in memstore
     this.store.add(new KeyValue(row, family, qf1, 1, value));
@@ -281,9 +327,8 @@ public class TestHMobStore {
   public void testGetFromMemStoreAndFiles() throws IOException {
 
     final Configuration conf = HBaseConfiguration.create();
-    conf.setClass(DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-        DefaultMobStoreFlusher.class, StoreFlusher.class);
-    init(name.getMethodName(), conf);
+    
+    init(name.getMethodName(), conf, false);
 
     //Put data in memstore
     this.store.add(new KeyValue(row, family, qf1, 1, value));
@@ -311,8 +356,6 @@ public class TestHMobStore {
     Collections.sort(results, KeyValue.COMPARATOR);
     scanner.close();
 
-    System.out.println(expected);
-    System.out.println(results);
     //Compare
     Assert.assertEquals(expected.size(), results.size());
     for(int i=0; i<results.size(); i++) {
@@ -328,15 +371,13 @@ public class TestHMobStore {
   public void testMobCellSizeThreshold() throws IOException {
 
     final Configuration conf = HBaseConfiguration.create();
-    conf.setClass(DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-        DefaultMobStoreFlusher.class, StoreFlusher.class);
 
     HColumnDescriptor hcd;
     hcd = new HColumnDescriptor(family);
     hcd.setValue(MobConstants.IS_MOB, "true");
     hcd.setValue(MobConstants.MOB_THRESHOLD, "100");
     hcd.setMaxVersions(4);
-    init(name.getMethodName(), conf, hcd);
+    init(name.getMethodName(), conf, hcd, false);
 
     //Put data in memstore
     this.store.add(new KeyValue(row, family, qf1, 1, value));
@@ -376,6 +417,40 @@ public class TestHMobStore {
       Assert.assertEquals(expected.get(i), results.get(i));
       Assert.assertEquals(100, MobUtils.getMobThreshold(store.getFamily()));
     }
+  }
+
+  @Test
+  public void testCommitFile() throws Exception {
+    final Configuration conf = HBaseConfiguration.create();
+    init(name.getMethodName(), conf, true);
+    String targetPathName = MobUtils.formatDate(new Date());
+    Path targetPath = new Path(store.getPath(), (targetPathName
+        + Path.SEPARATOR + mobFilePath.getName()));
+    fs.delete(targetPath, true);
+    Assert.assertFalse(fs.exists(targetPath));
+    //commit file
+    store.commitFile(mobFilePath, targetPath);
+    Assert.assertTrue(fs.exists(targetPath));
+  }
+
+  @Test
+  public void testResolve() throws Exception {
+    final Configuration conf = HBaseConfiguration.create();
+    init(name.getMethodName(), conf, true);
+    String targetPathName = MobUtils.formatDate(currentDate);
+    Path targetPath = new Path(store.getPath(), targetPathName);
+    store.commitFile(mobFilePath, targetPath);
+    //resolve
+    Cell resultCell1 = store.resolve(seekKey1, false);
+    Cell resultCell2 = store.resolve(seekKey2, false);
+    Cell resultCell3 = store.resolve(seekKey3, false);
+    //compare
+    Assert.assertEquals(Bytes.toString(value),
+        Bytes.toString(CellUtil.cloneValue(resultCell1)));
+    Assert.assertEquals(Bytes.toString(value),
+        Bytes.toString(CellUtil.cloneValue(resultCell2)));
+    Assert.assertEquals(Bytes.toString(value2),
+        Bytes.toString(CellUtil.cloneValue(resultCell3)));
   }
 
   /**

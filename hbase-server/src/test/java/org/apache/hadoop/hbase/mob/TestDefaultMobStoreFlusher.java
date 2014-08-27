@@ -16,7 +16,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package org.apache.hadoop.hbase.regionserver;
+package org.apache.hadoop.hbase.mob;
 
 import java.io.IOException;
 import java.util.List;
@@ -36,7 +36,6 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -60,10 +59,6 @@ public class TestDefaultMobStoreFlusher {
  public static void setUpBeforeClass() throws Exception {
    TEST_UTIL.getConfiguration().setInt("hbase.master.info.port", 0);
    TEST_UTIL.getConfiguration().setBoolean("hbase.regionserver.info.port.auto", true);
-   // Set the DefaultMobStoreFlusher as the default store flush
-   TEST_UTIL.getConfiguration().setClass(
-       DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-       DefaultMobStoreFlusher.class, StoreFlusher.class);
 
    TEST_UTIL.startMiniCluster(1);
  }
@@ -143,6 +138,7 @@ public class TestDefaultMobStoreFlusher {
      HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(TN));
      HColumnDescriptor hcd = new HColumnDescriptor(family);
      hcd.setValue(MobConstants.IS_MOB, "true");
+     hcd.setValue(MobConstants.MOB_THRESHOLD, "3");
      hcd.setMaxVersions(4);
      desc.addFamily(hcd);
 

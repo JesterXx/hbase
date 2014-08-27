@@ -29,22 +29,26 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.SmallTests;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.regionserver.HMobStore;
+import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.FSUtils;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 @Category(SmallTests.class)
 public class TestMobFileCache extends TestCase {
   static final Log LOG = LogFactory.getLog(TestMobFileCache.class);
-  private Configuration conf = HBaseConfiguration.create();
+  private HBaseTestingUtility UTIL;
+  private HRegion region;
+  private Configuration conf;
   private MobCacheConfig mobCacheConf;
   private MobFileCache mobFileCache;
   private Date currentDate = new Date();
@@ -71,7 +75,28 @@ public class TestMobFileCache extends TestCase {
 
   @Override
   public void setUp() throws Exception {
-    super.setUp();
+    UTIL = HBaseTestingUtility.createLocalHTU();
+    conf = UTIL.getConfiguration();
+    HTableDescriptor htd = UTIL.createTableDescriptor("testMobFileCache");
+    HColumnDescriptor hcd1 = new HColumnDescriptor(FAMILY1);
+    hcd1.setValue(MobConstants.IS_MOB, "true");
+    hcd1.setValue(MobConstants.MOB_THRESHOLD, String.valueOf(0));
+    HColumnDescriptor hcd2 = new HColumnDescriptor(FAMILY2);
+    hcd2.setValue(MobConstants.IS_MOB, "true");
+    hcd2.setValue(MobConstants.MOB_THRESHOLD, String.valueOf(0));
+    HColumnDescriptor hcd3 = new HColumnDescriptor(FAMILY3);
+    hcd3.setValue(MobConstants.IS_MOB, "true");
+    hcd3.setValue(MobConstants.MOB_THRESHOLD, String.valueOf(0));
+    htd.addFamily(hcd1);
+    htd.addFamily(hcd2);
+    htd.addFamily(hcd3);
+    region = UTIL.createLocalHRegion(htd, null, null);
+  }
+
+  @Override
+  protected void tearDown() throws Exception {
+    region.close();
+    region.getFilesystem().delete(UTIL.getDataTestDir(), true);
   }
 
   /**
@@ -104,28 +129,18 @@ public class TestMobFileCache extends TestCase {
       throws IOException {
     // Setting up a Store
     FileSystem fs = FileSystem.get(conf);
-    Path testDir = FSUtils.getRootDir(conf);
-    Path basedir = testDir;
     fs = FileSystem.get(conf);
 
     HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(TABLE));
     htd.addFamily(hcd);
-    Path homePath = new Path(basedir, TABLE + Path.SEPARATOR
-        + Bytes.toString(hcd.getName()));
-    MobFileManager mobFileManager = MobFileManager.create(conf, fs,
-        TableName.valueOf(TABLE), hcd);
-    if (mobFileManager == null) {
-      fs.mkdirs(homePath);
-      mobFileManager = MobFileManager.create(conf, fs, TableName.valueOf(TABLE), hcd);
-    }
-
+    HMobStore mobStore = (HMobStore) region.getStore(hcd.getName());
     KeyValue key1 = new KeyValue(ROW, hcd.getName(), QF1, 1, VALUE);
     KeyValue key2 = new KeyValue(ROW, hcd.getName(), QF2, 1, VALUE);
     KeyValue key3 = new KeyValue(ROW2, hcd.getName(), QF3, 1, VALUE2);
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
     HRegionInfo regionStartKey = new HRegionInfo();
-    StoreFile.Writer mobWriter = mobFileManager.createWriterInTmp(currentDate,
+    StoreFile.Writer mobWriter = mobStore.createWriterInTmp(currentDate,
         maxKeyCount, hcd.getCompactionCompression(), regionStartKey.getStartKey());
     Path mobFilePath = mobWriter.getPath();
     String fileName = mobFilePath.getName();
@@ -134,8 +149,8 @@ public class TestMobFileCache extends TestCase {
     mobWriter.append(key3);
     mobWriter.close();
     String targetPathName = MobUtils.formatDate(currentDate);
-    Path targetPath = new Path(mobFileManager.getPath(), targetPathName);
-    mobFileManager.commitFile(mobFilePath, targetPath);
+    Path targetPath = new Path(mobStore.getPath(), targetPathName);
+    mobStore.commitFile(mobFilePath, targetPath);
     return new Path(targetPath, fileName);
   }
 
@@ -155,18 +170,18 @@ public class TestMobFileCache extends TestCase {
         fs, file1Path, mobCacheConf);
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
     assertNotNull(cachedMobFile1);
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReferenceCount());
 
     // The evict is also managed by a schedule thread pool.
     // And its check period is set as 3600 seconds by default.
     // This evict should get the lock at the most time
     mobFileCache.evict();  // Cache not full, evict it
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReferenceCount());
 
     mobFileCache.evictFile(file1Path.getName());  // Evict one file
     assertEquals(EXPECTED_CACHE_SIZE_ZERO, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReference());
+    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReferenceCount());
 
     cachedMobFile1.close();  // Close the cached mob file
 
@@ -182,13 +197,13 @@ public class TestMobFileCache extends TestCase {
     // Before the evict
     // Evict the cache, should clost the first file 1
     assertEquals(EXPECTED_CACHE_SIZE_THREE, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReference());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile2.getReference());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReference());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile1.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile2.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReferenceCount());
     mobFileCache.evict();
     assertEquals(EXPECTED_CACHE_SIZE_ONE, mobFileCache.getCacheSize());
-    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReference());
-    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile2.getReference());
-    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReference());
+    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile1.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_ONE, cachedMobFile2.getReferenceCount());
+    assertEquals(EXPECTED_REFERENCE_TWO, cachedMobFile3.getReferenceCount());
   }
 }

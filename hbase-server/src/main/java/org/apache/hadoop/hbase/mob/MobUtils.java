@@ -37,6 +37,7 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
@@ -56,6 +57,9 @@ public class MobUtils {
 
   private static final Log LOG = LogFactory.getLog(MobUtils.class);
 
+  private final static char[] digits = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a',
+    'b', 'c', 'd', 'e', 'f' };
+
   private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT =
       new ThreadLocal<SimpleDateFormat>() {
     @Override
@@ -63,8 +67,6 @@ public class MobUtils {
       return new SimpleDateFormat("yyyyMMdd");
     }
   };
-  private final static char[] digits = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a',
-      'b', 'c', 'd', 'e', 'f' };
 
   /**
    * Indicates whether the column family is a mob one.
@@ -79,12 +81,14 @@ public class MobUtils {
   /**
    * Gets the mob threshold.
    * If the size of a cell value is larger than this threshold, it's regarded as a mob.
+   * The default threshold is 1024*100(100K)B.
    * @param hcd The descriptor of a column family.
    * @return The threshold.
    */
   public static long getMobThreshold(HColumnDescriptor hcd) {
     String threshold = hcd.getValue(MobConstants.MOB_THRESHOLD);
-    return Strings.isEmpty(threshold) ? 0 : Long.parseLong(threshold);
+    return Strings.isEmpty(threshold) ? MobConstants.DEFAULT_MOB_THRESHOLD : Long
+        .parseLong(threshold);
   }
 
   /**
@@ -112,8 +116,13 @@ public class MobUtils {
    * @return True if the cell has a mob reference tag, false if it doesn't.
    */
   public static boolean isMobReferenceCell(Cell cell) {
-    List<Tag> tags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
-    return hasMobReferenceTag(tags);
+    if (cell.getTagsLength() > 0) {
+      Tag tag = Tag.getTag(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength(),
+          TagType.MOB_REFERENCE_TAG_TYPE);
+      return tag != null;
+    } else {
+      return false;
+    }
   }
 
   /**
@@ -156,7 +165,7 @@ public class MobUtils {
    * Indicates whether the scan contains the information of caching blocks.
    * The information is set in the attribute "hbase.mob.cache.blocks" of scan.
    * @param scan The current scan.
-   * @return True if the scan contains the information of caching blocks.
+   * @return True when the Scan attribute specifies to cache the MOB blocks.
    */
   public static boolean isCacheMobBlocks(Scan scan) {
     byte[] cache = scan.getAttribute(MobConstants.MOB_CACHE_BLOCKS);
@@ -169,12 +178,13 @@ public class MobUtils {
 
   /**
    * Sets the attribute of caching blocks in the scan.
-   * 
+   *
    * @param scan
    *          The current scan.
    * @param cacheBlocks
    *          True, set the attribute of caching blocks into the scan, the scanner with this scan
    *          caches blocks.
+   *          False, the scanner doesn't cache blocks for this scan.
    */
   public static void setCacheMobBlocks(Scan scan, boolean cacheBlocks) {
     scan.setAttribute(MobConstants.MOB_CACHE_BLOCKS, Bytes.toBytes(cacheBlocks));
@@ -238,7 +248,7 @@ public class MobUtils {
    */
   public static Path getMobFamilyPath(Path regionPath, String familyName) {
     return new Path(regionPath, familyName);
-  } 
+  }
 
   /**
    * Gets the HRegionInfo of the mob files.
@@ -453,5 +463,29 @@ public class MobUtils {
     buffer[2] = (byte) ((buffer[4] << 4) ^ buffer[5]);
     buffer[3] = (byte) ((buffer[6] << 4) ^ buffer[7]);
     return Bytes.toInt(buffer, 0, 4);
+  }
+
+  /**
+   * Creates a mob reference KeyValue.
+   * The value of the mob reference KeyValue is mobCellValueSize + mobFileName.
+   * @param kv The original KeyValue.
+   * @param fileName The mob file name where the mob reference KeyValue is written.
+   * @param mobSrcTableName The tag of the current table name.
+   * @return The mob reference KeyValue.
+   */
+  public static KeyValue createMobRefKeyValue(KeyValue kv, byte[] fileName, Tag mobSrcTableName) {
+    // append the tags to the KeyValue.
+    // The key is same, the value is the filename of the mob file
+    List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(), kv.getTagsLength());
+    existingTags.add(MobConstants.MOB_REF_TAG);
+    existingTags.add(mobSrcTableName);
+    long valueLength = kv.getValueLength();
+    byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);
+    KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(), kv.getRowLength(),
+        kv.getFamilyArray(), kv.getFamilyOffset(), kv.getFamilyLength(), kv.getQualifierArray(),
+        kv.getQualifierOffset(), kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put,
+        refValue, 0, refValue.length, existingTags);
+    reference.setSequenceId(kv.getSequenceId());
+    return reference;
   }
 }

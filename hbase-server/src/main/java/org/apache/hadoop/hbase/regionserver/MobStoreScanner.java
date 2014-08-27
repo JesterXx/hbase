@@ -22,9 +22,9 @@ import java.io.IOException;
 import java.util.List;
 import java.util.NavigableSet;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.mob.MobFileManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 
 /**
@@ -32,17 +32,16 @@ import org.apache.hadoop.hbase.mob.MobUtils;
  * for a single row.
  *
  */
+@InterfaceAudience.Private
 public class MobStoreScanner extends StoreScanner {
 
   private boolean cacheMobBlocks = false;
-  private MobFileManager mobFileManager;
 
   public MobStoreScanner(Store store, ScanInfo scanInfo, Scan scan,
-      final NavigableSet<byte[]> columns, long readPt, MobFileManager mobFileStore)
+      final NavigableSet<byte[]> columns, long readPt)
       throws IOException {
     super(store, scanInfo, scan, columns, readPt);
     cacheMobBlocks = MobUtils.isCacheMobBlocks(scan);
-    this.mobFileManager = mobFileStore;
   }
 
   /**
@@ -58,10 +57,11 @@ public class MobStoreScanner extends StoreScanner {
       if (outResult.isEmpty()) {
         return result;
       }
+      HMobStore mobStore = (HMobStore) store;
       for (int i = 0; i < outResult.size(); i++) {
         Cell cell = outResult.get(i);
         if (MobUtils.isMobReferenceCell(cell)) {
-          outResult.set(i, mobFileManager.resolve(cell, cacheMobBlocks));
+          outResult.set(i, mobStore.resolve(cell, cacheMobBlocks));
         }
       }
     }

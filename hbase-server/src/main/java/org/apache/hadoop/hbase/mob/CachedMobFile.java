@@ -25,8 +25,9 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hbase.Cell;
-import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
+import org.apache.hadoop.hbase.io.hfile.CacheConfig;
+import org.apache.hadoop.hbase.regionserver.BloomType;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 
 /**
  * Cached mob file.
@@ -34,89 +35,61 @@ import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 @InterfaceAudience.Private
 public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> {
 
-  private long accessTime;
-  private MobFile file;
-  private AtomicLong reference = new AtomicLong(0);
+  private long accessCount;
+  private AtomicLong referenceCount = new AtomicLong(0);
 
-  public CachedMobFile(MobFile file) {
-    this.file = file;
+  public CachedMobFile(StoreFile sf) {
+    super(sf);
   }
 
   public static CachedMobFile create(FileSystem fs, Path path, Configuration conf,
-      MobCacheConfig cacheConf) throws IOException {
-    MobFile file = MobFile.create(fs, path, conf, cacheConf);
-    return new CachedMobFile(file);
+      CacheConfig cacheConf) throws IOException {
+    StoreFile sf = new StoreFile(fs, path, conf, cacheConf, BloomType.NONE);
+    return new CachedMobFile(sf);
   }
 
-  public void access(long time) {
-    this.accessTime = time;
+  public void access(long accessCount) {
+    this.accessCount = accessCount;
   }
 
   public int compareTo(CachedMobFile that) {
-    if (this.accessTime == that.accessTime)
-      return 0;
-    return this.accessTime < that.accessTime ? 1 : -1;
+    if (this.accessCount == that.accessCount) return 0;
+    return this.accessCount < that.accessCount ? 1 : -1;
   }
 
   /**
-   * Opens the mob file and increases the reference.
+   * Opens the mob file if it's not opened yet and increases the reference.
+   * It's not thread-safe. Use MobFileCache.openFile() instead.
+   * The reader of the mob file is just opened when it's not opened no matter how many times
+   * this open() method is invoked.
+   * The reference is a counter that how many times this reader is referenced. When the
+   * reference is 0, this reader is closed.
    */
   @Override
   public void open() throws IOException {
-    file.open();
-    reference.incrementAndGet();
+    super.open();
+    referenceCount.incrementAndGet();
   }
 
   /**
-   * Closes the mob file and decreases the reference.
+   * Decreases the reference of the underlying reader for the mob file.
+   * It's not thread-safe. Use MobFileCache.closeFile() instead.
    * This underlying reader isn't closed until the reference is 0.
    */
   @Override
   public void close() throws IOException {
-    long refs = reference.decrementAndGet();
+    long refs = referenceCount.decrementAndGet();
     if (refs == 0) {
-      this.file.close();
+      super.close();
     }
   }
 
   /**
-   * Reads a cell from the mob file.
-   * @param search The cell need to be searched in the mob file.
-   * @param cacheMobBlocks Whether should this scanner cache blocks.
-   * @return The cell in the mob file.
-   * @throws IOException
-   */
-  @Override
-  public Cell readCell(Cell search, boolean cacheMobBlocks) throws IOException {
-    return file.readCell(search, cacheMobBlocks);
-  }
-
-  /**
-   * Gets the file name.
-   * @return The file name.
-   */
-  @Override
-  public String getName() {
-    return file.getName();
-  }
-
-  /**
-   * Internal use only. This is used by the sweeper.
-   *
-   * @return The store file scanner.
-   * @throws IOException
-   */
-  @Override
-  public StoreFileScanner getScanner() throws IOException {
-    return file.getScanner();
-  }
-
-  /**
    * Gets the reference of the current mob file.
-   *
+   * Internal usage, currently it's for testing.
    * @return The reference of the current mob file.
    */
-  public long getReference() {
-    return this.reference.longValue();
+  public long getReferenceCount() {
+    return this.referenceCount.longValue();
   }
 }
