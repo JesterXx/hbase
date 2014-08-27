@@ -58,7 +58,7 @@ public class MobFileName {
     this.startKey = MD5Hash.getMD5AsHex(startKey, 0, startKey.length);
     this.uuid = uuid;
     this.date = date;
-    this.fileName = startKey + date + uuid;
+    this.fileName = this.startKey + date + uuid;
   }
 
   /**
