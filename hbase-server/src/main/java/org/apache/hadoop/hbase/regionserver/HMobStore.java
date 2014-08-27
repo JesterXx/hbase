@@ -245,7 +245,8 @@ public class HMobStore extends HStore {
       Path targetPath = new Path(mobFamilyPath, fileName);
       MobFile file = null;
       try {
-        file = mobCacheConfig.getMobFileCache().openFile(region.getFilesystem(), targetPath, mobCacheConfig);
+        file = mobCacheConfig.getMobFileCache().openFile(region.getFilesystem(), targetPath,
+            mobCacheConfig);
         result = file.readCell(reference, cacheBlocks);
       } catch (IOException e) {
         LOG.error("Fail to open/read the mob file " + targetPath.toString(), e);

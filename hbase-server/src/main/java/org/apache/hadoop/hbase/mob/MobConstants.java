@@ -48,7 +48,8 @@ public class MobConstants {
 
   public static final String MOB_CACHE_EVICT_PERIOD = "hbase.mob.cache.evict.period";
   public static final String MOB_CACHE_EVICT_REMAIN_RATIO = "hbase.mob.cache.evict.remain.ratio";
-  public static final Tag MOB_REF_TAG = new Tag(TagType.MOB_REFERENCE_TAG_TYPE, HConstants.EMPTY_BYTE_ARRAY);
+  public static final Tag MOB_REF_TAG = new Tag(TagType.MOB_REFERENCE_TAG_TYPE,
+      HConstants.EMPTY_BYTE_ARRAY);
 
   public static final float DEFAULT_EVICT_REMAIN_RATIO = 0.5f;
   public static final long DEFAULT_MOB_CACHE_EVICT_PERIOD = 3600l;
