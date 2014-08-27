@@ -73,7 +73,7 @@ public class MobFileName {
     this.startKey = startKey;
     this.uuid = uuid;
     this.date = date;
-    this.fileName = startKey + date + uuid;
+    this.fileName = this.startKey + date + uuid;
   }
 
   /**
