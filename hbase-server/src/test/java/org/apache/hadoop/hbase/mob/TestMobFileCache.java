@@ -128,9 +128,6 @@ public class TestMobFileCache extends TestCase {
   private Path createMobStoreFile(Configuration conf, HColumnDescriptor hcd)
       throws IOException {
     // Setting up a Store
-    FileSystem fs = FileSystem.get(conf);
-    fs = FileSystem.get(conf);
-
     HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(TABLE));
     htd.addFamily(hcd);
     HMobStore mobStore = (HMobStore) region.getStore(hcd.getName());
@@ -139,9 +136,9 @@ public class TestMobFileCache extends TestCase {
     KeyValue key3 = new KeyValue(ROW2, hcd.getName(), QF3, 1, VALUE2);
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
-    HRegionInfo regionStartKey = new HRegionInfo();
+    HRegionInfo regionInfo = new HRegionInfo();
     StoreFile.Writer mobWriter = mobStore.createWriterInTmp(currentDate,
-        maxKeyCount, hcd.getCompactionCompression(), regionStartKey.getStartKey());
+        maxKeyCount, hcd.getCompactionCompression(), regionInfo.getStartKey());
     Path mobFilePath = mobWriter.getPath();
     String fileName = mobFilePath.getName();
     mobWriter.append(key1);

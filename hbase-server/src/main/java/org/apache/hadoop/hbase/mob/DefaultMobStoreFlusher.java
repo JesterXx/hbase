@@ -46,7 +46,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 /**
  * An implementation of the StoreFlusher. It extends the DefaultStoreFlusher.
  * If the store is not a mob store, the flusher flushes the MemStore the same with
- * DefaultStoreFlusher, 
+ * DefaultStoreFlusher,
  * If the store is a mob store, the flusher flushes the MemStore into two places.
  * One is the store files of HBase, the other is the mob files.
  * <ol>
@@ -56,7 +56,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * <li>If the size of a cell value is smaller than or equal with a threshold, it'll be flushed to
  * HBase directly.</li>
  * </ol>
- * 
+ *
  */
 @InterfaceAudience.Private
 public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
@@ -83,8 +83,8 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   }
 
   /**
-   * Flushes the snapshot of the MemStore. 
-   * If this store is not a mob store, flush the cells in the snapshot to store files of HBase. 
+   * Flushes the snapshot of the MemStore.
+   * If this store is not a mob store, flush the cells in the snapshot to store files of HBase.
    * If the store is a mob one, the flusher flushes the MemStore into two places.
    * One is the store files of HBase, the other is the mob files.
    * <ol>

@@ -64,40 +64,32 @@ public class TestHMobStore {
   public static final Log LOG = LogFactory.getLog(TestHMobStore.class);
   @Rule public TestName name = new TestName();
 
-  HMobStore store;
-  HRegion region;
-  byte [] table = Bytes.toBytes("table");
-  byte [] family = Bytes.toBytes("family");
-
-  byte [] row = Bytes.toBytes("row");
-  byte [] row2 = Bytes.toBytes("row2");
-  byte [] qf1 = Bytes.toBytes("qf1");
-  byte [] qf2 = Bytes.toBytes("qf2");
-  byte [] qf3 = Bytes.toBytes("qf3");
-  byte [] qf4 = Bytes.toBytes("qf4");
-  byte [] qf5 = Bytes.toBytes("qf5");
-  byte [] qf6 = Bytes.toBytes("qf6");
-
-  byte[] value = Bytes.toBytes("value");
-  byte[] value2 = Bytes.toBytes("value2");
+  private HMobStore store;
+  private HRegion region;
+  private HColumnDescriptor hcd;
+  private FileSystem fs;
+  private byte [] table = Bytes.toBytes("table");
+  private byte [] family = Bytes.toBytes("family");
+  private byte [] row = Bytes.toBytes("row");
+  private byte [] row2 = Bytes.toBytes("row2");
+  private byte [] qf1 = Bytes.toBytes("qf1");
+  private byte [] qf2 = Bytes.toBytes("qf2");
+  private byte [] qf3 = Bytes.toBytes("qf3");
+  private byte [] qf4 = Bytes.toBytes("qf4");
+  private byte [] qf5 = Bytes.toBytes("qf5");
+  private byte [] qf6 = Bytes.toBytes("qf6");
+  private byte[] value = Bytes.toBytes("value");
+  private byte[] value2 = Bytes.toBytes("value2");
   private Path mobFilePath;
   private Date currentDate = new Date();
   private KeyValue seekKey1;
   private KeyValue seekKey2;
   private KeyValue seekKey3;
-
-  HColumnDescriptor hcd;
-  FileSystem fs;
-
-  NavigableSet<byte[]> qualifiers =
+  private NavigableSet<byte[]> qualifiers =
     new ConcurrentSkipListSet<byte[]>(Bytes.BYTES_COMPARATOR);
-
-  List<Cell> expected = new ArrayList<Cell>();
-  List<Cell> results = new ArrayList<Cell>();
-
-  long id = System.currentTimeMillis();
-  Get get = new Get(row);
-
+  private List<Cell> expected = new ArrayList<Cell>();
+  private long id = System.currentTimeMillis();
+  private Get get = new Get(row);
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private final String DIR = TEST_UTIL.getDataTestDir("TestHMobStore").toString();
 
@@ -137,7 +129,7 @@ public class TestHMobStore {
 
   private void init(String methodName, Configuration conf, HTableDescriptor htd,
       HColumnDescriptor hcd, boolean testStore) throws IOException {
-    //Setting up a Store
+    //Setting up tje Region and Store
     Path basedir = new Path(DIR+methodName);
     Path tableDir = FSUtils.getTableDir(basedir, htd.getTableName());
     String logName = "logs";
@@ -157,10 +149,8 @@ public class TestHMobStore {
 
   private void init(Configuration conf, HColumnDescriptor hcd)
       throws IOException {
-    // Setting up a Store
     Path basedir = FSUtils.getRootDir(conf);
     fs = FileSystem.get(conf);
-
     Path homePath = new Path(basedir, Bytes.toString(family) + Path.SEPARATOR
         + Bytes.toString(family));
     fs.mkdirs(homePath);
@@ -178,11 +168,12 @@ public class TestHMobStore {
     mobWriter.append(key2);
     mobWriter.append(key3);
     mobWriter.close();
-    String targetPathName = MobUtils.formatDate(currentDate);
 
     long valueLength1 = key1.getValueLength();
     long valueLength2 = key2.getValueLength();
     long valueLength3 = key3.getValueLength();
+
+    String targetPathName = MobUtils.formatDate(currentDate);
     byte[] referenceValue =
             Bytes.toBytes(targetPathName + Path.SEPARATOR
                 + mobFilePath.getName());
@@ -327,7 +318,7 @@ public class TestHMobStore {
   public void testGetFromMemStoreAndFiles() throws IOException {
 
     final Configuration conf = HBaseConfiguration.create();
-    
+
     init(name.getMethodName(), conf, false);
 
     //Put data in memstore

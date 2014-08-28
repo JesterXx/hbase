@@ -71,7 +71,7 @@ public class MobFileCache {
     }
   }
 
-  // a ConcurrentHashMap, accesses to this map are synchronized.  
+  // a ConcurrentHashMap, accesses to this map are synchronized.
   private Map<String, CachedMobFile> map = null;
   // caches access count
   private final AtomicLong count;

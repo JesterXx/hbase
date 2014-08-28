@@ -32,7 +32,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 @InterfaceStability.Stable
 public class MobConstants {
 
-  public static final String IS_MOB = "isMob";
+  public static final String IS_MOB = "IS_MOB";
   public static final String MOB_THRESHOLD = "mobThreshold";
   public static final long DEFAULT_MOB_THRESHOLD = 102400;
 

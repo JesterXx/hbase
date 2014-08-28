@@ -25,6 +25,8 @@ import java.util.UUID;
 import junit.framework.TestCase;
 
 import org.apache.hadoop.hbase.SmallTests;
+import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.MD5Hash;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -34,66 +36,44 @@ public class TestMobFileName extends TestCase {
   private String uuid;
   private Date date;
   private String dateStr;
-  private int startKey;
+  private byte[] startKey;
 
   public void setUp() {
     Random random = new Random();
     uuid = UUID.randomUUID().toString().replaceAll("-", "");
     date = new Date();
     dateStr = MobUtils.formatDate(date);
-    startKey = random.nextInt();
+    startKey = Bytes.toBytes(random.nextInt());
   }
 
   @Test
   public void testHashCode() {
-    assertEquals(
-      MobFileName.create(MobUtils.int2HexString(startKey),
-        dateStr, uuid).hashCode(),
-      MobFileName.create(MobUtils.int2HexString(startKey),
-        dateStr, uuid).hashCode());
-    assertNotSame(
-      MobFileName.create(MobUtils.int2HexString(startKey),
-        dateStr, uuid).hashCode(),
-      MobFileName.create(MobUtils.int2HexString(startKey),
-        dateStr, uuid).hashCode());
+    assertEquals(MobFileName.create(startKey, dateStr, uuid).hashCode(),
+        MobFileName.create(startKey, dateStr, uuid).hashCode());
+    assertNotSame(MobFileName.create(startKey, dateStr, uuid).hashCode(),
+        MobFileName.create(startKey, dateStr, uuid).hashCode());
   }
 
   @Test
   public void testCreate() {
-    MobFileName mobFileName = MobFileName.create(
-        MobUtils.int2HexString(startKey), dateStr, uuid);
-    assertEquals(mobFileName,
-      MobFileName.create(mobFileName.getFileName()));
-  }
-
-  @Test
-  public void testSwitchHexStringInt() {
-    int[] ints = { -1, 0, 123, Integer.MIN_VALUE, Integer.MAX_VALUE };
-    for (int i = 0; i < ints.length; i++) {
-      assertEquals(ints[i],
-          MobUtils.hexString2Int(MobUtils.int2HexString(ints[i])));
-    }
+    MobFileName mobFileName = MobFileName.create(startKey, dateStr, uuid);
+    assertEquals(mobFileName, MobFileName.create(mobFileName.getFileName()));
   }
 
   @Test
   public void testGet() {
-    MobFileName mobFileName = MobFileName.create(
-        MobUtils.int2HexString(startKey), dateStr, uuid);
-    assertEquals(MobUtils.int2HexString(startKey),
-      mobFileName.getStartKey()); // getStartKey
-    assertEquals(dateStr, mobFileName.getDate()); // getDate
-    assertEquals(
-      mobFileName.getFileName(),
-      MobUtils.int2HexString(startKey) + dateStr + uuid); // getFileName
+    MobFileName mobFileName = MobFileName.create(startKey, dateStr, uuid);
+    assertEquals(MD5Hash.getMD5AsHex(startKey, 0, startKey.length), mobFileName.getStartKey());
+    assertEquals(dateStr, mobFileName.getDate());
+    assertEquals(mobFileName.getFileName(), MD5Hash.getMD5AsHex(startKey, 0, startKey.length)
+        + dateStr + uuid);
   }
 
   @Test
   public void testEquals() {
-    MobFileName mobFileName = MobFileName.create(
-        MobUtils.int2HexString(startKey), dateStr, uuid);
+    MobFileName mobFileName = MobFileName.create(startKey, dateStr, uuid);
     assertTrue(mobFileName.equals(mobFileName));
     assertFalse(mobFileName.equals(this));
-    assertTrue(mobFileName.equals(MobFileName.create(
-        MobUtils.int2HexString(startKey), dateStr, uuid)));
+    assertTrue(mobFileName.equals(MobFileName.create(startKey, dateStr, uuid)));
   }
 }

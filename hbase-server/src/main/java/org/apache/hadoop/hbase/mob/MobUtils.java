@@ -471,14 +471,20 @@ public class MobUtils {
    * The value of the mob reference KeyValue is mobCellValueSize + mobFileName.
    * @param kv The original KeyValue.
    * @param fileName The mob file name where the mob reference KeyValue is written.
-   * @param mobSrcTableName The tag of the current table name.
+   * @param mobSrcTableName The tag of the current table name. It's very important in
+   *                        cloning the snapshot.
    * @return The mob reference KeyValue.
    */
   public static KeyValue createMobRefKeyValue(KeyValue kv, byte[] fileName, Tag mobSrcTableName) {
-    // append the tags to the KeyValue.
+    // Append the tags to the KeyValue.
     // The key is same, the value is the filename of the mob file
     List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(), kv.getTagsLength());
     existingTags.add(MobConstants.MOB_REF_TAG);
+    // Add the tag of the source table name, this table is where this mob file is flushed
+    // from.
+    // It's very useful in cloning the snapshot. When reading from the cloning table, we need to
+    // find the original mob files by this table name. For details please see cloning
+    // snapshot for mob files.
     existingTags.add(mobSrcTableName);
     long valueLength = kv.getValueLength();
     byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);

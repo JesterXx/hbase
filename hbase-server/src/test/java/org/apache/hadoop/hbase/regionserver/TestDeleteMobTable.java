@@ -72,7 +72,7 @@ public class TestDeleteMobTable {
 
   /**
    * Generate the mob value.
-   * 
+   *
    * @param size
    *          the size of the value
    * @return the mob value generated
@@ -179,7 +179,7 @@ public class TestDeleteMobTable {
       return 0;
     }
   }
-  
+
   private int countArchiveMobFiles(TableName tn, String familyName)
       throws IOException {
     FileSystem fs = TEST_UTIL.getTestFileSystem();

@@ -19,19 +19,20 @@
 package org.apache.hadoop.hbase.mob;
 
 import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.util.MD5Hash;
 
 /**
  * The mob file name.
- * It consists of a checksum of a start key, a date and an uuid.
- * It looks like checksum(start) + date + uuid.
+ * It consists of a md5 of a start key, a date and an uuid.
+ * It looks like md5(start) + date + uuid.
  * <ol>
- * <li>0-7 characters: checksum of a start key. Since the length of the start key is not
- * fixed, have to use the checksum instead which has a fix length.</li>
- * <li>8-15 characters: a string of a date with format yyyymmdd. The date is the latest timestamp
+ * <li>0-31 characters: md5 hex string of a start key. Since the length of the start key is not
+ * fixed, have to use the md5 instead which has a fix length.</li>
+ * <li>32-39 characters: a string of a date with format yyyymmdd. The date is the latest timestamp
  * of cells in this file</li>
  * <li>the remaining characters: the uuid.</li>
  * </ol>
- * Has the checksum of the start key in the file name in order to keep region information in the
+ * Has the md5 of the start key in the file name in order to keep region information in the
  * file name. This might be useful in bulkload to minimize the target regions.
  * The cells come from different regions might be in the same mob file, this is allowed.
  * Has the latest timestamp of cells in the file name in order to clean the expired mob files by
@@ -41,23 +42,38 @@ import org.apache.hadoop.classification.InterfaceAudience;
 public class MobFileName {
 
   private final String date;
-  private final int startKey;
+  private final String startKey;
   private final String uuid;
   private String fileName;
 
   /**
    * @param startKey
-   *          The checksum of the start key.
+   *          The start key.
    * @param date
    *          The string of the latest timestamp of cells in this file, the format is yyyymmdd.
    * @param uuid
    *          The uuid
    */
-  private MobFileName(int startKey, String date, String uuid) {
+  private MobFileName(byte[] startKey, String date, String uuid) {
+    this.startKey = MD5Hash.getMD5AsHex(startKey, 0, startKey.length);
+    this.uuid = uuid;
+    this.date = date;
+    this.fileName = this.startKey + date + uuid;
+  }
+
+  /**
+   * @param startKey
+   *          The md5 hex string of the start key.
+   * @param date
+   *          The string of the latest timestamp of cells in this file, the format is yyyymmdd.
+   * @param uuid
+   *          The uuid
+   */
+  private MobFileName(String startKey, String date, String uuid) {
     this.startKey = startKey;
     this.uuid = uuid;
     this.date = date;
-    this.fileName = MobUtils.int2HexString(startKey) + date + uuid;
+    this.fileName = this.startKey + date + uuid;
   }
 
   /**
@@ -70,8 +86,8 @@ public class MobFileName {
    * @param uuid The uuid.
    * @return An instance of a MobFileName.
    */
-  public static MobFileName create(String startKey, String date, String uuid) {
-    return new MobFileName(MobUtils.hexString2Int(startKey), date, uuid);
+  public static MobFileName create(byte[] startKey, String date, String uuid) {
+    return new MobFileName(startKey, date, uuid);
   }
 
   /**
@@ -80,18 +96,18 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String fileName) {
-    int startKey = MobUtils.hexString2Int(fileName.substring(0, 8));
-    String date = fileName.substring(8, 16);
-    String uuid = fileName.substring(16);
+    String startKey = fileName.substring(0, 32);
+    String date = fileName.substring(32, 40);
+    String uuid = fileName.substring(40);
     return new MobFileName(startKey, date, uuid);
   }
 
   /**
-   * Gets the hex string of the checksum for a start key.
-   * @return The hex string of the checksum for a start key.
+   * Gets the hex string of the md5 for a start key.
+   * @return The hex string of the md5 for a start key.
    */
   public String getStartKey() {
-    return MobUtils.int2HexString(startKey);
+    return startKey;
   }
 
   /**
@@ -118,7 +134,7 @@ public class MobFileName {
     }
     if (anObject instanceof MobFileName) {
       MobFileName another = (MobFileName) anObject;
-      if (this.startKey == another.startKey && this.date.equals(another.date)
+      if (this.startKey.equals(another.startKey) && this.date.equals(another.date)
           && this.uuid.equals(another.uuid)) {
         return true;
       }

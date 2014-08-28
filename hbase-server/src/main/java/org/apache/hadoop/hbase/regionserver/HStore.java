@@ -137,7 +137,7 @@ public class HStore implements Store {
   private final HColumnDescriptor family;
   private final HRegionFileSystem fs;
   protected final Configuration conf;
-  protected CacheConfig cacheConf = null;
+  protected CacheConfig cacheConf;
   private long lastCompactSize = 0;
   volatile boolean forceMajor = false;
   /* how many bytes to write between status checks */
