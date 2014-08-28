@@ -91,6 +91,20 @@ public class MobFileName {
   }
 
   /**
+   * Creates an instance of MobFileName
+   *
+   * @param startKey
+   *          The md5 hex string of the start key.
+   * @param date
+   *          The string of the latest timestamp of cells in this file, the format is yyyymmdd.
+   * @param uuid The uuid.
+   * @return An instance of a MobFileName.
+   */
+  public static MobFileName create(String startKey, String date, String uuid) {
+    return new MobFileName(startKey, date, uuid);
+  }
+
+  /**
    * Creates an instance of MobFileName.
    * @param fileName The string format of a file name.
    * @return An instance of a MobFileName.
