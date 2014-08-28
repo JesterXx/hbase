@@ -201,7 +201,7 @@ public class HMobStore extends HStore {
           new StoreFile(region.getFilesystem(), path, conf, this.mobCacheConfig, BloomType.NONE);
       storeFile.createReader();
     } catch (IOException e) {
-      LOG.error("Fail to open mob file[" + path + "], keeping it in temp directory.", e);
+      LOG.error("Fail to open mob file[" + path + "], keep it in temp directory.", e);
       throw e;
     } finally {
       if (storeFile != null) {
