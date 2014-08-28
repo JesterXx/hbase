@@ -39,6 +39,7 @@ import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
 import org.apache.hadoop.hbase.mob.MobCacheConfig;
+import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFile;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobStoreEngine;
@@ -67,7 +68,6 @@ public class HMobStore extends HStore {
   private MobCacheConfig mobCacheConfig;
   private Path homePath;
   private Path mobFamilyPath;
-  private final static String TMP = ".tmp";
 
   public HMobStore(final HRegion region, final HColumnDescriptor family,
       final Configuration confParam) throws IOException {
@@ -116,7 +116,7 @@ public class HMobStore extends HStore {
    * @return The temp directory.
    */
   private Path getTmpDir() {
-    return new Path(homePath, TMP);
+    return new Path(homePath, MobConstants.TEMP_DIR_NAME);
   }
 
   /**
