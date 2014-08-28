@@ -53,6 +53,8 @@ public class MobConstants {
 
   public static final float DEFAULT_EVICT_REMAIN_RATIO = 0.5f;
   public static final long DEFAULT_MOB_CACHE_EVICT_PERIOD = 3600l;
+
+  public final static String TEMP_DIR_NAME = ".tmp";
   private MobConstants() {
 
   }
