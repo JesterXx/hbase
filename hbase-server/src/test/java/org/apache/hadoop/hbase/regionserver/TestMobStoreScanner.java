@@ -60,7 +60,7 @@ public class TestMobStoreScanner {
   private static HColumnDescriptor hcd;
   private static HTableDescriptor desc;
   private static Random random = new Random();
-  private static String defaultThreshold = "10";
+  private static long defaultThreshold = 10;
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
@@ -75,11 +75,11 @@ public class TestMobStoreScanner {
     TEST_UTIL.shutdownMiniCluster();
   }
 
-  public void setUp(String threshold, String TN) throws Exception {
+  public void setUp(long threshold, String TN) throws Exception {
     desc = new HTableDescriptor(TableName.valueOf(TN));
     hcd = new HColumnDescriptor(family);
-    hcd.setValue(MobConstants.IS_MOB, "true");
-    hcd.setValue(MobConstants.MOB_THRESHOLD, threshold);
+    hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
+    hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(threshold));
     hcd.setMaxVersions(4);
     desc.addFamily(hcd);
     admin = new HBaseAdmin(TEST_UTIL.getConfiguration());
@@ -136,7 +136,7 @@ public class TestMobStoreScanner {
     long ts1 = System.currentTimeMillis();
     long ts2 = ts1 + 1;
     long ts3 = ts1 + 2;
-    byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);
+    byte [] value = generateMobValue((int)defaultThreshold+1);
 
     Put put1 = new Put(row1);
     put1.add(family, qf1, ts3, value);
@@ -171,7 +171,7 @@ public class TestMobStoreScanner {
     long ts1 = System.currentTimeMillis();
     long ts2 = ts1 + 1;
     long ts3 = ts1 + 2;
-    byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);;
+    byte [] value = generateMobValue((int)defaultThreshold+1);;
 
     Put put1 = new Put(row1);
     put1.add(family, qf1, ts3, value);
@@ -203,7 +203,7 @@ public class TestMobStoreScanner {
     long ts1 = System.currentTimeMillis();
     long ts2 = ts1 + 1;
     long ts3 = ts1 + 2;
-    byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);;
+    byte [] value = generateMobValue((int)defaultThreshold+1);;
 
     Put put1 = new Put(row1);
     put1.add(family, qf1, ts3, value);
@@ -234,9 +234,9 @@ public class TestMobStoreScanner {
   public void testMobThreshold(boolean reversed) throws Exception {
     String TN = "testMobThreshold" + reversed;
     setUp(defaultThreshold, TN);
-    byte [] valueLess = generateMobValue(Integer.parseInt(defaultThreshold)-1);
-    byte [] valueEqual = generateMobValue(Integer.parseInt(defaultThreshold));
-    byte [] valueGreater = generateMobValue(Integer.parseInt(defaultThreshold)+1);
+    byte [] valueLess = generateMobValue((int)defaultThreshold-1);
+    byte [] valueEqual = generateMobValue((int)defaultThreshold);
+    byte [] valueGreater = generateMobValue((int)defaultThreshold+1);
     long ts1 = System.currentTimeMillis();
     long ts2 = ts1 + 1;
     long ts3 = ts1 + 2;
