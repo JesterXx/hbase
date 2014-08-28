@@ -26,9 +26,9 @@ import org.apache.hadoop.hbase.util.MD5Hash;
  * It consists of a md5 of a start key, a date and an uuid.
  * It looks like md5(start) + date + uuid.
  * <ol>
- * <li>0-32 characters: md5 of a start key. Since the length of the start key is not
+ * <li>0-31 characters: md5 hex string of a start key. Since the length of the start key is not
  * fixed, have to use the md5 instead which has a fix length.</li>
- * <li>32-40 characters: a string of a date with format yyyymmdd. The date is the latest timestamp
+ * <li>32-39 characters: a string of a date with format yyyymmdd. The date is the latest timestamp
  * of cells in this file</li>
  * <li>the remaining characters: the uuid.</li>
  * </ol>
@@ -63,7 +63,7 @@ public class MobFileName {
 
   /**
    * @param startKey
-   *          The md5 of the start key.
+   *          The md5 hex string of the start key.
    * @param date
    *          The string of the latest timestamp of cells in this file, the format is yyyymmdd.
    * @param uuid

@@ -89,7 +89,7 @@ public class HMobStore extends HStore {
   /**
    * Gets the MobStoreScanner or MobReversedStoreScanner. In these scanners, a additional seeks in
    * the mob files should be performed after the seek in HBase is done.
-   */  
+   */
   @Override
   protected KeyValueScanner createScanner(Scan scan, final NavigableSet<byte[]> targetCols,
       long readPt, KeyValueScanner scanner) throws IOException {
@@ -165,7 +165,7 @@ public class HMobStore extends HStore {
         .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
     return w;
   }
-  
+
   /**
    * Commits the mob file.
    * @param sourceFile The source file.

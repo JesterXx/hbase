@@ -318,7 +318,7 @@ public class TestHMobStore {
   public void testGetFromMemStoreAndFiles() throws IOException {
 
     final Configuration conf = HBaseConfiguration.create();
-    
+
     init(name.getMethodName(), conf, false);
 
     //Put data in memstore
