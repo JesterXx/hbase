@@ -82,15 +82,15 @@ public class MobFileCache {
   private final ReentrantLock evictionLock = new ReentrantLock(true);
 
   //stripes lock on each mob file based on its hash. Sync the openFile/closeFile operations.
-  private IdLock keyLock = new IdLock();
+  private final IdLock keyLock = new IdLock();
 
   private final ScheduledExecutorService scheduleThreadPool = Executors.newScheduledThreadPool(1,
       new ThreadFactoryBuilder().setNameFormat("MobFileCache #%d").setDaemon(true).build());
-  private Configuration conf;
+  private final Configuration conf;
 
   // the count of the cached references to mob files
-  private int mobFileMaxCacheSize;
-  private boolean isCacheEnabled = false;
+  private final int mobFileMaxCacheSize;
+  private final boolean isCacheEnabled;
   private float evictRemainRatio;
 
   public MobFileCache(Configuration conf) {

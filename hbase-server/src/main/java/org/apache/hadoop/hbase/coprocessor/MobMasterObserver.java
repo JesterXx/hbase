@@ -21,6 +21,7 @@ import java.io.IOException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HRegionInfo;
@@ -35,6 +36,7 @@ import org.apache.hadoop.hbase.util.FSUtils;
  * It monitors the operations in HMaster, and takes special actions for MOB.
  *
  */
+@InterfaceAudience.Private
 public class MobMasterObserver extends BaseMasterObserver {
 
   private static final Log LOG = LogFactory.getLog(MobMasterObserver.class);

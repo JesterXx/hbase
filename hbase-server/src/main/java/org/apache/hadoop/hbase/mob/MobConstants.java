@@ -29,7 +29,7 @@ import org.apache.hadoop.hbase.util.Bytes;
  * The constants used in mob.
  */
 @InterfaceAudience.Public
-@InterfaceStability.Stable
+@InterfaceStability.Evolving
 public class MobConstants {
 
   public static final byte[] IS_MOB = Bytes.toBytes("isMob");
