@@ -96,7 +96,6 @@ public class TestMobRestoreFlushSnapshotFromClient {
     tableName = TableName.valueOf("testtb-" + tid);
     snapshotName0 = Bytes.toBytes("snaptb0-" + tid);
     snapshotName1 = Bytes.toBytes("snaptb1-" + tid);
-    snapshotName2 = Bytes.toBytes("snaptb2-" + tid);
 
     // create Table
     MobSnapshotTestingUtils.createMobTable(UTIL, tableName, 1, FAMILY);
