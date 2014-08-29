@@ -75,7 +75,9 @@ public class MobFileCache {
   private Map<String, CachedMobFile> map = null;
   // caches access count
   private final AtomicLong count;
+  private long lastAccess;
   private final AtomicLong miss;
+  private long lastMiss;
 
   // a lock to sync the evict to guarantee the eviction occurs in sequence.
   // the method evictFile is not sync by this lock, the ConcurrentHashMap does the sync there.
@@ -126,10 +128,10 @@ public class MobFileCache {
   public void evict() {
     if (isCacheEnabled) {
       // Ensure only one eviction at a time
-      printStatistics();
       if (!evictionLock.tryLock()) {
         return;
       }
+      printStatistics();
       List<CachedMobFile> evictedFiles = new ArrayList<CachedMobFile>();
       try {
         if (map.size() <= mobFileMaxCacheSize) {
@@ -253,12 +255,14 @@ public class MobFileCache {
    * Prints the statistics.
    */
   public void printStatistics() {
-    long access = count.get();
-    long missed = miss.get();
+    long access = count.get() - lastAccess;
+    long missed = miss.get() - lastMiss;
+    long hitRate = (access - missed) * 100 / access;
     LOG.info("MobFileCache Statistics, access: " + access + ", miss: " + missed + ", hit: "
         + (access - missed) + ", hit rate: "
-        + ((access == 0) ? 0 : ((access - missed) * 100 / access)) + "%");
-
+        + ((access == 0) ? 0 : hitRate) + "%");
+    lastAccess += access;
+    lastMiss += missed;
   }
 
 }
