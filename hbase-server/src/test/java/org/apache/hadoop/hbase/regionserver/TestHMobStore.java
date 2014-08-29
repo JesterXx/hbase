@@ -115,8 +115,8 @@ public class TestHMobStore {
   private void init(String methodName, Configuration conf, boolean testStore)
   throws IOException {
     hcd = new HColumnDescriptor(family);
-    hcd.setValue(MobConstants.IS_MOB, "true");
-    hcd.setValue(MobConstants.MOB_THRESHOLD, "3");
+    hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
+    hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(3L));
     hcd.setMaxVersions(4);
     init(methodName, conf, hcd, testStore);
   }
@@ -365,8 +365,8 @@ public class TestHMobStore {
 
     HColumnDescriptor hcd;
     hcd = new HColumnDescriptor(family);
-    hcd.setValue(MobConstants.IS_MOB, "true");
-    hcd.setValue(MobConstants.MOB_THRESHOLD, "100");
+    hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
+    hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(100L));
     hcd.setMaxVersions(4);
     init(name.getMethodName(), conf, hcd, false);
 

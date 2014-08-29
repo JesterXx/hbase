@@ -89,8 +89,8 @@ public class TestDeleteMobTable {
     TableName tn = TableName.valueOf(tableName);
     HTableDescriptor htd = new HTableDescriptor(tn);
     HColumnDescriptor hcd = new HColumnDescriptor(FAMILY);
-    hcd.setValue(MobConstants.IS_MOB, "true");
-    hcd.setValue(MobConstants.MOB_THRESHOLD, Long.toString(0));
+    hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
+    hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(0L));
     htd.addFamily(hcd);
     HBaseAdmin admin = null;
     HTable table = null;

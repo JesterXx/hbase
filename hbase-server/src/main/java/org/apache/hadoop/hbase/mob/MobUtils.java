@@ -75,8 +75,8 @@ public class MobUtils {
    * @return True if this column family is a mob one, false if it's not.
    */
   public static boolean isMobFamily(HColumnDescriptor hcd) {
-    String isMob = hcd.getValue(MobConstants.IS_MOB);
-    return isMob != null && Boolean.parseBoolean(isMob);
+    byte[] isMob = hcd.getValue(MobConstants.IS_MOB);
+    return isMob != null && isMob.length == 1 && Bytes.toBoolean(isMob);
   }
 
   /**
@@ -87,9 +87,9 @@ public class MobUtils {
    * @return The threshold.
    */
   public static long getMobThreshold(HColumnDescriptor hcd) {
-    String threshold = hcd.getValue(MobConstants.MOB_THRESHOLD);
-    return Strings.isEmpty(threshold) ? MobConstants.DEFAULT_MOB_THRESHOLD : Long
-        .parseLong(threshold);
+    byte[] threshold = hcd.getValue(MobConstants.MOB_THRESHOLD);
+    return threshold != null && threshold.length == Bytes.SIZEOF_LONG ? Bytes.toLong(threshold)
+        : MobConstants.DEFAULT_MOB_THRESHOLD;
   }
 
   /**

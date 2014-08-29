@@ -56,7 +56,7 @@ public class TestMobDataBlockEncoding {
   private static HColumnDescriptor hcd;
   private static HTableDescriptor desc;
   private static Random random = new Random();
-  private static String defaultThreshold = "10";
+  private static long defaultThreshold = 10;
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
@@ -71,12 +71,12 @@ public class TestMobDataBlockEncoding {
     TEST_UTIL.shutdownMiniCluster();
   }
 
-  public void setUp(String threshold, String TN, DataBlockEncoding encoding)
+  public void setUp(long threshold, String TN, DataBlockEncoding encoding)
       throws Exception {
     desc = new HTableDescriptor(TableName.valueOf(TN));
     hcd = new HColumnDescriptor(family);
-    hcd.setValue(MobConstants.IS_MOB, "true");
-    hcd.setValue(MobConstants.MOB_THRESHOLD, threshold);
+    hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
+    hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(threshold));
     hcd.setMaxVersions(4);
     hcd.setDataBlockEncoding(encoding);
     desc.addFamily(hcd);
@@ -110,7 +110,7 @@ public class TestMobDataBlockEncoding {
     long ts1 = System.currentTimeMillis();
     long ts2 = ts1 + 1;
     long ts3 = ts1 + 2;
-    byte [] value = generateMobValue(Integer.parseInt(defaultThreshold)+1);
+    byte[] value = generateMobValue((int) defaultThreshold + 1);
 
     Put put1 = new Put(row1);
     put1.add(family, qf1, ts3, value);

@@ -122,7 +122,7 @@ public class HMobStore extends HStore {
    * Gets the temp directory.
    * @return The temp directory.
    */
-  private Path getTmpDir() {
+  private Path getTempDir() {
     return new Path(homePath, MobConstants.TEMP_DIR_NAME);
   }
 
@@ -140,7 +140,7 @@ public class HMobStore extends HStore {
     if (null == startKey) {
       startKey = HConstants.EMPTY_START_ROW;
     }
-    Path path = getTmpDir();
+    Path path = getTempDir();
     return createWriterInTmp(MobUtils.formatDate(date), path, maxKeyCount, compression, startKey);
   }
 
@@ -192,7 +192,7 @@ public class HMobStore extends HStore {
       region.getFilesystem().mkdirs(parent);
     }
     if (!region.getFilesystem().rename(sourceFile, dstPath)) {
-      LOG.warn("Unable to rename " + sourceFile + " to " + dstPath);
+      throw new IOException("Failed rename of " + sourceFile + " to " + dstPath);
     }
   }
 
@@ -208,8 +208,7 @@ public class HMobStore extends HStore {
           new StoreFile(region.getFilesystem(), path, conf, this.mobCacheConfig, BloomType.NONE);
       storeFile.createReader();
     } catch (IOException e) {
-      LOG.error("Fail to open mob store file[" + path + "], keeping it in tmp location["
-          + getTmpDir() + "].", e);
+      LOG.error("Fail to open mob file[" + path + "], keep it in temp directory.", e);
       throw e;
     } finally {
       if (storeFile != null) {
