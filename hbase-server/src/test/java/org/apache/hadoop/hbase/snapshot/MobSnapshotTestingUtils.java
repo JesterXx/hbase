@@ -33,6 +33,7 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.mob.MobConstants;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Assert;
 
 public class MobSnapshotTestingUtils {
@@ -46,7 +47,8 @@ public class MobSnapshotTestingUtils {
     htd.setRegionReplication(regionReplication);
     for (byte[] family: families) {
       HColumnDescriptor hcd = new HColumnDescriptor(family);
-      hcd.setValue(MobConstants.IS_MOB, "true");
+      hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
+      hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(3L));
       htd.addFamily(hcd);
     }
     byte[][] splitKeys = SnapshotTestingUtils.getSplitKeys();
