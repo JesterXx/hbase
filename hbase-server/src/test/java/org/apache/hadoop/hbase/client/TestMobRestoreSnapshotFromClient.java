@@ -182,7 +182,8 @@ public class TestMobRestoreSnapshotFromClient {
     // Add one column family and put some data in it
     admin.disableTable(tableName);
     HColumnDescriptor hcd = new HColumnDescriptor(TEST_FAMILY2);
-    hcd.setValue(MobConstants.IS_MOB, "true");
+    hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
+    hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(3L));
     admin.addColumn(tableName, hcd);
     admin.enableTable(tableName);
     assertEquals(2, table.getTableDescriptor().getFamilies().size());
