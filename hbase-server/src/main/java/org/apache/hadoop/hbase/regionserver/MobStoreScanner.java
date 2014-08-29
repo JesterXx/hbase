@@ -38,8 +38,7 @@ public class MobStoreScanner extends StoreScanner {
   private boolean cacheMobBlocks = false;
 
   public MobStoreScanner(Store store, ScanInfo scanInfo, Scan scan,
-      final NavigableSet<byte[]> columns, long readPt)
-      throws IOException {
+      final NavigableSet<byte[]> columns, long readPt) throws IOException {
     super(store, scanInfo, scan, columns, readPt);
     cacheMobBlocks = MobUtils.isCacheMobBlocks(scan);
   }

@@ -44,7 +44,7 @@ public class MobFileName {
   private final String date;
   private final String startKey;
   private final String uuid;
-  private String fileName;
+  private final String fileName;
 
   /**
    * @param startKey

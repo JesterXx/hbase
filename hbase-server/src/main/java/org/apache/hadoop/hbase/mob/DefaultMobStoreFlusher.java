@@ -68,7 +68,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
   private Path targetPath;
   private HMobStore mobStore;
 
-  public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException{
+  public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException {
     super(conf, store);
     isMob = MobUtils.isMobFamily(store.getFamily());
     if (isMob) {
