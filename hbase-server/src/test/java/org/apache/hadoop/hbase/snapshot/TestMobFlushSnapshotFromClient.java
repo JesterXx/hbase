@@ -71,7 +71,6 @@ public class TestMobFlushSnapshotFromClient {
   private static final int NUM_RS = 2;
   private static final String STRING_TABLE_NAME = "test";
   private static final byte[] TEST_FAM = Bytes.toBytes("fam");
-  private static final byte[] TEST_QUAL = Bytes.toBytes("q");
   private static final TableName TABLE_NAME =
       TableName.valueOf(STRING_TABLE_NAME);
   private final int DEFAULT_NUM_ROWS = 100;

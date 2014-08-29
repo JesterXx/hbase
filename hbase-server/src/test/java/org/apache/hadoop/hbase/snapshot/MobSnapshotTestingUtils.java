@@ -65,7 +65,7 @@ public class MobSnapshotTestingUtils {
     Scan scan = new Scan();
     ResultScanner results = table.getScanner(scan);
     int count = 0;
-    for (@SuppressWarnings("unused") Result res : results) {
+    for (Result res : results) {
       count++;
       List<Cell> cells = res.listCells();
       for(Cell cell : cells) {
@@ -87,7 +87,7 @@ public class MobSnapshotTestingUtils {
     }
     ResultScanner results = table.getScanner(scan);
     int count = 0;
-    for (@SuppressWarnings("unused") Result res : results) {
+    for (Result res : results) {
       count++;
       List<Cell> cells = res.listCells();
       for(Cell cell : cells) {

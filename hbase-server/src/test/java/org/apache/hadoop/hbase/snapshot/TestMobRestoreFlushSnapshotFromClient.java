@@ -56,7 +56,6 @@ public class TestMobRestoreFlushSnapshotFromClient {
 
   private byte[] snapshotName0;
   private byte[] snapshotName1;
-  private byte[] snapshotName2;
   private int snapshot0Rows;
   private int snapshot1Rows;
   private TableName tableName;

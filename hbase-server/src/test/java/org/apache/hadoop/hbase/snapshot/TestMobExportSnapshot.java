@@ -40,7 +40,6 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.MediumTests;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
@@ -115,7 +114,6 @@ public class TestMobExportSnapshot {
     admin.snapshot(emptySnapshotName, tableName);
 
     // Add some rows
-    HTable table = new HTable(TEST_UTIL.getConfiguration(), tableName);
     SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 50, FAMILY);
     tableNumFiles = admin.getTableRegions(tableName).size();
 
