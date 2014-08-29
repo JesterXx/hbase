@@ -172,7 +172,7 @@ public class DeleteTableHandler extends TableEventHandler {
           tableName);
       regionDir = new Path(mobTableDir, MobUtils.getMobRegionInfo(tableName).getEncodedName());
       if (fs.exists(regionDir)) {
-        HFileArchiver.archiveRegion(fs, mfs.getRootDir(), tempTableDir, regionDir);
+        HFileArchiver.archiveRegion(fs, mfs.getRootDir(), mobTableDir, regionDir);
       }
     }
     // 4. Delete table directory from FS (temp directory)
