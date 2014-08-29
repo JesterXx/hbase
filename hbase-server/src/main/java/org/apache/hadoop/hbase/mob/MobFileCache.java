@@ -103,6 +103,8 @@ public class MobFileCache {
     map = new ConcurrentHashMap<String, CachedMobFile>(mobFileMaxCacheSize);
     this.count = new AtomicLong(0);
     this.miss = new AtomicLong(0);
+    this.lastAccess = 0;
+    this.lastMiss = 0;
     if (isCacheEnabled) {
       long period = conf.getLong(MobConstants.MOB_CACHE_EVICT_PERIOD,
           MobConstants.DEFAULT_MOB_CACHE_EVICT_PERIOD); // in seconds
