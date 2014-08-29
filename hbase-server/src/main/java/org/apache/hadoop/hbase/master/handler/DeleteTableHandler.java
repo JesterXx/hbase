@@ -165,9 +165,10 @@ public class DeleteTableHandler extends TableEventHandler {
         break;
       }
     }
+    Path mobTableDir = null;
     if (hasMob) {
       // Archive mob data
-      Path mobTableDir = FSUtils.getTableDir(new Path(mfs.getRootDir(), MobConstants.MOB_DIR_NAME),
+      mobTableDir = FSUtils.getTableDir(new Path(mfs.getRootDir(), MobConstants.MOB_DIR_NAME),
           tableName);
       Path regionDir =
           new Path(mobTableDir, MobUtils.getMobRegionInfo(tableName).getEncodedName());
@@ -178,6 +179,12 @@ public class DeleteTableHandler extends TableEventHandler {
     // 4. Delete table directory from FS (temp directory)
     if (!fs.delete(tempTableDir, true)) {
       LOG.error("Couldn't delete " + tempTableDir);
+    }
+    // Delete the table directory where the mob files are saved
+    if (hasMob && mobTableDir != null && fs.exists(mobTableDir)) {
+      if (!fs.delete(mobTableDir, true)) {
+        LOG.error("Couldn't delete " + mobTableDir);
+      }
     }
 
     LOG.debug("Table '" + tableName + "' archived!");
