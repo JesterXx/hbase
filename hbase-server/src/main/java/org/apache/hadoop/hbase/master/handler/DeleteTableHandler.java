@@ -165,12 +165,12 @@ public class DeleteTableHandler extends TableEventHandler {
         break;
       }
     }
-    Path regionDir = null;
     if (hasMob) {
       // Archive mob data
       Path mobTableDir = FSUtils.getTableDir(new Path(mfs.getRootDir(), MobConstants.MOB_DIR_NAME),
           tableName);
-      regionDir = new Path(mobTableDir, MobUtils.getMobRegionInfo(tableName).getEncodedName());
+      Path regionDir =
+          new Path(mobTableDir, MobUtils.getMobRegionInfo(tableName).getEncodedName());
       if (fs.exists(regionDir)) {
         HFileArchiver.archiveRegion(fs, mfs.getRootDir(), mobTableDir, regionDir);
       }
