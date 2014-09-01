@@ -102,7 +102,6 @@ public class TestDeleteMobTable {
 
       table.flushCommits();
       admin.flush(tableName);
-      table.close();
 
       // the mob file exists
       Assert.assertEquals(1, countMobFiles(tn, hcd.getNameAsString()));
@@ -110,6 +109,7 @@ public class TestDeleteMobTable {
       String fileName = assertHasOneMobRow(table, tn, hcd.getNameAsString());
       Assert.assertFalse(mobArchiveExist(tn, hcd.getNameAsString(), fileName));
       Assert.assertTrue(mobTableDirExist(tn));
+      table.close();
 
       admin.disableTable(tn);
       admin.deleteTable(tn);
