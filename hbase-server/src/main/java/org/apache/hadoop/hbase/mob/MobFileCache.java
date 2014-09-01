@@ -211,8 +211,8 @@ public class MobFileCache {
             cached = CachedMobFile.create(fs, path, conf, cacheConf);
             cached.open();
             map.put(fileName, cached);
+            miss.incrementAndGet();
           }
-          miss.incrementAndGet();
         }
         cached.open();
         cached.access(count.incrementAndGet());

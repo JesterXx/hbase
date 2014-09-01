@@ -37,7 +37,6 @@ import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
-import org.apache.hadoop.hbase.util.Strings;
 
 /**
  * The mob utilities
@@ -105,9 +104,8 @@ public class MobUtils {
       Tag tag = Tag.getTag(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength(),
           TagType.MOB_REFERENCE_TAG_TYPE);
       return tag != null;
-    } else {
-      return false;
     }
+    return false;
   }
 
   /**
@@ -116,16 +114,14 @@ public class MobUtils {
    * @return True if the list has a mob reference tag, false if it doesn't.
    */
   public static boolean hasMobReferenceTag(List<Tag> tags) {
-    boolean isMob = false;
     if (!tags.isEmpty()) {
       for (Tag tag : tags) {
         if (tag.getType() == TagType.MOB_REFERENCE_TAG_TYPE) {
-          isMob = true;
-          break;
+          return true;
         }
       }
     }
-    return isMob;
+    return false;
   }
 
   /**
@@ -240,11 +236,11 @@ public class MobUtils {
    * The value of the mob reference KeyValue is mobCellValueSize + mobFileName.
    * @param kv The original KeyValue.
    * @param fileName The mob file name where the mob reference KeyValue is written.
-   * @param mobSrcTableName The tag of the current table name. It's very important in
+   * @param tableNameTag The tag of the current table name. It's very important in
    *                        cloning the snapshot.
    * @return The mob reference KeyValue.
    */
-  public static KeyValue createMobRefKeyValue(KeyValue kv, byte[] fileName, Tag mobSrcTableName) {
+  public static KeyValue createMobRefKeyValue(KeyValue kv, byte[] fileName, Tag tableNameTag) {
     // Append the tags to the KeyValue.
     // The key is same, the value is the filename of the mob file
     List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(), kv.getTagsLength());
@@ -254,7 +250,7 @@ public class MobUtils {
     // It's very useful in cloning the snapshot. When reading from the cloning table, we need to
     // find the original mob files by this table name. For details please see cloning
     // snapshot for mob files.
-    existingTags.add(mobSrcTableName);
+    existingTags.add(tableNameTag);
     long valueLength = kv.getValueLength();
     byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);
     KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(), kv.getRowLength(),
