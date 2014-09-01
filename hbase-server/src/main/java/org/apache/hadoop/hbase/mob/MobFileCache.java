@@ -146,7 +146,7 @@ public class MobFileCache {
           for (int i = start; i < files.size(); i++) {
             String name = files.get(i).getFileName();
             CachedMobFile evictedFile = map.remove(name);
-            if (null != evictedFile) {
+            if (evictedFile != null) {
               evictedFiles.add(evictedFile);
             }
           }
