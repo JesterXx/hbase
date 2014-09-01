@@ -173,7 +173,7 @@ public class MobFileCache {
         // obtains the lock to close the cached file.
         lockEntry = keyLock.getLockEntry(fileName.hashCode());
         CachedMobFile evictedFile = map.remove(fileName);
-        if (null != evictedFile) {
+        if (evictedFile != null) {
           evictedFile.close();
         }
       } catch (IOException e) {
@@ -202,9 +202,9 @@ public class MobFileCache {
       CachedMobFile cached = map.get(fileName);
       IdLock.Entry lockEntry = keyLock.getLockEntry(fileName.hashCode());
       try {
-        if (null == cached) {
+        if (cached == null) {
           cached = map.get(fileName);
-          if (null == cached) {
+          if (cached == null) {
             if (map.size() > mobFileMaxCacheSize) {
               evict();
             }
