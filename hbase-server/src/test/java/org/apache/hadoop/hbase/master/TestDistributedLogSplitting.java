@@ -77,6 +77,8 @@ import org.apache.hadoop.hbase.client.PerClientRandomNonceGenerator;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.RetriesExhaustedWithDetailsException;
+import org.apache.hadoop.hbase.coordination.BaseCoordinatedStateManager;
+import org.apache.hadoop.hbase.coordination.ZKSplitLogManagerCoordination;
 import org.apache.hadoop.hbase.exceptions.OperationConflictException;
 import org.apache.hadoop.hbase.exceptions.RegionInRecoveryException;
 import org.apache.hadoop.hbase.master.SplitLogManager.TaskBatch;
@@ -167,7 +169,7 @@ public class TestDistributedLogSplitting {
     cluster.waitForActiveAndReadyMaster();
     master = cluster.getMaster();
     while (cluster.getLiveRegionServerThreads().size() < num_rs) {
-      Threads.sleep(1);
+      Threads.sleep(10);
     }
   }
 
@@ -651,8 +653,8 @@ public class TestDistributedLogSplitting {
       break;
     }
 
-    slm.markRegionsRecoveringInZK(firstFailedServer, regionSet);
-    slm.markRegionsRecoveringInZK(secondFailedServer, regionSet);
+    slm.markRegionsRecovering(firstFailedServer, regionSet);
+    slm.markRegionsRecovering(secondFailedServer, regionSet);
 
     List<String> recoveringRegions = ZKUtil.listChildrenNoWatch(zkw,
       ZKUtil.joinZNode(zkw.recoveringRegionsZNode, region.getEncodedName()));
@@ -880,7 +882,7 @@ public class TestDistributedLogSplitting {
       break;
     }
 
-    slm.markRegionsRecoveringInZK(hrs.getServerName(), regionSet);
+    slm.markRegionsRecovering(hrs.getServerName(), regionSet);
     // move region in order for the region opened in recovering state
     final HRegionInfo hri = region;
     final HRegionServer tmpRS = dstRS;
@@ -1013,18 +1015,18 @@ public class TestDistributedLogSplitting {
     rsts.get(1).getRegionServer().abort("testing");
     rsts.get(2).getRegionServer().abort("testing");
 
-    long start = EnvironmentEdgeManager.currentTimeMillis();
+    long start = EnvironmentEdgeManager.currentTime();
     while (cluster.getLiveRegionServerThreads().size() > (NUM_RS - 3)) {
-      if (EnvironmentEdgeManager.currentTimeMillis() - start > 60000) {
+      if (EnvironmentEdgeManager.currentTime() - start > 60000) {
         assertTrue(false);
       }
       Thread.sleep(200);
     }
 
-    start = EnvironmentEdgeManager.currentTimeMillis();
+    start = EnvironmentEdgeManager.currentTime();
     while (HBaseTestingUtility.getAllOnlineRegions(cluster).size()
         < (NUM_REGIONS_TO_CREATE + 1)) {
-      if (EnvironmentEdgeManager.currentTimeMillis() - start > 60000) {
+      if (EnvironmentEdgeManager.currentTime() - start > 60000) {
         assertTrue("Timedout", false);
       }
       Thread.sleep(200);
@@ -1064,7 +1066,10 @@ public class TestDistributedLogSplitting {
       out.write(0);
       out.write(Bytes.toBytes("corrupted bytes"));
       out.close();
-      slm.ignoreZKDeleteForTesting = true;
+      ZKSplitLogManagerCoordination coordination =
+          (ZKSplitLogManagerCoordination) ((BaseCoordinatedStateManager) master
+              .getCoordinatedStateManager()).getSplitLogManagerCoordination();
+      coordination.setIgnoreDeleteForTesting(true);
       executor = Executors.newSingleThreadExecutor();
       Runnable runnable = new Runnable() {
        @Override
@@ -1591,14 +1596,19 @@ public class TestDistributedLogSplitting {
    */
   private HRegionServer findRSToKill(boolean hasMetaRegion, String tableName) throws Exception {
     List<RegionServerThread> rsts = cluster.getLiveRegionServerThreads();
-    int numOfRSs = rsts.size();
     List<HRegionInfo> regions = null;
     HRegionServer hrs = null;
 
-    for (int i = 0; i < numOfRSs; i++) {
+    for (RegionServerThread rst: rsts) {
+      hrs = rst.getRegionServer();
+      while (rst.isAlive() && !hrs.isOnline()) {
+        Thread.sleep(100);
+      }
+      if (!rst.isAlive()) {
+        continue;
+      }
       boolean isCarryingMeta = false;
       boolean foundTableRegion = false;
-      hrs = rsts.get(i).getRegionServer();
       regions = ProtobufUtil.getOnlineRegions(hrs.getRSRpcServices());
       for (HRegionInfo region : regions) {
         if (region.isMetaRegion()) {

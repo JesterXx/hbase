@@ -524,7 +524,14 @@ public class AssignmentManager {
     regionStateStore.start();
 
     if (failover) {
-      processDeadServers(deadServers);
+      if (deadServers != null && !deadServers.isEmpty()) {
+        for (ServerName serverName: deadServers) {
+          if (!serverManager.isServerDead(serverName)) {
+            serverManager.expireServer(serverName); // Let SSH do region re-assign
+          }
+        }
+      }
+      processRegionsInTransition(regionStates.getRegionsInTransition().values());
     }
 
     // Now we can safely claim failover cleanup completed and enable
@@ -670,7 +677,7 @@ public class AssignmentManager {
    */
   boolean assign(final ServerName destination, final List<HRegionInfo> regions)
     throws InterruptedException {
-    long startTime = EnvironmentEdgeManager.currentTimeMillis();
+    long startTime = EnvironmentEdgeManager.currentTime();
     try {
       int regionCount = regions.size();
       if (regionCount == 0) {
@@ -822,7 +829,7 @@ public class AssignmentManager {
       LOG.debug("Bulk assigning done for " + destination);
       return true;
     } finally {
-      metricsAssignmentManager.updateBulkAssignTime(EnvironmentEdgeManager.currentTimeMillis() - startTime);
+      metricsAssignmentManager.updateBulkAssignTime(EnvironmentEdgeManager.currentTime() - startTime);
     }
   }
 
@@ -884,11 +891,11 @@ public class AssignmentManager {
           } else {
             if (maxWaitTime < 0) {
               maxWaitTime =
-                  EnvironmentEdgeManager.currentTimeMillis()
+                  EnvironmentEdgeManager.currentTime()
                       + conf.getLong(ALREADY_IN_TRANSITION_WAITTIME,
                         DEFAULT_ALREADY_IN_TRANSITION_WAITTIME);
             }
-            long now = EnvironmentEdgeManager.currentTimeMillis();
+            long now = EnvironmentEdgeManager.currentTime();
             if (now < maxWaitTime) {
               LOG.debug("Region is already in transition; "
                 + "waiting up to " + (maxWaitTime - now) + "ms", t);
@@ -980,7 +987,7 @@ public class AssignmentManager {
    * @param forceNewPlan
    */
   private void assign(RegionState state, boolean forceNewPlan) {
-    long startTime = EnvironmentEdgeManager.currentTimeMillis();
+    long startTime = EnvironmentEdgeManager.currentTime();
     try {
       Configuration conf = server.getConfiguration();
       RegionPlan plan = null;
@@ -1083,18 +1090,18 @@ public class AssignmentManager {
 
             if (maxWaitTime < 0) {
               if (t instanceof RegionAlreadyInTransitionException) {
-                maxWaitTime = EnvironmentEdgeManager.currentTimeMillis()
+                maxWaitTime = EnvironmentEdgeManager.currentTime()
                   + this.server.getConfiguration().getLong(ALREADY_IN_TRANSITION_WAITTIME,
                     DEFAULT_ALREADY_IN_TRANSITION_WAITTIME);
               } else {
-                maxWaitTime = EnvironmentEdgeManager.currentTimeMillis()
+                maxWaitTime = EnvironmentEdgeManager.currentTime()
                   + this.server.getConfiguration().getLong(
                     "hbase.regionserver.rpc.startup.waittime", 60000);
               }
             }
             try {
               needNewPlan = false;
-              long now = EnvironmentEdgeManager.currentTimeMillis();
+              long now = EnvironmentEdgeManager.currentTime();
               if (now < maxWaitTime) {
                 LOG.debug("Server is not yet up or region is already in transition; "
                   + "waiting up to " + (maxWaitTime - now) + "ms", t);
@@ -1175,7 +1182,7 @@ public class AssignmentManager {
       // Run out of attempts
       regionStates.updateRegionState(region, State.FAILED_OPEN);
     } finally {
-      metricsAssignmentManager.updateAssignmentTime(EnvironmentEdgeManager.currentTimeMillis() - startTime);
+      metricsAssignmentManager.updateAssignmentTime(EnvironmentEdgeManager.currentTime() - startTime);
     }
   }
 
@@ -1399,13 +1406,9 @@ public class AssignmentManager {
    * <p>
    * Assumes that hbase:meta is currently closed and is not being actively served by
    * any RegionServer.
-   * <p>
-   * Forcibly unsets the current meta region location in ZooKeeper and assigns
-   * hbase:meta to a random RegionServer.
-   * @throws KeeperException
    */
   public void assignMeta() throws KeeperException {
-    this.server.getMetaTableLocator().deleteMetaLocation(this.server.getZooKeeper());
+    regionStates.updateRegionState(HRegionInfo.FIRST_META_REGIONINFO, State.OFFLINE);
     assign(HRegionInfo.FIRST_META_REGIONINFO);
   }
 
@@ -1709,28 +1712,15 @@ public class AssignmentManager {
   }
 
   /**
-   * Processes list of dead servers from result of hbase:meta scan and regions in RIT
-   *
-   * @param deadServers
-   *          The list of dead servers which failed while there was no active
-   *          master. Can be null.
+   * Processes list of regions in transition at startup
    */
-  private void processDeadServers(Set<ServerName> deadServers) {
-    if (deadServers != null && !deadServers.isEmpty()) {
-      for (ServerName serverName: deadServers) {
-        if (!serverManager.isServerDead(serverName)) {
-          serverManager.expireServer(serverName); // Let SSH do region re-assign
-        }
-      }
-    }
-
+  void processRegionsInTransition(Collection<RegionState> regionStates) {
     // We need to send RPC call again for PENDING_OPEN/PENDING_CLOSE regions
     // in case the RPC call is not sent out yet before the master was shut down
     // since we update the state before we send the RPC call. We can't update
     // the state after the RPC call. Otherwise, we don't know what's happened
     // to the region if the master dies right after the RPC call is out.
-    Map<String, RegionState> rits = regionStates.getRegionsInTransition();
-    for (RegionState regionState: rits.values()) {
+    for (RegionState regionState: regionStates) {
       if (!serverManager.isServerOnline(regionState.getServerName())) {
         continue; // SSH will handle it
       }
@@ -1922,7 +1912,7 @@ public class AssignmentManager {
   public boolean waitOnRegionToClearRegionsInTransition(final HRegionInfo hri, long timeOut)
       throws InterruptedException {
     if (!regionStates.isRegionInTransition(hri)) return true;
-    long end = (timeOut <= 0) ? Long.MAX_VALUE : EnvironmentEdgeManager.currentTimeMillis()
+    long end = (timeOut <= 0) ? Long.MAX_VALUE : EnvironmentEdgeManager.currentTime()
         + timeOut;
     // There is already a timeout monitor on regions in transition so I
     // should not have to have one here too?
@@ -1930,7 +1920,7 @@ public class AssignmentManager {
         " to leave regions-in-transition, timeOut=" + timeOut + " ms.");
     while (!this.server.isStopped() && regionStates.isRegionInTransition(hri)) {
       regionStates.waitForUpdate(100);
-      if (EnvironmentEdgeManager.currentTimeMillis() > end) {
+      if (EnvironmentEdgeManager.currentTime() > end) {
         LOG.info("Timed out on waiting for " + hri.getEncodedName() + " to be assigned.");
         return false;
       }
