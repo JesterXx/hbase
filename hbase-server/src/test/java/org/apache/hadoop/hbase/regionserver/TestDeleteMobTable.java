@@ -33,11 +33,11 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.mob.DefaultMobStoreFlusher;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.HFileArchiveUtil;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -57,8 +57,6 @@ public class TestDeleteMobTable {
   public static void setUpBeforeClass() throws Exception {
     TEST_UTIL.getConfiguration().setInt("hbase.master.info.port", 0);
     TEST_UTIL.getConfiguration().setBoolean("hbase.regionserver.info.port.auto", true);
-    TEST_UTIL.getConfiguration().setClass(DefaultStoreEngine.DEFAULT_STORE_FLUSHER_CLASS_KEY,
-        DefaultMobStoreFlusher.class, StoreFlusher.class);
     TEST_UTIL.startMiniCluster(1);
   }
 
@@ -110,6 +108,7 @@ public class TestDeleteMobTable {
       Assert.assertEquals(0, countArchiveMobFiles(tn, hcd.getNameAsString()));
       String fileName = assertHasOneMobRow(table, tn, hcd.getNameAsString());
       Assert.assertFalse(mobArchiveExist(tn, hcd.getNameAsString(), fileName));
+      Assert.assertTrue(mobTableDirExist(tn));
       table.close();
 
       admin.disableTable(tn);
@@ -119,6 +118,7 @@ public class TestDeleteMobTable {
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(1, countArchiveMobFiles(tn, hcd.getNameAsString()));
       Assert.assertTrue(mobArchiveExist(tn, hcd.getNameAsString(), fileName));
+      Assert.assertFalse(mobTableDirExist(tn));
     } finally {
       if (admin != null) {
         admin.close();
@@ -148,11 +148,12 @@ public class TestDeleteMobTable {
 
       table.flushCommits();
       admin.flush(tableName);
+      table.close();
 
       // the mob file doesn't exist
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(0, countArchiveMobFiles(tn, hcd.getNameAsString()));
-      table.close();
+      Assert.assertFalse(mobTableDirExist(tn));
 
       admin.disableTable(tn);
       admin.deleteTable(tn);
@@ -160,6 +161,7 @@ public class TestDeleteMobTable {
       Assert.assertFalse(admin.tableExists(tn));
       Assert.assertEquals(0, countMobFiles(tn, hcd.getNameAsString()));
       Assert.assertEquals(0, countArchiveMobFiles(tn, hcd.getNameAsString()));
+      Assert.assertFalse(mobTableDirExist(tn));
     } finally {
       if (admin != null) {
         admin.close();
@@ -187,6 +189,12 @@ public class TestDeleteMobTable {
     } else {
       return 0;
     }
+  }
+
+  private boolean mobTableDirExist(TableName tn) throws IOException {
+    FileSystem fs = TEST_UTIL.getTestFileSystem();
+    Path tableDir = FSUtils.getTableDir(MobUtils.getMobHome(TEST_UTIL.getConfiguration()), tn);
+    return fs.exists(tableDir);
   }
 
   private boolean mobArchiveExist(TableName tn, String familyName, String fileName)

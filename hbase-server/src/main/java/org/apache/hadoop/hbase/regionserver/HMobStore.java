@@ -54,8 +54,8 @@ import org.apache.hadoop.hbase.util.Bytes;
  * HMobStore is almost the same with the HStore except using different types of scanners.
  * In the method of getScanner, the MobStoreScanner and MobReversedStoreScanner are returned.
  * In these scanners, a additional seeks in the mob files should be performed after the seek
- * in HBase is done.
- * The store implementation to save MOBs (medium objects), it extends the HStore. When a descriptor
+ * to HBase is done.
+ * The store implements how we save MOBs by extending HStore. When a descriptor
  * of a column family has the value "isMob", it means this column family is a mob one. When a
  * HRegion instantiate a store for this column family, the HMobStore is created. HMobStore is
  * almost the same with the HStore except using different types of scanners. In the method of
@@ -250,7 +250,7 @@ public class HMobStore extends HStore {
           reference.getFamilyLength(), reference.getQualifierArray(),
           reference.getQualifierOffset(), reference.getQualifierLength(), reference.getTimestamp(),
           Type.codeToType(reference.getTypeByte()), HConstants.EMPTY_BYTE_ARRAY,
-          reference.getValueOffset(), 0, reference.getTagsArray(), reference.getTagsOffset(),
+          0, 0, reference.getTagsArray(), reference.getTagsOffset(),
           reference.getTagsLength());
     }
     return result;

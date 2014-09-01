@@ -18,21 +18,21 @@
  */
 package org.apache.hadoop.hbase;
 
-import com.google.common.net.InetAddresses;
-import com.google.protobuf.InvalidProtocolBufferException;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.hbase.exceptions.DeserializationException;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
-import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.MetaRegionServer;
+import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos;
 import org.apache.hadoop.hbase.util.Addressing;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.regex.Pattern;
+import com.google.common.net.InetAddresses;
+import com.google.protobuf.InvalidProtocolBufferException;
 
 /**
  * Instance of an HBase ServerName.
@@ -54,6 +54,8 @@ import java.util.regex.Pattern;
 @InterfaceAudience.Public
 @InterfaceStability.Evolving
 public class ServerName implements Comparable<ServerName>, Serializable {
+  private static final long serialVersionUID = 1367463982557264981L;
+
   /**
    * Version for this class.
    * Its a short rather than a byte so I can for sure distinguish between this
@@ -147,14 +149,29 @@ public class ServerName implements Comparable<ServerName>, Serializable {
     return Long.parseLong(serverName.substring(index + 1));
   }
 
+  /**
+   * Retrieve an instance of ServerName.
+   * Callers should use the equals method to compare returned instances, though we may return
+   * a shared immutable object as an internal optimization.
+   */
   public static ServerName valueOf(final String hostname, final int port, final long startcode) {
     return new ServerName(hostname, port, startcode);
   }
 
+  /**
+   * Retrieve an instance of ServerName.
+   * Callers should use the equals method to compare returned instances, though we may return
+   * a shared immutable object as an internal optimization.
+   */
   public static ServerName valueOf(final String serverName) {
     return new ServerName(serverName);
   }
 
+  /**
+   * Retrieve an instance of ServerName.
+   * Callers should use the equals method to compare returned instances, though we may return
+   * a shared immutable object as an internal optimization.
+   */
   public static ServerName valueOf(final String hostAndPort, final long startCode) {
     return new ServerName(hostAndPort, startCode);
   }
@@ -355,9 +372,9 @@ public class ServerName implements Comparable<ServerName>, Serializable {
     if (ProtobufUtil.isPBMagicPrefix(data)) {
       int prefixLen = ProtobufUtil.lengthOfPBMagic();
       try {
-        MetaRegionServer rss =
-          MetaRegionServer.PARSER.parseFrom(data, prefixLen, data.length - prefixLen);
-        org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName sn = rss.getServer();
+        ZooKeeperProtos.Master rss =
+          ZooKeeperProtos.Master.PARSER.parseFrom(data, prefixLen, data.length - prefixLen);
+        org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName sn = rss.getMaster();
         return valueOf(sn.getHostName(), sn.getPort(), sn.getStartCode());
       } catch (InvalidProtocolBufferException e) {
         // A failed parse of the znode is pretty catastrophic. Rather than loop

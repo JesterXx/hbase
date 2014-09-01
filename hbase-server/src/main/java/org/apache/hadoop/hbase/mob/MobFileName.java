@@ -32,9 +32,10 @@ import org.apache.hadoop.hbase.util.MD5Hash;
  * of cells in this file</li>
  * <li>the remaining characters: the uuid.</li>
  * </ol>
- * Has the md5 of the start key in the file name in order to keep region information in the
- * file name. This might be useful in bulkload to minimize the target regions.
- * The cells come from different regions might be in the same mob file, this is allowed.
+ * Using md5 hex string of start key as the prefix of file name makes files with the same start
+ * key unique, they're different from the ones with other start keys
+ * The cells come from different regions might be in the same mob file by region split,
+ * this is allowed.
  * Has the latest timestamp of cells in the file name in order to clean the expired mob files by
  * TTL easily. If this timestamp is older than the TTL, it's regarded as expired.
  */
@@ -110,6 +111,8 @@ public class MobFileName {
    * @return An instance of a MobFileName.
    */
   public static MobFileName create(String fileName) {
+    // The format of a file name is md5HexString(0-31bytes) + date(32-39bytes) + UUID
+    // The date format is yyyyMMdd
     String startKey = fileName.substring(0, 32);
     String date = fileName.substring(32, 40);
     String uuid = fileName.substring(40);

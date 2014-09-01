@@ -31,5 +31,5 @@ public final class TagType {
 
   // mob tags
   public static final byte MOB_REFERENCE_TAG_TYPE = (byte) 5;
-  public static final byte MOB_SRC_TABLE_NAME_TAG_TYPE = (byte) 6;
+  public static final byte MOB_TABLE_NAME_TAG_TYPE = (byte) 6;
 }

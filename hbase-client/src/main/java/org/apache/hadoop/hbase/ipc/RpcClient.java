@@ -188,7 +188,7 @@ public class RpcClient {
      * Add an address to the list of the failed servers list.
      */
     public synchronized void addToFailedServers(InetSocketAddress address) {
-      final long expiry = EnvironmentEdgeManager.currentTimeMillis() + recheckServersTimeout;
+      final long expiry = EnvironmentEdgeManager.currentTime() + recheckServersTimeout;
       failedServers.addFirst(new Pair<Long, String>(expiry, address.toString()));
     }
 
@@ -203,7 +203,7 @@ public class RpcClient {
       }
 
       final String lookup = address.toString();
-      final long now = EnvironmentEdgeManager.currentTimeMillis();
+      final long now = EnvironmentEdgeManager.currentTime();
 
       // iterate, looking for the search entry and cleaning expired entries
       Iterator<Pair<Long, String>> it = failedServers.iterator();
@@ -261,7 +261,7 @@ public class RpcClient {
       this.param = param;
       this.md = md;
       this.cells = cells;
-      this.startTime = EnvironmentEdgeManager.currentTimeMillis();
+      this.startTime = EnvironmentEdgeManager.currentTime();
       this.responseDefaultType = responseDefaultType;
       this.id = callIdCnt.getAndIncrement();
       this.timeout = timeout;
@@ -277,7 +277,7 @@ public class RpcClient {
         return false;
       }
 
-      long waitTime = EnvironmentEdgeManager.currentTimeMillis() - getStartTime();
+      long waitTime = EnvironmentEdgeManager.currentTime() - getStartTime();
       if (waitTime >= timeout) {
         IOException ie = new CallTimeoutException("Call id=" + id +
             ", waitTime=" + waitTime + ", operationTimeout=" + timeout + " expired.");
@@ -293,7 +293,7 @@ public class RpcClient {
         return Integer.MAX_VALUE;
       }
 
-      int remaining = timeout - (int) (EnvironmentEdgeManager.currentTimeMillis() - getStartTime());
+      int remaining = timeout - (int) (EnvironmentEdgeManager.currentTime() - getStartTime());
       return remaining > 0 ? remaining : 0;
     }
 
@@ -731,40 +731,36 @@ public class RpcClient {
     protected synchronized boolean waitForWork() throws InterruptedException {
       // beware of the concurrent access to the calls list: we can add calls, but as well
       //  remove them.
-      long waitUntil = EnvironmentEdgeManager.currentTimeMillis() + minIdleTimeBeforeClose;
-      while (!shouldCloseConnection.get() && running.get() &&
-          EnvironmentEdgeManager.currentTimeMillis() < waitUntil && calls.isEmpty()) {
+      long waitUntil = EnvironmentEdgeManager.currentTime() + minIdleTimeBeforeClose;
+
+      while (true) {
+        if (shouldCloseConnection.get()) {
+          return false;
+        }
+
+        if (!running.get()) {
+          markClosed(new IOException("stopped with " + calls.size() + " pending request(s)"));
+          return false;
+        }
+
+        if (!calls.isEmpty()) {
+          // shouldCloseConnection can be set to true by a parallel thread here. The caller
+          //  will need to check anyway.
+          return true;
+        }
+
+        if (EnvironmentEdgeManager.currentTime() >= waitUntil) {
+          // Connection is idle.
+          // We expect the number of calls to be zero here, but actually someone can
+          //  adds a call at the any moment, as there is no synchronization between this task
+          //  and adding new calls. It's not a big issue, but it will get an exception.
+          markClosed(new IOException(
+              "idle connection closed with " + calls.size() + " pending request(s)"));
+          return false;
+        }
+
         wait(Math.min(minIdleTimeBeforeClose, 1000));
       }
-
-      if (shouldCloseConnection.get()) {
-        return false;
-      }
-
-      if (!running.get()) {
-        markClosed(new IOException("stopped with " + calls.size() + " pending request(s)"));
-        return false;
-      }
-
-      if (!calls.isEmpty()) {
-        // shouldCloseConnection can be set to true by a parallel thread here. The caller
-        //  will need to check anyway.
-        return true;
-      }
-
-      if (EnvironmentEdgeManager.currentTimeMillis() >= waitUntil) {
-        // Connection is idle.
-        // We expect the number of calls to be zero here, but actually someone can
-        //  adds a call at the any moment, as there is no synchronization between this task
-        //  and adding new calls. It's not a big issue, but it will get an exception.
-        markClosed(new IOException(
-            "idle connection closed with " + calls.size() + " pending request(s)"));
-        return false;
-      }
-
-      // We can get here if we received a notification that there is some work to do but
-      //  the work was cancelled. As we're not idle we continue to wait.
-      return false;
     }
 
     public InetSocketAddress getRemoteAddress() {
@@ -824,7 +820,7 @@ public class RpcClient {
     private synchronized boolean setupSaslConnection(final InputStream in2,
         final OutputStream out2) throws IOException {
       saslRpcClient = new HBaseSaslRpcClient(authMethod, token, serverPrincipal, fallbackAllowed,
-          conf.get("hbase.rpc.protection", 
+          conf.get("hbase.rpc.protection",
               QualityOfProtection.AUTHENTICATION.name().toLowerCase()));
       return saslRpcClient.saslConnect(in2, out2);
     }
@@ -1249,7 +1245,7 @@ public class RpcClient {
           // To catch the calls without timeout that were cancelled.
           itor.remove();
         } else if (allCalls) {
-          long waitTime = EnvironmentEdgeManager.currentTimeMillis() - c.getStartTime();
+          long waitTime = EnvironmentEdgeManager.currentTime() - c.getStartTime();
           IOException ie = new IOException("Connection to " + getRemoteAddress()
               + " is closing. Call id=" + c.id + ", waitTime=" + waitTime);
           c.setException(ie);
@@ -1673,7 +1669,7 @@ public class RpcClient {
   throws ServiceException {
     long startTime = 0;
     if (LOG.isTraceEnabled()) {
-      startTime = EnvironmentEdgeManager.currentTimeMillis();
+      startTime = EnvironmentEdgeManager.currentTime();
     }
     int callTimeout = 0;
     CellScanner cells = null;
@@ -1695,7 +1691,7 @@ public class RpcClient {
       }
 
       if (LOG.isTraceEnabled()) {
-        long callTime = EnvironmentEdgeManager.currentTimeMillis() - startTime;
+        long callTime = EnvironmentEdgeManager.currentTime() - startTime;
         LOG.trace("Call: " + md.getName() + ", callTime: " + callTime + "ms");
       }
       return val.getFirst();

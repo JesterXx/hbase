@@ -63,23 +63,19 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
   private static final Log LOG = LogFactory.getLog(DefaultMobStoreFlusher.class);
   private final Object flushLock = new Object();
-  private boolean isMob = false;
   private long mobCellValueSizeThreshold = 0;
   private Path targetPath;
   private HMobStore mobStore;
 
   public DefaultMobStoreFlusher(Configuration conf, Store store) throws IOException {
     super(conf, store);
-    isMob = MobUtils.isMobFamily(store.getFamily());
-    if (isMob) {
-      mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
-      this.targetPath = MobUtils.getMobFamilyPath(conf, store.getTableName(),
-          store.getColumnFamilyName());
-      if (!this.store.getFileSystem().exists(targetPath)) {
-        this.store.getFileSystem().mkdirs(targetPath);
-      }
-      this.mobStore = (HMobStore) store;
+    mobCellValueSizeThreshold = MobUtils.getMobThreshold(store.getFamily());
+    this.targetPath = MobUtils.getMobFamilyPath(conf, store.getTableName(),
+        store.getColumnFamilyName());
+    if (!this.store.getFileSystem().exists(targetPath)) {
+      this.store.getFileSystem().mkdirs(targetPath);
     }
+    this.mobStore = (HMobStore) store;
   }
 
   /**
@@ -120,14 +116,9 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
             false, true, true);
         writer.setTimeRangeTracker(snapshot.getTimeRangeTracker());
         try {
-          if (!isMob) {
-            // It's not a mob store, flush the cells in a normal way
-            performFlush(scanner, writer, smallestReadPoint);
-          } else {
-            // It's a mob store, flush the cells in a mob way. This is the difference of flushing
-            // between a normal and a mob store.
-            performMobFlush(snapshot, cacheFlushId, scanner, writer, status);
-          }
+          // It's a mob store, flush the cells in a mob way. This is the difference of flushing
+          // between a normal and a mob store.
+          performMobFlush(snapshot, cacheFlushId, scanner, writer, status);
         } finally {
           finalizeWriter(writer, cacheFlushId, status);
         }
@@ -172,7 +163,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
     // the relative path is mobFiles
     byte[] fileName = Bytes.toBytes(mobFileWriter.getPath().getName());
     try {
-      Tag mobSrcTableName = new Tag(TagType.MOB_SRC_TABLE_NAME_TAG_TYPE, store.getTableName()
+      Tag tableNameTag = new Tag(TagType.MOB_TABLE_NAME_TAG_TYPE, store.getTableName()
           .getName());
       List<Cell> cells = new ArrayList<Cell>();
       boolean hasMore;
@@ -194,7 +185,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
 
               // append the tags to the KeyValue.
               // The key is same, the value is the filename of the mob file
-              KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName, mobSrcTableName);
+              KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName, tableNameTag);
               writer.append(reference);
             }
           }
