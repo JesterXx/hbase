@@ -146,7 +146,7 @@ public class MobFileCache {
           for (int i = start; i < files.size(); i++) {
             String name = files.get(i).getFileName();
             CachedMobFile evictedFile = map.remove(name);
-            if (null != evictedFile) {
+            if (evictedFile != null) {
               evictedFiles.add(evictedFile);
             }
           }
@@ -172,7 +172,7 @@ public class MobFileCache {
       IdLock.Entry lockEntry = keyLock.getLockEntry(fileName.hashCode());
       try {
         CachedMobFile deletedFile = map.remove(fileName);
-        if (null != deletedFile) {
+        if (deletedFile != null) {
           try {
             deletedFile.close();
           } catch (IOException e) {
@@ -201,9 +201,9 @@ public class MobFileCache {
       CachedMobFile cached = map.get(fileName);
       IdLock.Entry lockEntry = keyLock.getLockEntry(fileName.hashCode());
       try {
-        if (null == cached) {
+        if (cached == null) {
           cached = map.get(fileName);
-          if (null == cached) {
+          if (cached == null) {
             if (map.size() > mobFileMaxCacheSize) {
               evict();
             }

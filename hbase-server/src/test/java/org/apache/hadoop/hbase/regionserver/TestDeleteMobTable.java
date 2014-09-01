@@ -97,7 +97,7 @@ public class TestDeleteMobTable {
 
       byte[] row = Bytes.toBytes("row");
       Put put = new Put(row);
-      put.add(FAMILY, QF, EnvironmentEdgeManager.currentTimeMillis(), value);
+      put.add(FAMILY, QF, EnvironmentEdgeManager.currentTime(), value);
       table.put(put);
 
       table.flushCommits();
@@ -143,7 +143,7 @@ public class TestDeleteMobTable {
 
       byte[] row = Bytes.toBytes("row");
       Put put = new Put(row);
-      put.add(FAMILY, QF, EnvironmentEdgeManager.currentTimeMillis(), value);
+      put.add(FAMILY, QF, EnvironmentEdgeManager.currentTime(), value);
       table.put(put);
 
       table.flushCommits();

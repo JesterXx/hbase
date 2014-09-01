@@ -137,7 +137,7 @@ public class HMobStore extends HStore {
    */
   public StoreFile.Writer createWriterInTmp(Date date, long maxKeyCount,
       Compression.Algorithm compression, byte[] startKey) throws IOException {
-    if (null == startKey) {
+    if (startKey == null) {
       startKey = HConstants.EMPTY_START_ROW;
     }
     Path path = getTempDir();

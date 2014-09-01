@@ -117,7 +117,7 @@ public class MobFile {
    * @throws IOException
    */
   public void close() throws IOException {
-    if (null != sf) {
+    if (sf != null) {
       sf.closeReader(false);
       sf = null;
     }
