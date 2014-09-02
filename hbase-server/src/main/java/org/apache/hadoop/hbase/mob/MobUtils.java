@@ -223,7 +223,7 @@ public class MobUtils {
    * This is a dummy region. The mob files are not saved in a region in HBase.
    * This is only used in mob snapshot. It's internally used only.
    * @param tableName
-   * @return
+   * @return A dummy mob region info.
    */
   public static HRegionInfo getMobRegionInfo(TableName tableName) {
     HRegionInfo info = new HRegionInfo(tableName, MobConstants.MOB_REGION_NAME_BYTES,

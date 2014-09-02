@@ -57,6 +57,25 @@ public class CachedMobFile extends MobFile implements Comparable<CachedMobFile> 
     return this.accessCount < that.accessCount ? 1 : -1;
   }
 
+  @Override
+  public boolean equals(Object obj) {
+    if (this == obj) {
+      return true;
+    }
+    if (obj == null) {
+      return false;
+    }
+    if (!(obj instanceof CachedMobFile)) {
+      return false;
+    }
+    return compareTo((CachedMobFile) obj) == 0;
+  }
+
+  @Override
+  public int hashCode() {
+    return (int)(accessCount ^ (accessCount >>> 32));
+  }
+
   /**
    * Opens the mob file if it's not opened yet and increases the reference.
    * It's not thread-safe. Use MobFileCache.openFile() instead.
