@@ -56,9 +56,6 @@ public class MobUtils {
 
   private static final Log LOG = LogFactory.getLog(MobUtils.class);
 
-  private final static char[] digits = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a',
-    'b', 'c', 'd', 'e', 'f' };
-
   private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT =
       new ThreadLocal<SimpleDateFormat>() {
     @Override
@@ -310,8 +307,7 @@ public class MobUtils {
     if (findArchive) {
       // find from archive
       // Evict the cached file
-      String fileName = path.getName();
-      evictFile(cacheConf, fileName);
+      cacheConf.getMobFileCache().evictFile(path.getName());
       Path archivePath = HFileArchiveUtil.getStoreArchivePath(store.getConfiguration(),
           store.getTableName(), getMobRegionInfo(store.getTableName())
               .getEncodedName(), store.getFamily().getName());
@@ -360,7 +356,7 @@ public class MobUtils {
       findArchive = true;
     }
     if (findArchive) {
-      evictFile(cacheConf, file.getFileName());
+      cacheConf.getMobFileCache().evictFile(file.getFileName());
       Path archivePath = HFileArchiveUtil.getStoreArchivePath(store.getConfiguration(),
           store.getTableName(), getMobRegionInfo(store.getTableName())
               .getEncodedName(), store.getFamily().getName());
@@ -370,13 +366,13 @@ public class MobUtils {
       } catch (IOException e) {
         if (e.getCause() instanceof FileNotFoundException) {
           logFileNotFoundException(e.getCause());
-          evictFile(cacheConf, file.getFileName());
+          cacheConf.getMobFileCache().evictFile(file.getFileName());
           return null;
         }
         throw e;
       } catch (NullPointerException e) {
         logNullPointerException(e);
-        evictFile(cacheConf, file.getFileName());
+        cacheConf.getMobFileCache().evictFile(file.getFileName());
         return null;
       }
     }
@@ -400,15 +396,6 @@ public class MobUtils {
    */
   private static void logFileNotFoundException(Throwable e) {
     LOG.error("Fail to read Cell, this mob file doesn't exist", e);
-  }
-
-  /**
-   * Evicts the cached file.
-   * @param cacheConf The current MobCachConfig.
-   * @param fileName The name of the file to be evicted.
-   */
-  private static void evictFile(MobCacheConfig cacheConf, String fileName) {
-    cacheConf.getMobFileCache().evictFile(fileName);
   }
 
   /**
