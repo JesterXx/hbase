@@ -165,22 +165,23 @@ public class MobFileCache {
   /**
    * Evicts the cached file by the name.
    * @param fileName The name of a cached file.
-   * @throws IOException
    */
-  public void evictFile(String fileName) throws IOException {
+  public void evictFile(String fileName) {
     if (isCacheEnabled) {
-      IdLock.Entry lockEntry = keyLock.getLockEntry(fileName.hashCode());
+      IdLock.Entry lockEntry = null;
       try {
-        CachedMobFile deletedFile = map.remove(fileName);
-        if (deletedFile != null) {
-          try {
-            deletedFile.close();
-          } catch (IOException e) {
-            LOG.error(e.getMessage(), e);
-          }
+        // obtains the lock to close the cached file.
+        lockEntry = keyLock.getLockEntry(fileName.hashCode());
+        CachedMobFile evictedFile = map.remove(fileName);
+        if (evictedFile != null) {
+          evictedFile.close();
         }
+      } catch (IOException e) {
+        LOG.error("Fail to evict the file " + fileName, e);
       } finally {
-        keyLock.releaseLockEntry(lockEntry);
+        if (lockEntry != null) {
+          keyLock.releaseLockEntry(lockEntry);
+        }
       }
     }
   }

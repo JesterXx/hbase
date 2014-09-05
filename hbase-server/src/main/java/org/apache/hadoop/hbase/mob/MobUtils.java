@@ -251,7 +251,7 @@ public class MobUtils {
    * This is a dummy region. The mob files are not saved in a region in HBase.
    * This is only used in mob snapshot. It's internally used only.
    * @param tableName
-   * @return
+   * @return A dummy mob region info.
    */
   public static HRegionInfo getMobRegionInfo(TableName tableName) {
     HRegionInfo info = new HRegionInfo(tableName, MobConstants.MOB_REGION_NAME_BYTES,
@@ -408,11 +408,7 @@ public class MobUtils {
    * @param fileName The name of the file to be evicted.
    */
   private static void evictFile(MobCacheConfig cacheConf, String fileName) {
-    try {
-      cacheConf.getMobFileCache().evictFile(fileName);
-    } catch (IOException e) {
-      LOG.error("Fail to evict the file " + fileName, e);
-    }
+    cacheConf.getMobFileCache().evictFile(fileName);
   }
 
   /**
@@ -435,7 +431,7 @@ public class MobUtils {
     // find the original mob files by this table name. For details please see cloning
     // snapshot for mob files.
     existingTags.add(tableNameTag);
-    long valueLength = kv.getValueLength();
+    int valueLength = kv.getValueLength();
     byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);
     KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(), kv.getRowLength(),
         kv.getFamilyArray(), kv.getFamilyOffset(), kv.getFamilyLength(), kv.getQualifierArray(),
