@@ -264,13 +264,15 @@ public class MobUtils {
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param tableName The table name.
+   * @param tableDir The table directory.
    * @param family The name of the column family.
    * @param storeFiles The files to be deleted.
    * @throws IOException
    */
   public static void removeMobFiles(Configuration conf, FileSystem fs, TableName tableName,
-      byte[] family, Collection<StoreFile> storeFiles) throws IOException {
-    HFileArchiver.archiveStoreFiles(conf, fs, getMobRegionInfo(tableName), family, storeFiles);
+      Path tableDir, byte[] family, Collection<StoreFile> storeFiles) throws IOException {
+    HFileArchiver.archiveStoreFiles(conf, fs, getMobRegionInfo(tableName), tableDir, family,
+        storeFiles);
   }
 
   /**
