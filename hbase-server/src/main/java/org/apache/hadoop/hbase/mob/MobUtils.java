@@ -18,7 +18,6 @@
  */
 package org.apache.hadoop.hbase.mob;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -26,8 +25,6 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -42,19 +39,15 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.backup.HFileArchiver;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.regionserver.HMobStore;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
-import org.apache.hadoop.hbase.util.HFileArchiveUtil;
 
 /**
  * The mob utilities
  */
 @InterfaceAudience.Private
 public class MobUtils {
-
-  private static final Log LOG = LogFactory.getLog(MobUtils.class);
 
   private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT =
       new ThreadLocal<SimpleDateFormat>() {
@@ -215,7 +208,7 @@ public class MobUtils {
    * @return The region dir of the mob files.
    */
   public static Path getMobRegionPath(Configuration conf, TableName tableName) {
-    Path tablePath = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
+    Path tablePath = FSUtils.getTableDir(getMobHome(conf), tableName);
     HRegionInfo regionInfo = getMobRegionInfo(tableName);
     return new Path(tablePath, regionInfo.getEncodedName());
   }
@@ -281,136 +274,19 @@ public class MobUtils {
   }
 
   /**
-   * Opens existing files.
-   * The file to be opened might be unavailable. Instead the file in another location
-   * will be opened.
-   * The possible locations for a file could be either in mob directory or the archive directory.
-   * @param manager The current MobFileManager.
-   * @param path The path of the file to be opened.
-   * @return The opened MobFile.
-   * @throws IOException
-   */
-  public static MobFile openExistFile(HMobStore store, Path path) throws IOException {
-    boolean findArchive = false;
-    MobCacheConfig cacheConf = (MobCacheConfig)store.getCacheConfig();
-    FileSystem fs = store.getFileSystem();
-    try {
-      return cacheConf.getMobFileCache().openFile(fs, path, cacheConf);
-    } catch (IOException e) {
-      if (e.getCause() instanceof FileNotFoundException) {
-        logFileNotFoundException(e.getCause());
-        findArchive = true;
-      } else {
-        throw e;
-      }
-    }
-    if (findArchive) {
-      // find from archive
-      // Evict the cached file
-      cacheConf.getMobFileCache().evictFile(path.getName());
-      Path archivePath = HFileArchiveUtil.getStoreArchivePath(store.getConfiguration(),
-          store.getTableName(), getMobRegionInfo(store.getTableName())
-              .getEncodedName(), store.getFamily().getName());
-      try {
-        // Open and cache
-        return cacheConf.getMobFileCache().openFile(fs, archivePath, cacheConf);
-      } catch (IOException e) {
-        if (e.getCause() instanceof FileNotFoundException) {
-          logFileNotFoundException(e.getCause());
-          return null;
-        }
-        throw e;
-      }
-    }
-    // never come here
-    return null;
-  }
-
-  /**
-   * Reads the mob cells from the existing file.
-   * The file to be opened might be unavailable. Instead the file in another location
-   * will be opened and read.
-   * The possible locations for a file could be either in mob directory or the archive directory.
-   * @param manager The current MobFileManager.
-   * @param file The file to be read.
-   * @param search The cell to be searched.
-   * @param cacheMobBlocks Whether the scanner should cache blocks.
-   * @return The found cell.
-   * @throws IOException
-   */
-  public static Cell readCellFromExistFile(HMobStore store, MobFile file, Cell search,
-      boolean cacheMobBlocks) throws IOException {
-    boolean findArchive = false;
-    MobCacheConfig cacheConf = (MobCacheConfig)store.getCacheConfig();
-    FileSystem fs = store.getFileSystem();
-    try {
-      return file.readCell(search, cacheMobBlocks);
-    } catch (IOException e) {
-      if (e.getCause() instanceof FileNotFoundException) {
-        logFileNotFoundException(e.getCause());
-        findArchive = true;
-      }
-      throw e;
-    } catch (NullPointerException e) {
-      logNullPointerException(e);
-      findArchive = true;
-    }
-    if (findArchive) {
-      cacheConf.getMobFileCache().evictFile(file.getFileName());
-      Path archivePath = HFileArchiveUtil.getStoreArchivePath(store.getConfiguration(),
-          store.getTableName(), getMobRegionInfo(store.getTableName())
-              .getEncodedName(), store.getFamily().getName());
-      try {
-        MobFile archive = cacheConf.getMobFileCache().openFile(fs, archivePath, cacheConf);
-        return archive.readCell(search, cacheMobBlocks);
-      } catch (IOException e) {
-        if (e.getCause() instanceof FileNotFoundException) {
-          logFileNotFoundException(e.getCause());
-          cacheConf.getMobFileCache().evictFile(file.getFileName());
-          return null;
-        }
-        throw e;
-      } catch (NullPointerException e) {
-        logNullPointerException(e);
-        cacheConf.getMobFileCache().evictFile(file.getFileName());
-        return null;
-      }
-    }
-    // never come here
-    return null;
-  }
-
-  /**
-   * Logs the exception.
-   * @param e The exception to be logged.
-   */
-  private static void logNullPointerException(Throwable e) {
-    // When delete the file during the scan, the hdfs getBlockRange will
-    // throw NullPointerException, catch it and manage it.
-    LOG.error("Fail to read Cell", e);
-  }
-
-  /**
-   * Logs the exception.
-   * @param e The exception to be logged.
-   */
-  private static void logFileNotFoundException(Throwable e) {
-    LOG.error("Fail to read Cell, this mob file doesn't exist", e);
-  }
-
-  /**
    * Creates a mob reference KeyValue.
    * The value of the mob reference KeyValue is mobCellValueSize + mobFileName.
-   * @param kv The original KeyValue.
+   * @param cell The original Cell.
    * @param fileName The mob file name where the mob reference KeyValue is written.
    * @param tableNameTag The tag of the current table name. It's very important in
    *                        cloning the snapshot.
    * @return The mob reference KeyValue.
    */
-  public static KeyValue createMobRefKeyValue(KeyValue kv, byte[] fileName, Tag tableNameTag) {
+  public static KeyValue createMobRefKeyValue(Cell cell, byte[] fileName, Tag tableNameTag) {
     // Append the tags to the KeyValue.
     // The key is same, the value is the filename of the mob file
-    List<Tag> existingTags = Tag.asList(kv.getTagsArray(), kv.getTagsOffset(), kv.getTagsLength());
+    List<Tag> existingTags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(),
+        cell.getTagsLength());
     existingTags.add(MobConstants.MOB_REF_TAG);
     // Add the tag of the source table name, this table is where this mob file is flushed
     // from.
@@ -418,13 +294,53 @@ public class MobUtils {
     // find the original mob files by this table name. For details please see cloning
     // snapshot for mob files.
     existingTags.add(tableNameTag);
-    int valueLength = kv.getValueLength();
+    int valueLength = cell.getValueLength();
     byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);
-    KeyValue reference = new KeyValue(kv.getRowArray(), kv.getRowOffset(), kv.getRowLength(),
-        kv.getFamilyArray(), kv.getFamilyOffset(), kv.getFamilyLength(), kv.getQualifierArray(),
-        kv.getQualifierOffset(), kv.getQualifierLength(), kv.getTimestamp(), KeyValue.Type.Put,
-        refValue, 0, refValue.length, existingTags);
-    reference.setSequenceId(kv.getSequenceId());
+    KeyValue reference = new KeyValue(cell.getRowArray(), cell.getRowOffset(), cell.getRowLength(),
+        cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength(),
+        cell.getQualifierArray(), cell.getQualifierOffset(), cell.getQualifierLength(),
+        cell.getTimestamp(), KeyValue.Type.Put, refValue, 0, refValue.length, existingTags);
+    reference.setSequenceId(cell.getSequenceId());
     return reference;
+  }
+
+  /**
+   * Indicates whether the current mob ref cell has a valid value.
+   * A mob ref cell has a mob reference tag.
+   * The value of a mob ref cell consists of two parts, real mob value length and mob file name.
+   * The real mob value length takes 4 bytes.
+   * The remaining part is the mob file name.
+   * @param cell The mob ref cell.
+   * @return True if the cell has a valid value.
+   */
+  public static boolean isValidMobRefCellValue(Cell cell) {
+    return cell.getValueLength() > Bytes.SIZEOF_INT;
+  }
+
+  /**
+   * Gets the mob value length from the mob ref cell.
+   * A mob ref cell has a mob reference tag.
+   * The value of a mob ref cell consists of two parts, real mob value length and mob file name.
+   * The real mob value length takes 4 bytes.
+   * The remaining part is the mob file name.
+   * @param cell The mob ref cell.
+   * @return The real mob value length.
+   */
+  public static int getMobValueLength(Cell cell) {
+    return Bytes.toInt(cell.getValueArray(), cell.getValueOffset(), Bytes.SIZEOF_INT);
+  }
+
+  /**
+   * Gets the mob file name from the mob ref cell.
+   * A mob ref cell has a mob reference tag.
+   * The value of a mob ref cell consists of two parts, real mob value length and mob file name.
+   * The real mob value length takes 4 bytes.
+   * The remaining part is the mob file name.
+   * @param cell The mob ref cell.
+   * @return The mob file name.
+   */
+  public static String getMobFileName(Cell cell) {
+    return Bytes.toString(cell.getValueArray(), cell.getValueOffset() + Bytes.SIZEOF_INT,
+        cell.getValueLength() - Bytes.SIZEOF_INT);
   }
 }

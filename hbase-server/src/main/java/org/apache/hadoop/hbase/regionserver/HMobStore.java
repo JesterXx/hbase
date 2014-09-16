@@ -18,13 +18,17 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.NavigableSet;
 import java.util.UUID;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
@@ -32,6 +36,7 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.KVComparator;
 import org.apache.hadoop.hbase.KeyValue.Type;
+import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.io.compress.Compression;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
@@ -45,6 +50,7 @@ import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobStoreEngine;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.HFileArchiveUtil;
 
 /**
  * The store implementation to save MOBs (medium objects), it extends the HStore.
@@ -68,6 +74,7 @@ public class HMobStore extends HStore {
   private MobCacheConfig mobCacheConfig;
   private Path homePath;
   private Path mobFamilyPath;
+  private List<Path> mobDirLocations;
 
   public HMobStore(final HRegion region, final HColumnDescriptor family,
       final Configuration confParam) throws IOException {
@@ -76,6 +83,11 @@ public class HMobStore extends HStore {
     this.homePath = MobUtils.getMobHome(conf);
     this.mobFamilyPath = MobUtils.getMobFamilyPath(conf, this.getTableName(),
         family.getNameAsString());
+    mobDirLocations = new ArrayList<Path>();
+    mobDirLocations.add(mobFamilyPath);
+    TableName tn = region.getTableDesc().getTableName();
+    mobDirLocations.add(HFileArchiveUtil.getStoreArchivePath(conf, tn, MobUtils
+        .getMobRegionInfo(tn).getEncodedName(), family.getNameAsString()));
   }
 
   /**
@@ -226,22 +238,10 @@ public class HMobStore extends HStore {
    */
   public Cell resolve(Cell reference, boolean cacheBlocks) throws IOException {
     Cell result = null;
-    if (reference.getValueLength() > Bytes.SIZEOF_INT) {
-      String fileName = Bytes.toString(reference.getValueArray(), reference.getValueOffset()
-          + Bytes.SIZEOF_INT, reference.getValueLength() - Bytes.SIZEOF_INT);
-      Path targetPath = new Path(mobFamilyPath, fileName);
-      MobFile file = MobUtils.openExistFile(this, targetPath);
-      if (file != null) {
-        try {
-          result = MobUtils.readCellFromExistFile(this, file, reference, cacheBlocks);
-        } finally {
-          mobCacheConfig.getMobFileCache().closeFile(file);
-        }
-      } else {
-        LOG.warn("Fail to find the mob file " + targetPath);
-      }
+    if (MobUtils.isValidMobRefCellValue(reference)) {
+      String fileName = MobUtils.getMobFileName(reference);
+      result = readCell(fileName, reference, cacheBlocks);
     }
-
     if (result == null) {
       LOG.warn("The KeyValue result is null, assemble a new KeyValue with the same row,family,"
           + "qualifier,timestamp,type and tags but with an empty value to return.");
@@ -254,6 +254,44 @@ public class HMobStore extends HStore {
           reference.getTagsLength());
     }
     return result;
+  }
+
+  /**
+   * Reads the cell from a mob file.
+   * The mob file might be located in different directories.
+   * 1. The working directory.
+   * 2. The archive directory.
+   * Reads the cell from the files located in both of the above directories.
+   * @param fileName The file to be read.
+   * @param search The cell to be searched.
+   * @param cacheMobBlocks Whether the scanner should cache blocks.
+   * @return The found cell. Null if there's no such a cell.
+   * @throws IOException
+   */
+  private Cell readCell(String fileName, Cell search, boolean cacheMobBlocks) throws IOException {
+    FileSystem fs = getFileSystem();
+    for (Path location : mobDirLocations) {
+      MobFile file = null;
+      Path path = new Path(location, fileName);
+      try {
+        file = mobCacheConfig.getMobFileCache().openFile(fs, path, mobCacheConfig);
+        return file.readCell(search, cacheMobBlocks);
+      } catch (IOException e) {
+        mobCacheConfig.getMobFileCache().evictFile(fileName);
+        if (e instanceof FileNotFoundException) {
+          LOG.warn("Fail to read the cell, the mob file " + path + " doesn't exist", e);
+        } else {
+          throw e;
+        }
+      } finally {
+        if (file != null) {
+          mobCacheConfig.getMobFileCache().closeFile(file);
+        }
+      }
+    }
+    LOG.error("The mob file " + fileName + " could not be found in the locations "
+        + mobDirLocations);
+    return null;
   }
 
   /**
