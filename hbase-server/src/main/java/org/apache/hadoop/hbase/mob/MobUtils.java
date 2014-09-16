@@ -125,7 +125,7 @@ public class MobUtils {
       return tag;
     }
     return null;
-  } 
+  }
 
   /**
    * Whether the tag list has a mob reference tag.
