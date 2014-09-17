@@ -48,7 +48,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * The store implementation to save MOBs (medium objects), it extends the HStore.
- * When a descriptor of a column family has the value "is_mob", it means this column family
+ * When a descriptor of a column family has the value "IS_MOB", it means this column family
  * is a mob one. When a HRegion instantiate a store for this column family, the HMobStore is
  * created.
  * HMobStore is almost the same with the HStore except using different types of scanners.
