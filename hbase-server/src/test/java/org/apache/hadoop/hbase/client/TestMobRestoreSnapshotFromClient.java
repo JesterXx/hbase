@@ -80,6 +80,7 @@ public class TestMobRestoreSnapshotFromClient {
     TEST_UTIL.getConfiguration().setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 6);
     TEST_UTIL.getConfiguration().setBoolean(
         "hbase.master.enabletable.roundrobin", true);
+    TEST_UTIL.getConfiguration().setInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY, 0);
     TEST_UTIL.startMiniCluster(3);
   }
 
@@ -107,9 +108,9 @@ public class TestMobRestoreSnapshotFromClient {
 
     // create Table and disable it
     MobSnapshotTestingUtils.createMobTable(TEST_UTIL, tableName, 1, FAMILY);
-    
+
     admin.disableTable(tableName);
-    
+
     // take an empty snapshot
     admin.snapshot(emptySnapshot, tableName);
 
@@ -139,33 +140,33 @@ public class TestMobRestoreSnapshotFromClient {
 
   @Test
   public void testRestoreSnapshot() throws IOException {
-    SnapshotTestingUtils.verifyRowCount(TEST_UTIL, tableName, snapshot1Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot1Rows);
     admin.disableTable(tableName);
     admin.snapshot(snapshotName1, tableName);
     // Restore from snapshot-0
     admin.restoreSnapshot(snapshotName0);
     admin.enableTable(tableName);
-    SnapshotTestingUtils.verifyRowCount(TEST_UTIL, tableName, snapshot0Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot0Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
 
     // Restore from emptySnapshot
     admin.disableTable(tableName);
     admin.restoreSnapshot(emptySnapshot);
     admin.enableTable(tableName);
-    SnapshotTestingUtils.verifyRowCount(TEST_UTIL, tableName, 0);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, 0);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
 
     // Restore from snapshot-1
     admin.disableTable(tableName);
     admin.restoreSnapshot(snapshotName1);
     admin.enableTable(tableName);
-    SnapshotTestingUtils.verifyRowCount(TEST_UTIL, tableName, snapshot1Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot1Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
 
     // Restore from snapshot-1
     TEST_UTIL.deleteTable(tableName);
     admin.restoreSnapshot(snapshotName1);
-    SnapshotTestingUtils.verifyRowCount(TEST_UTIL, tableName, snapshot1Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot1Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
   }
 
@@ -231,6 +232,41 @@ public class TestMobRestoreSnapshotFromClient {
   }
 
   @Test
+  public void testCloneSnapshotOfCloned() throws IOException, InterruptedException {
+    TableName clonedTableName =
+        TableName.valueOf("clonedtb-" + System.currentTimeMillis());
+    admin.cloneSnapshot(snapshotName0, clonedTableName);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, clonedTableName, snapshot0Rows);
+    SnapshotTestingUtils.verifyReplicasCameOnline(clonedTableName, admin, getNumReplicas());
+    admin.disableTable(clonedTableName);
+    admin.snapshot(snapshotName2, clonedTableName);
+    TEST_UTIL.deleteTable(clonedTableName);
+    waitCleanerRun();
+
+    admin.cloneSnapshot(snapshotName2, clonedTableName);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, clonedTableName, snapshot0Rows);
+    SnapshotTestingUtils.verifyReplicasCameOnline(clonedTableName, admin, getNumReplicas());
+    TEST_UTIL.deleteTable(clonedTableName);
+  }
+
+  @Test
+  public void testCloneAndRestoreSnapshot() throws IOException, InterruptedException {
+    TEST_UTIL.deleteTable(tableName);
+    waitCleanerRun();
+
+    admin.cloneSnapshot(snapshotName0, tableName);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot0Rows);
+    SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
+    waitCleanerRun();
+
+    admin.disableTable(tableName);
+    admin.restoreSnapshot(snapshotName0);
+    admin.enableTable(tableName);
+    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot0Rows);
+    SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
+  }
+
+  @Test
   public void testCorruptedSnapshot() throws IOException, InterruptedException {
     SnapshotTestingUtils.corruptSnapshot(TEST_UTIL, Bytes.toString(snapshotName0));
     TableName cloneName = TableName.valueOf("corruptedClone-" + System.currentTimeMillis());
@@ -265,4 +301,3 @@ public class TestMobRestoreSnapshotFromClient {
     return families;
   }
 }
-

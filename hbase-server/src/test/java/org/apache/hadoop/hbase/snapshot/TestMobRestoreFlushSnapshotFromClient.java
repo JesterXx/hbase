@@ -29,6 +29,7 @@ import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.master.MasterFileSystem;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
+import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.regionserver.snapshot.RegionServerSnapshotManager;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -56,6 +57,7 @@ public class TestMobRestoreFlushSnapshotFromClient {
 
   private byte[] snapshotName0;
   private byte[] snapshotName1;
+  private byte[] snapshotName2;
   private int snapshot0Rows;
   private int snapshot1Rows;
   private TableName tableName;
@@ -74,6 +76,8 @@ public class TestMobRestoreFlushSnapshotFromClient {
     UTIL.getConfiguration().setBoolean(SnapshotManager.HBASE_SNAPSHOT_ENABLED, true);
     UTIL.getConfiguration().setLong(RegionServerSnapshotManager.SNAPSHOT_TIMEOUT_MILLIS_KEY,
       RegionServerSnapshotManager.SNAPSHOT_TIMEOUT_MILLIS_DEFAULT * 2);
+    
+    UTIL.getConfiguration().setInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY, 0);
 
     UTIL.startMiniCluster(3);
   }
@@ -96,6 +100,7 @@ public class TestMobRestoreFlushSnapshotFromClient {
     tableName = TableName.valueOf("testtb-" + tid);
     snapshotName0 = Bytes.toBytes("snaptb0-" + tid);
     snapshotName1 = Bytes.toBytes("snaptb1-" + tid);
+    snapshotName2 = Bytes.toBytes("snaptb2-" + tid);
 
     // create Table
     MobSnapshotTestingUtils.createMobTable(UTIL, tableName, 1, FAMILY);
@@ -156,6 +161,42 @@ public class TestMobRestoreFlushSnapshotFromClient {
     admin.restoreSnapshot(snapshotName1);
     admin.enableTable(tableName);
     MobSnapshotTestingUtils.verifyMobRowCount(UTIL, tableName, snapshot1Rows);
+  }
+  
+  @Test(expected=SnapshotDoesNotExistException.class)
+  public void testCloneNonExistentSnapshot() throws IOException, InterruptedException {
+    String snapshotName = "random-snapshot-" + System.currentTimeMillis();
+    TableName tableName = TableName.valueOf("random-table-" + System.currentTimeMillis());
+    admin.cloneSnapshot(snapshotName, tableName);
+  }
+
+  @Test
+  public void testCloneSnapshot() throws IOException, InterruptedException {
+    TableName clonedTableName = TableName.valueOf("clonedtb-" + System.currentTimeMillis());
+    testCloneSnapshot(clonedTableName, snapshotName0, snapshot0Rows);
+    testCloneSnapshot(clonedTableName, snapshotName1, snapshot1Rows);
+  }
+
+  private void testCloneSnapshot(final TableName tableName, final byte[] snapshotName,
+      int snapshotRows) throws IOException, InterruptedException {
+    // create a new table from snapshot
+    admin.cloneSnapshot(snapshotName, tableName);
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, tableName, snapshotRows);
+
+    UTIL.deleteTable(tableName);
+  }
+
+  @Test
+  public void testRestoreSnapshotOfCloned() throws IOException, InterruptedException {
+    TableName clonedTableName = TableName.valueOf("clonedtb-" + System.currentTimeMillis());
+    admin.cloneSnapshot(snapshotName0, clonedTableName);
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, clonedTableName, snapshot0Rows);
+    admin.snapshot(Bytes.toString(snapshotName2), clonedTableName, SnapshotDescription.Type.FLUSH);
+    UTIL.deleteTable(clonedTableName);
+
+    admin.cloneSnapshot(snapshotName2, clonedTableName);
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, clonedTableName, snapshot0Rows);
+    UTIL.deleteTable(clonedTableName);
   }
 
   // ==========================================================================

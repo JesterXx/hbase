@@ -17,10 +17,11 @@
  */
 package org.apache.hadoop.hbase.snapshot;
 
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.*;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.LargeTests;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
@@ -44,6 +46,7 @@ import org.apache.hadoop.hbase.ipc.RpcClient;
 import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
+import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.regionserver.ConstantSizeRegionSplitPolicy;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -103,6 +106,7 @@ public class TestMobFlushSnapshotFromClient {
     conf.setBoolean(SnapshotManager.HBASE_SNAPSHOT_ENABLED, true);
     conf.set(HConstants.HBASE_REGION_SPLIT_POLICY_KEY,
       ConstantSizeRegionSplitPolicy.class.getName());
+    conf.setInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY, 0);
   }
 
   @Before
@@ -302,6 +306,101 @@ public class TestMobFlushSnapshotFromClient {
       FSUtils.getRootDir(UTIL.getConfiguration()), LOG);
     // make sure we get the snapshot
     SnapshotTestingUtils.assertOneSnapshotThatMatches(admin, snapshot);
+  }
+
+  @Test (timeout=300000)
+  public void testSnapshotStateAfterMerge() throws Exception {
+    int numRows = DEFAULT_NUM_ROWS;
+    Admin admin = UTIL.getHBaseAdmin();
+    // make sure we don't fail on listing snapshots
+    SnapshotTestingUtils.assertNoSnapshots(admin);
+    // load the table so we have some data
+    SnapshotTestingUtils.loadData(UTIL, TABLE_NAME, numRows, TEST_FAM);
+
+    // Take a snapshot
+    String snapshotBeforeMergeName = "snapshotBeforeMerge";
+    admin.snapshot(snapshotBeforeMergeName, TABLE_NAME, SnapshotDescription.Type.FLUSH);
+
+    // Clone the table
+    TableName cloneBeforeMergeName = TableName.valueOf("cloneBeforeMerge");
+    admin.cloneSnapshot(snapshotBeforeMergeName, cloneBeforeMergeName);
+    SnapshotTestingUtils.waitForTableToBeOnline(UTIL, cloneBeforeMergeName);
+
+    // Merge two regions
+    List<HRegionInfo> regions = admin.getTableRegions(TABLE_NAME);
+    Collections.sort(regions, new Comparator<HRegionInfo>() {
+      public int compare(HRegionInfo r1, HRegionInfo r2) {
+        return Bytes.compareTo(r1.getStartKey(), r2.getStartKey());
+      }
+    });
+
+    int numRegions = admin.getTableRegions(TABLE_NAME).size();
+    int numRegionsAfterMerge = numRegions - 2;
+    admin.mergeRegions(regions.get(1).getEncodedNameAsBytes(),
+        regions.get(2).getEncodedNameAsBytes(), true);
+    admin.mergeRegions(regions.get(5).getEncodedNameAsBytes(),
+        regions.get(6).getEncodedNameAsBytes(), true);
+
+    // Verify that there's one region less
+    waitRegionsAfterMerge(numRegionsAfterMerge);
+    assertEquals(numRegionsAfterMerge, admin.getTableRegions(TABLE_NAME).size());
+
+    // Clone the table
+    TableName cloneAfterMergeName = TableName.valueOf("cloneAfterMerge");
+    admin.cloneSnapshot(snapshotBeforeMergeName, cloneAfterMergeName);
+    SnapshotTestingUtils.waitForTableToBeOnline(UTIL, cloneAfterMergeName);
+
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, TABLE_NAME, numRows);
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, cloneBeforeMergeName, numRows);
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, cloneAfterMergeName, numRows);
+
+    // test that we can delete the snapshot
+    UTIL.deleteTable(cloneAfterMergeName);
+    UTIL.deleteTable(cloneBeforeMergeName);
+  }
+
+  @Test (timeout=300000)
+  public void testTakeSnapshotAfterMerge() throws Exception {
+    int numRows = DEFAULT_NUM_ROWS;
+    Admin admin = UTIL.getHBaseAdmin();
+    // make sure we don't fail on listing snapshots
+    SnapshotTestingUtils.assertNoSnapshots(admin);
+    // load the table so we have some data
+    SnapshotTestingUtils.loadData(UTIL, TABLE_NAME, numRows, TEST_FAM);
+
+    // Merge two regions
+    List<HRegionInfo> regions = admin.getTableRegions(TABLE_NAME);
+    Collections.sort(regions, new Comparator<HRegionInfo>() {
+      public int compare(HRegionInfo r1, HRegionInfo r2) {
+        return Bytes.compareTo(r1.getStartKey(), r2.getStartKey());
+      }
+    });
+
+    int numRegions = admin.getTableRegions(TABLE_NAME).size();
+    int numRegionsAfterMerge = numRegions - 2;
+    admin.mergeRegions(regions.get(1).getEncodedNameAsBytes(),
+        regions.get(2).getEncodedNameAsBytes(), true);
+    admin.mergeRegions(regions.get(5).getEncodedNameAsBytes(),
+        regions.get(6).getEncodedNameAsBytes(), true);
+
+    waitRegionsAfterMerge(numRegionsAfterMerge);
+    assertEquals(numRegionsAfterMerge, admin.getTableRegions(TABLE_NAME).size());
+
+    // Take a snapshot
+    String snapshotName = "snapshotAfterMerge";
+    SnapshotTestingUtils.snapshot(admin, snapshotName, TABLE_NAME.getNameAsString(),
+      SnapshotDescription.Type.FLUSH, 3);
+
+    // Clone the table
+    TableName cloneName = TableName.valueOf("cloneMerge");
+    admin.cloneSnapshot(snapshotName, cloneName);
+    SnapshotTestingUtils.waitForTableToBeOnline(UTIL, cloneName);
+
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, TABLE_NAME, numRows);
+    MobSnapshotTestingUtils.verifyMobRowCount(UTIL, cloneName, numRows);
+
+    // test that we can delete the snapshot
+    UTIL.deleteTable(cloneName);
   }
 
   /**
