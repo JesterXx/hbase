@@ -50,7 +50,7 @@ import org.mockito.Mockito;
  * Test the restore/clone operation from a file-system point of view.
  */
 @Category(SmallTests.class)
-public class TesMobtRestoreSnapshotHelper {
+public class TesMobRestoreSnapshotHelper {
   final Log LOG = LogFactory.getLog(getClass());
 
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();

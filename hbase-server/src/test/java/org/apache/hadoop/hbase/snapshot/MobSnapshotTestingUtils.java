@@ -42,8 +42,6 @@ import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.regionserver.HRegionFileSystem;
-import org.apache.hadoop.hbase.snapshot.SnapshotTestingUtils.SnapshotMock.RegionData;
-import org.apache.hadoop.hbase.snapshot.SnapshotTestingUtils.SnapshotMock.SnapshotBuilder;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSTableDescriptors;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -105,7 +103,7 @@ public class MobSnapshotTestingUtils {
       List<Cell> cells = res.listCells();
       for(Cell cell : cells) {
         // Verify the value
-        Assert.assertNotNull(CellUtil.cloneValue(cell));
+        Assert.assertTrue(CellUtil.cloneValue(cell).length > 0);
       }
     }
     results.close();
@@ -238,7 +236,6 @@ public class MobSnapshotTestingUtils {
     private SnapshotBuilder createSnapshot(final String snapshotName, final int version)
         throws IOException {
       HTableDescriptor htd = createHtd(snapshotName);
-//      htd.addFamily(new HColumnDescriptor(TEST_FAMILY));
 
       RegionData[] regions = createTable(htd, TEST_NUM_REGIONS);
 
@@ -259,7 +256,6 @@ public class MobSnapshotTestingUtils {
       hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
       hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(0L));
       htd.addFamily(hcd);
-//      htd.addFamily(new HColumnDescriptor(TEST_FAMILY));
       return htd;
     }
 
