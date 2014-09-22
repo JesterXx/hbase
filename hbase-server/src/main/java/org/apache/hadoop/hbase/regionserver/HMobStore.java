@@ -39,6 +39,8 @@ import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.filter.Filter;
+import org.apache.hadoop.hbase.filter.FilterList;
 import org.apache.hadoop.hbase.io.compress.Compression;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
@@ -50,8 +52,11 @@ import org.apache.hadoop.hbase.mob.MobFile;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobStoreEngine;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.mob.MobZookeeper;
+import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.HFileArchiveUtil;
+import org.apache.zookeeper.KeeperException;
 
 /**
  * The store implementation to save MOBs (medium objects), it extends the HStore.
@@ -116,6 +121,15 @@ public class HMobStore extends HStore {
   protected KeyValueScanner createScanner(Scan scan, final NavigableSet<byte[]> targetCols,
       long readPt, KeyValueScanner scanner) throws IOException {
     if (scanner == null) {
+      if (MobUtils.isRefOnlyScan(scan)) {
+        Filter refOnlyFilter = new MobReferenceOnlyFilter();
+        Filter filter = scan.getFilter();
+        if (filter != null) {
+          scan.setFilter(new FilterList(filter, refOnlyFilter));
+        } else {
+          scan.setFilter(refOnlyFilter);
+        }
+      }
       scanner = scan.isReversed() ? new ReversedMobStoreScanner(this, getScanInfo(), scan,
           targetCols, readPt) : new MobStoreScanner(this, getScanInfo(), scan, targetCols, readPt);
     }
@@ -241,7 +255,7 @@ public class HMobStore extends HStore {
    */
   public Cell resolve(Cell reference, boolean cacheBlocks) throws IOException {
     Cell result = null;
-    if (MobUtils.isValidMobRefCellValue(reference)) {
+    if (MobUtils.hasValidMobRefCellValue(reference)) {
       String fileName = MobUtils.getMobFileName(reference);
       result = readCell(mobDirLocations, fileName, reference, cacheBlocks);
       if (result == null) {
@@ -341,5 +355,89 @@ public class HMobStore extends HStore {
    */
   public Path getPath() {
     return mobFamilyPath;
+  }
+
+  /**
+   * The compaction in the store of mob.
+   * The cells in this store contains the path of the mob files. There might be race
+   * condition between the major compaction and the sweeping in mob files.
+   * In order to avoid this, we need mutually exclude the running of the major compaction and
+   * sweeping in mob files.
+   * The minor compaction is not affected.
+   * The major compaction is converted to a minor one when a sweeping is in progress.
+   */
+  @Override
+  public List<StoreFile> compact(CompactionContext compaction) throws IOException {
+    // If it's major compaction, try to find whether there's a sweeper is running
+    // If yes, change the major compaction to a minor one.
+    if (compaction.getRequest().isMajor()) {
+      // Use the Zookeeper to coordinate.
+      // 1. Acquire a operation lock.
+      //   1.1. If no, convert the major compaction to a minor one and continue the compaction.
+      //   1.2. If the lock is obtained, search the node of sweeping.
+      //      1.2.1. If the node is there, the sweeping is in progress, convert the major
+      //             compaction to a minor one and continue the compaction.
+      //      1.2.2. If the node is not there, add a child to the major compaction node, and
+      //             run the compaction directly.
+      String compactionName = UUID.randomUUID().toString().replaceAll("-", "");
+      MobZookeeper zk = null;
+      try {
+        zk = MobZookeeper.newInstance(region.getBaseConf(), compactionName);
+      } catch (KeeperException e) {
+        LOG.error("Cannot connect to the zookeeper, ready to perform the minor compaction instead",
+            e);
+        // change the major compaction into a minor one
+        compaction.getRequest().setIsMajor(false, false);
+        return super.compact(compaction);
+      }
+      boolean major = false;
+      try {
+        // try to acquire the operation lock.
+        if (zk.lockColumnFamily(getTableName().getNameAsString(), getFamily().getNameAsString())) {
+          try {
+            LOG.info("Obtain the lock for the store[" + this
+                + "], ready to perform the major compaction");
+            // check the sweeping node to find out whether the sweeping is in progress.
+            boolean hasSweeper = zk.isSweeperZNodeExist(getTableName().getNameAsString(),
+                getFamily().getNameAsString());
+            if (!hasSweeper) {
+              // if not, add a child to the major compaction node of this store.
+              major = zk.addMajorCompactionZNode(getTableName().getNameAsString(), getFamily()
+                  .getNameAsString(), compactionName);
+            }
+          } catch (Exception e) {
+            LOG.error("Fail to handle the Zookeeper", e);
+          } finally {
+            // release the operation lock
+            zk.unlockColumnFamily(getTableName().getNameAsString(), getFamily().getNameAsString());
+          }
+        }
+        try {
+          if (major) {
+            return super.compact(compaction);
+          } else {
+            LOG.warn("Cannot obtain the lock or a sweep tool is running on this store["
+                + this + "], ready to perform the minor compaction instead");
+            // change the major compaction into a minor one
+            compaction.getRequest().setIsMajor(false, false);
+            return super.compact(compaction);
+          }
+        } finally {
+          if (major) {
+            try {
+              zk.deleteMajorCompactionZNode(getTableName().getNameAsString(), getFamily()
+                  .getNameAsString(), compactionName);
+            } catch (KeeperException e) {
+              LOG.error("Fail to delete the compaction znode" + compactionName, e);
+            }
+          }
+        }
+      } finally {
+        zk.close();
+      }
+    } else {
+      // If it's not a major compaction, continue the compaction.
+      return super.compact(compaction);
+    }
   }
 }

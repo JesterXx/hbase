@@ -18,15 +18,21 @@
  */
 package org.apache.hadoop.hbase.mob;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
@@ -39,6 +45,13 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.backup.HFileArchiver;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.HFileLink;
+import org.apache.hadoop.hbase.io.compress.Compression;
+import org.apache.hadoop.hbase.io.hfile.CacheConfig;
+import org.apache.hadoop.hbase.io.hfile.HFile;
+import org.apache.hadoop.hbase.io.hfile.HFileContext;
+import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
+import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -48,6 +61,9 @@ import org.apache.hadoop.hbase.util.FSUtils;
  */
 @InterfaceAudience.Private
 public class MobUtils {
+
+  private static final Log LOG = LogFactory.getLog(MobUtils.class);
+  private static final String COMPACTION_WORKING_DIR_NAME = "working";
 
   private static final ThreadLocal<SimpleDateFormat> LOCAL_FORMAT =
       new ThreadLocal<SimpleDateFormat>() {
@@ -162,6 +178,22 @@ public class MobUtils {
   }
 
   /**
+   * Indicates whether it's a reference only scan.
+   * The information is set in the attribute "hbase.mob.scan.ref.only" of scan.
+   * If it's a ref only scan, only the cells with ref tag are returned.
+   * @param scan The current scan.
+   * @return True if it's a ref only scan.
+   */
+  public static boolean isRefOnlyScan(Scan scan) {
+    byte[] refOnly = scan.getAttribute(MobConstants.MOB_SCAN_REF_ONLY);
+    try {
+      return refOnly != null && Bytes.toBoolean(refOnly);
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+  }
+
+  /**
    * Indicates whether the scan contains the information of caching blocks.
    * The information is set in the attribute "hbase.mob.cache.blocks" of scan.
    * @param scan The current scan.
@@ -188,6 +220,91 @@ public class MobUtils {
    */
   public static void setCacheMobBlocks(Scan scan, boolean cacheBlocks) {
     scan.setAttribute(MobConstants.MOB_CACHE_BLOCKS, Bytes.toBytes(cacheBlocks));
+  }
+
+  /**
+   * Cleans the expired mob files.
+   * Cleans the files whose creation date is older than (current - columnFamily.ttl), and
+   * the minVersions of that column family is 0.
+   * @param fs The current file system.
+   * @param conf The current configuration.
+   * @param tableName The current table name.
+   * @param columnDescriptor The descriptor of the current column family.
+   * @param cacheConfig The cacheConfig that disables the block cache.
+   * @param current The current time.
+   * @throws IOException
+   */
+  public static void cleanExpiredMobFiles(FileSystem fs, Configuration conf, TableName tableName,
+      HColumnDescriptor columnDescriptor, CacheConfig cacheConfig, long current)
+      throws IOException {
+    long timeToLive = columnDescriptor.getTimeToLive();
+    if (Integer.MAX_VALUE == timeToLive) {
+      // no need to clean, because the TTL is not set.
+      return;
+    }
+
+    Date expireDate = new Date(current - timeToLive * 1000);
+    expireDate = new Date(expireDate.getYear(), expireDate.getMonth(), expireDate.getDate());
+    LOG.info("MOB HFiles older than " + expireDate.toGMTString() + " will be deleted!");
+
+    FileStatus[] stats = null;
+    Path mobTableDir = FSUtils.getTableDir(getMobHome(conf), tableName);
+    Path path = getMobFamilyPath(conf, tableName, columnDescriptor.getNameAsString());
+    try {
+      stats = fs.listStatus(path);
+    } catch (FileNotFoundException e) {
+      LOG.warn("Fail to find the mob file " + path, e);
+    }
+    if (null == stats) {
+      // no file found
+      return;
+    }
+    List<StoreFile> filesToClean = new ArrayList<StoreFile>();
+    int deletedFileCount = 0;
+    for (FileStatus file : stats) {
+      String fileName = file.getPath().getName();
+      try {
+        MobFileName mobFileName = null;
+        if (!HFileLink.isHFileLink(file.getPath())) {
+          mobFileName = MobFileName.create(fileName);
+        } else {
+          HFileLink hfileLink = new HFileLink(conf, file.getPath());
+          mobFileName = MobFileName.create(hfileLink.getOriginPath().getName());
+        }
+        Date fileDate = parseDate(mobFileName.getDate());
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Checking file " + fileName);
+        }
+        if (fileDate.getTime() < expireDate.getTime()) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug(fileName + " is an expired file");
+          }
+          filesToClean.add(new StoreFile(fs, file.getPath(), conf, cacheConfig, BloomType.NONE));
+        }
+      } catch (Exception e) {
+        LOG.error("Cannot parse the fileName " + fileName, e);
+      }
+    }
+    if (!filesToClean.isEmpty()) {
+      try {
+        removeMobFiles(conf, fs, tableName, mobTableDir, columnDescriptor.getName(),
+            filesToClean);
+        deletedFileCount = filesToClean.size();
+      } catch (IOException e) {
+        LOG.error("Fail to delete the mob files " + filesToClean, e);
+      }
+    }
+    LOG.info(deletedFileCount + " expired mob files are deleted");
+  }
+
+  /**
+   * Gets the znode name of column family.
+   * @param tableName The current table name.
+   * @param familyName The name of the current column family.
+   * @return The znode name of column family.
+   */
+  public static String getColumnFamilyZNodeName(String tableName, String familyName) {
+    return tableName + ":" + familyName;
   }
 
   /**
@@ -274,6 +391,17 @@ public class MobUtils {
   }
 
   /**
+   * Gets the working directory of the mob compaction.
+   * @param root The root directory of the mob compaction.
+   * @param jobName The current job name.
+   * @return The directory of the mob compaction for the current job.
+   */
+  public static Path getCompactionWorkingPath(Path root, String jobName) {
+    Path parent = new Path(root, jobName);
+    return new Path(parent, COMPACTION_WORKING_DIR_NAME);
+  }
+
+  /**
    * Archives the mob files.
    * @param conf The current configuration.
    * @param fs The current file system.
@@ -301,23 +429,109 @@ public class MobUtils {
   public static KeyValue createMobRefKeyValue(Cell cell, byte[] fileName, Tag tableNameTag) {
     // Append the tags to the KeyValue.
     // The key is same, the value is the filename of the mob file
-    List<Tag> existingTags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(),
-        cell.getTagsLength());
-    existingTags.add(MobConstants.MOB_REF_TAG);
+    List<Tag> tags = new ArrayList<Tag>();
+    // Add the ref tag as the 1st one.
+    tags.add(MobConstants.MOB_REF_TAG);
+    // Add the existing tags.
+    tags.addAll(Tag.asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength()));
     // Add the tag of the source table name, this table is where this mob file is flushed
     // from.
     // It's very useful in cloning the snapshot. When reading from the cloning table, we need to
     // find the original mob files by this table name. For details please see cloning
     // snapshot for mob files.
-    existingTags.add(tableNameTag);
+    tags.add(tableNameTag);
     int valueLength = cell.getValueLength();
     byte[] refValue = Bytes.add(Bytes.toBytes(valueLength), fileName);
     KeyValue reference = new KeyValue(cell.getRowArray(), cell.getRowOffset(), cell.getRowLength(),
         cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength(),
         cell.getQualifierArray(), cell.getQualifierOffset(), cell.getQualifierLength(),
-        cell.getTimestamp(), KeyValue.Type.Put, refValue, 0, refValue.length, existingTags);
+        cell.getTimestamp(), KeyValue.Type.Put, refValue, 0, refValue.length, tags);
     reference.setSequenceId(cell.getSequenceId());
     return reference;
+  }
+
+  /**
+   * Creates a directory of mob files for flushing.
+   * @param conf The current configuration.
+   * @param fs The current file system.
+   * @param family The descriptor of the current column family.
+   * @param date The date string, its format is yyyymmmdd.
+   * @param basePath The basic path for a temp directory.
+   * @param maxKeyCount The key count.
+   * @param compression The compression algorithm.
+   * @param startKey The hex string of the start key.
+   * @param cacheConfig The current cache config.
+   * @return The writer for the mob file.
+   * @throws IOException
+   */
+  public static StoreFile.Writer createWriter(Configuration conf, FileSystem fs,
+      HColumnDescriptor family, String date, Path basePath, long maxKeyCount,
+      Compression.Algorithm compression, String startKey, CacheConfig cacheConfig)
+      throws IOException {
+    MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID().toString()
+        .replaceAll("-", ""));
+    HFileContext hFileContext = new HFileContextBuilder().withCompression(compression)
+        .withIncludesMvcc(false).withIncludesTags(true)
+        .withChecksumType(HFile.DEFAULT_CHECKSUM_TYPE)
+        .withBytesPerCheckSum(HFile.DEFAULT_BYTES_PER_CHECKSUM)
+        .withBlockSize(family.getBlocksize()).withHBaseCheckSum(true)
+        .withDataBlockEncoding(family.getDataBlockEncoding()).build();
+
+    StoreFile.Writer w = new StoreFile.WriterBuilder(conf, cacheConfig, fs)
+        .withFilePath(new Path(basePath, mobFileName.getFileName()))
+        .withComparator(KeyValue.COMPARATOR).withBloomType(BloomType.NONE)
+        .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
+    return w;
+  }
+
+  /**
+   * Commits the mob file.
+   * @param @param conf The current configuration.
+   * @param fs The current file system.
+   * @param path The path where the mob file is saved.
+   * @param targetPath The directory path where the source file is renamed to.
+   * @param cacheConfig The current cache config.
+   * @throws IOException
+   */
+  public static void commitFile(Configuration conf, FileSystem fs, final Path sourceFile,
+      Path targetPath, CacheConfig cacheConfig) throws IOException {
+    if (sourceFile == null) {
+      return;
+    }
+    Path dstPath = new Path(targetPath, sourceFile.getName());
+    validateMobFile(conf, fs, sourceFile, cacheConfig);
+    String msg = "Renaming flushed file from " + sourceFile + " to " + dstPath;
+    LOG.info(msg);
+    Path parent = dstPath.getParent();
+    if (!fs.exists(parent)) {
+      fs.mkdirs(parent);
+    }
+    if (!fs.rename(sourceFile, dstPath)) {
+      throw new IOException("Failed rename of " + sourceFile + " to " + dstPath);
+    }
+  }
+
+  /**
+   * Validates a mob file by opening and closing it.
+   * @param conf The current configuration.
+   * @param fs The current file system.
+   * @param path The path where the mob file is saved.
+   * @param cacheConfig The current cache config.
+   */
+  private static void validateMobFile(Configuration conf, FileSystem fs, Path path,
+      CacheConfig cacheConfig) throws IOException {
+    StoreFile storeFile = null;
+    try {
+      storeFile = new StoreFile(fs, path, conf, cacheConfig, BloomType.NONE);
+      storeFile.createReader();
+    } catch (IOException e) {
+      LOG.error("Fail to open mob file[" + path + "], keep it in temp directory.", e);
+      throw e;
+    } finally {
+      if (storeFile != null) {
+        storeFile.closeReader(false);
+      }
+    }
   }
 
   /**
@@ -329,7 +543,7 @@ public class MobUtils {
    * @param cell The mob ref cell.
    * @return True if the cell has a valid value.
    */
-  public static boolean isValidMobRefCellValue(Cell cell) {
+  public static boolean hasValidMobRefCellValue(Cell cell) {
     return cell.getValueLength() > Bytes.SIZEOF_INT;
   }
 

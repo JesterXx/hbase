@@ -37,6 +37,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -206,7 +207,7 @@ public class TestSplitLogManager {
     conf.setInt("hbase.splitlog.manager.unassigned.timeout", 2 * to);
 
     conf.setInt("hbase.splitlog.manager.timeoutmonitor.period", 100);
-    to = to + 4 * 100;
+    to = to + 16 * 100;
 
     this.mode =
         (conf.getBoolean(HConstants.DISTRIBUTED_LOG_REPLAY_KEY, false) ? RecoveryMode.LOG_REPLAY
@@ -216,7 +217,7 @@ public class TestSplitLogManager {
   @After
   public void teardown() throws IOException, KeeperException {
     stopper.stop("");
-    slm.stop();
+    if (slm != null) slm.stop();
     TEST_UTIL.shutdownMiniZKCluster();
   }
 
@@ -227,6 +228,7 @@ public class TestSplitLogManager {
   private void waitForCounter(final AtomicLong ctr, long oldval, long newval, long timems)
       throws Exception {
     Expr e = new Expr() {
+      @Override
       public long eval() {
         return ctr.get();
       }
@@ -455,7 +457,7 @@ public class TestSplitLogManager {
     SplitLogTask slt = new SplitLogTask.Resigned(worker1, this.mode);
     assertEquals(tot_mgr_resubmit.get(), 0);
     ZKUtil.setData(zkw, tasknode, slt.toByteArray());
-    int version = ZKUtil.checkExists(zkw, tasknode);
+    ZKUtil.checkExists(zkw, tasknode);
     // Could be small race here.
     if (tot_mgr_resubmit.get() == 0) {
       waitForCounter(tot_mgr_resubmit, 0, 1, to/2);
@@ -565,6 +567,44 @@ public class TestSplitLogManager {
     fs.mkdirs(emptyLogDirPath);
     slm.splitLogDistributed(emptyLogDirPath);
     assertFalse(fs.exists(emptyLogDirPath));
+  }
+
+  @Test (timeout = 60000)
+  public void testLogFilesAreArchived() throws Exception {
+    LOG.info("testLogFilesAreArchived");
+    final SplitLogManager slm = new SplitLogManager(ds, conf, stopper, master, DUMMY_MASTER);
+    FileSystem fs = TEST_UTIL.getTestFileSystem();
+    Path dir = TEST_UTIL.getDataTestDirOnTestFS("testLogFilesAreArchived");
+    conf.set(HConstants.HBASE_DIR, dir.toString());
+    Path logDirPath = new Path(dir, UUID.randomUUID().toString());
+    fs.mkdirs(logDirPath);
+    // create an empty log file
+    String logFile = ServerName.valueOf("foo", 1, 1).toString();
+    fs.create(new Path(logDirPath, logFile)).close();
+
+    // spin up a thread mocking split done.
+    new Thread() {
+      @Override
+      public void run() {
+        boolean done = false;
+        while (!done) {
+          for (Map.Entry<String, Task> entry : slm.getTasks().entrySet()) {
+            final ServerName worker1 = ServerName.valueOf("worker1,1,1");
+            SplitLogTask slt = new SplitLogTask.Done(worker1, RecoveryMode.LOG_SPLITTING);
+            try {
+              ZKUtil.setData(zkw, entry.getKey(), slt.toByteArray());
+            } catch (KeeperException e) {
+              LOG.warn(e);
+            }
+            done = true;
+          }
+        }
+      };
+    }.start();
+
+    slm.splitLogDistributed(logDirPath);
+
+    assertFalse(fs.exists(logDirPath));
   }
 
   /**

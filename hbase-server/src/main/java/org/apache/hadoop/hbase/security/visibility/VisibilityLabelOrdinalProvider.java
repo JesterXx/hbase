@@ -1,5 +1,4 @@
 /**
- *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -16,16 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.hadoop.hbase.security.visibility;
 
-package org.apache.hadoop.hbase.regionserver;
-
-import java.io.IOException;
 import org.apache.hadoop.classification.InterfaceAudience;
 
-/**
- * Interface which abstracts implementations on log sequence number assignment
- */
 @InterfaceAudience.Private
-public interface SequenceNumber {
-  public long getSequenceNumber() throws IOException;
+public interface VisibilityLabelOrdinalProvider {
+
+  /**
+   * @param label Not null label string
+   * @return The ordinal for the label. The ordinal starts from 1. Returns 0 when passed a non
+   *         existing label.
+   */
+  public int getLabelOrdinal(String label);
 }

@@ -208,6 +208,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   CatalogJanitor catalogJanitorChore;
   private LogCleaner logCleaner;
   private HFileCleaner hfileCleaner;
+  private ExpiredMobFileCleanerChore expiredMobFileCleanerChore;
 
   MasterCoprocessorHost cpHost;
 
@@ -480,8 +481,12 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     ZKClusterId.setClusterId(this.zooKeeper, fileSystemManager.getClusterId());
     this.serverManager = createServerManager(this, this);
 
-    metaTableLocator = new MetaTableLocator();
-    shortCircuitConnection = createShortCircuitConnection();
+    synchronized (this) {
+      if (shortCircuitConnection == null) {
+        shortCircuitConnection = createShortCircuitConnection();
+        metaTableLocator = new MetaTableLocator();
+      }
+    }
 
     // Invalidate all write locks held previously
     this.tableLockManager.reapWriteLocks();
@@ -605,6 +610,9 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     // removing dead server with same hostname and port of rs which is trying to check in before
     // master initialization. See HBASE-5916.
     this.serverManager.clearDeadServersWithSameHostNameAndPortOfOnlineServer();
+
+    this.expiredMobFileCleanerChore = new ExpiredMobFileCleanerChore(this);
+    Threads.setDaemonThreadRunning(expiredMobFileCleanerChore.getThread());
 
     if (this.cpHost != null) {
       // don't let cp initialization errors kill the master
@@ -852,6 +860,9 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   }
 
   private void stopChores() {
+    if (this.expiredMobFileCleanerChore != null) {
+      this.expiredMobFileCleanerChore.interrupt();
+    }
     if (this.balancerChore != null) {
       this.balancerChore.interrupt();
     }
