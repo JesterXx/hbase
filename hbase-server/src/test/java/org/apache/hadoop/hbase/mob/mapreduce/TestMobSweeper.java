@@ -64,7 +64,8 @@ public class TestMobSweeper {
   public static void setUpBeforeClass() throws Exception {
     TEST_UTIL.getConfiguration().setInt("hbase.master.info.port", 0);
     TEST_UTIL.getConfiguration().setBoolean("hbase.regionserver.info.port.auto", true);
-
+    TEST_UTIL.getConfiguration().setInt("hbase.hstore.compaction.min", 15); // avoid major compactions
+    TEST_UTIL.getConfiguration().setInt("hbase.hstore.compaction.max", 30); // avoid major compactions
     TEST_UTIL.getConfiguration().setInt("hfile.format.version", 3);
 
     TEST_UTIL.startMiniCluster();
@@ -85,8 +86,8 @@ public class TestMobSweeper {
     tableName = "testSweeper" + tid;
     HTableDescriptor desc = new HTableDescriptor(tableName);
     HColumnDescriptor hcd = new HColumnDescriptor(family);
-    hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
-    hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(3L));
+    hcd.setMobEnabled(true);
+    hcd.setMobThreshold(3L);
     hcd.setMaxVersions(4);
     desc.addFamily(hcd);
 
