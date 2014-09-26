@@ -58,8 +58,8 @@ public class MobSnapshotTestingUtils {
     htd.setRegionReplication(regionReplication);
     for (byte[] family: families) {
       HColumnDescriptor hcd = new HColumnDescriptor(family);
-      hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
-      hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(0L));
+      hcd.setMobEnabled(true);
+      hcd.setMobThreshold(0L);
       htd.addFamily(hcd);
     }
     byte[][] splitKeys = SnapshotTestingUtils.getSplitKeys();
@@ -253,8 +253,8 @@ public class MobSnapshotTestingUtils {
     public HTableDescriptor createHtd(final String tableName) {
       HTableDescriptor htd = new HTableDescriptor(tableName);
       HColumnDescriptor hcd = new HColumnDescriptor(TEST_FAMILY);
-      hcd.setValue(MobConstants.IS_MOB, Bytes.toBytes(Boolean.TRUE));
-      hcd.setValue(MobConstants.MOB_THRESHOLD, Bytes.toBytes(0L));
+      hcd.setMobEnabled(true);
+      hcd.setMobThreshold(0L);
       htd.addFamily(hcd);
       return htd;
     }

@@ -114,6 +114,7 @@ import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.ipc.CallerDisconnectedException;
 import org.apache.hadoop.hbase.ipc.RpcCallContext;
 import org.apache.hadoop.hbase.ipc.RpcServer;
+import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.monitoring.TaskMonitor;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
@@ -2997,7 +2998,7 @@ public class HRegion implements HeapSize { // , Writable{
       Map<byte[], Store> stores = getStores();
       boolean hasMobStore = false;
       for (Entry<byte[], Store> store : stores.entrySet()) {
-        hasMobStore = MobUtils.isMobFamily(store.getValue().getFamily());
+        hasMobStore = store.getValue().getFamily().isMobEnabled();
         if (hasMobStore) {
           break;
         }

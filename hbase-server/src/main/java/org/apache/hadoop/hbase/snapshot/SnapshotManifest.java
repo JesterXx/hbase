@@ -170,7 +170,7 @@ public class SnapshotManifest {
     Path mobRegionPath = MobUtils.getMobRegionPath(conf, regionInfo.getTable());
     for (HColumnDescriptor hcd : hcds) {
       // 2.1. build the snapshot reference for the store if it's a mob store
-      if (MobUtils.isMobFamily(hcd)) {
+      if (hcd.isMobEnabled()) {
         Object familyData = visitor.familyOpen(regionData, hcd.getName());
         monitor.rethrowException();
 
