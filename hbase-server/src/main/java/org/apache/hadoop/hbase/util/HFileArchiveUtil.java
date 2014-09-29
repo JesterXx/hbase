@@ -37,7 +37,7 @@ public class HFileArchiveUtil {
   }
 
   /**
-   * Gets the directory to archive a store directory
+   * Get the directory to archive a store directory
    * @param conf {@link Configuration} to read for the archive directory name
    * @param tableName table name under which the store currently lives
    * @param regionName region encoded name under which the store currently lives
