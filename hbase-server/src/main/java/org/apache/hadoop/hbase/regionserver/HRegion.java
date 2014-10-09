@@ -3010,7 +3010,7 @@ public class HRegion implements HeapSize { // , Writable{
         // use the .mob as the start key and 0 as the regionid
         HRegionInfo mobRegionInfo = MobUtils.getMobRegionInfo(this.getTableDesc().getTableName());
         mobRegionInfo.setOffline(true);
-        snapshotManifest.addMobRegion(mobRegionInfo, this.getTableDesc().getColumnFamilies()); 
+        snapshotManifest.addMobRegion(mobRegionInfo, this.getTableDesc().getColumnFamilies());
       }
     }
     SnapshotManifest manifest = SnapshotManifest.create(conf, getFilesystem(),

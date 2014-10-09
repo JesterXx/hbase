@@ -200,7 +200,7 @@ public class RestoreSnapshotHelper {
       monitor.rethrowException();
       status.setStatus("Restoring table regions...");
       if (regionNames.contains(mobRegion.getEncodedName())) {
-        // restore the mob region in case 
+        // restore the mob region in case
         List<HRegionInfo> mobRegions = new ArrayList<HRegionInfo>(1);
         mobRegions.add(mobRegion);
         restoreHdfsMobRegions(exec, regionManifests, mobRegions);

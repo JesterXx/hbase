@@ -76,7 +76,7 @@ public class TestMobRestoreFlushSnapshotFromClient {
     UTIL.getConfiguration().setBoolean(SnapshotManager.HBASE_SNAPSHOT_ENABLED, true);
     UTIL.getConfiguration().setLong(RegionServerSnapshotManager.SNAPSHOT_TIMEOUT_MILLIS_KEY,
       RegionServerSnapshotManager.SNAPSHOT_TIMEOUT_MILLIS_DEFAULT * 2);
-    
+
     UTIL.getConfiguration().setInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY, 0);
 
     UTIL.startMiniCluster(3);
@@ -162,7 +162,7 @@ public class TestMobRestoreFlushSnapshotFromClient {
     admin.enableTable(tableName);
     MobSnapshotTestingUtils.verifyMobRowCount(UTIL, tableName, snapshot1Rows);
   }
-  
+
   @Test(expected=SnapshotDoesNotExistException.class)
   public void testCloneNonExistentSnapshot() throws IOException, InterruptedException {
     String snapshotName = "random-snapshot-" + System.currentTimeMillis();

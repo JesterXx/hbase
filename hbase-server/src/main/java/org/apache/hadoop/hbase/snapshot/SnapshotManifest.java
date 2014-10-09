@@ -260,7 +260,7 @@ public class SnapshotManifest {
       // this is a mob region
       try {
         HRegionFileSystem mobRegionFs = HRegionFileSystem.openRegionFromFileSystem(conf, fs,
-            tableDir, regionInfo, true);;  
+            tableDir, regionInfo, true);
         monitor.rethrowException();
 
         // 1. dump region meta info into the snapshot directory
@@ -317,7 +317,6 @@ public class SnapshotManifest {
       } catch(IOException e) {
         //the mob directory might not be created yet, so do nothing here
       }
-      
     } else {
       // Open the RegionFS
       HRegionFileSystem regionFs = HRegionFileSystem.openRegionFromFileSystem(conf, fs,
@@ -368,7 +367,7 @@ public class SnapshotManifest {
           visitor.familyClose(regionData, familyData);
         }
       }
-      visitor.regionClose(regionData);  
+      visitor.regionClose(regionData);
     }
   }
 
