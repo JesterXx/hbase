@@ -21,8 +21,8 @@ import org.apache.hadoop.hbase.LargeTests;
 import org.junit.experimental.categories.Category;
 
 @Category(LargeTests.class)
-public class TestMobCloneSnapshotFromClientWithRegionReplicas extends
-    TestMobCloneSnapshotFromClient {
+public class TestMobSnapshotFromClientWithRegionReplicas extends
+    TestMobSnapshotFromClient {
   @Override
   protected int getNumReplicas() {
     return 3;

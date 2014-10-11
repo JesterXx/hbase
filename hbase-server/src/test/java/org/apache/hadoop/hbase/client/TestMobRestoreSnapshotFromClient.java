@@ -107,7 +107,7 @@ public class TestMobRestoreSnapshotFromClient {
     snapshotName2 = Bytes.toBytes("snaptb2-" + tid);
 
     // create Table and disable it
-    MobSnapshotTestingUtils.createMobTable(TEST_UTIL, tableName, 1, FAMILY);
+    MobSnapshotTestingUtils.createMobTable(TEST_UTIL, tableName, getNumReplicas(), FAMILY);
 
     admin.disableTable(tableName);
 
