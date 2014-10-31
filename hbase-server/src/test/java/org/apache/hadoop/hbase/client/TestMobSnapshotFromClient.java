@@ -100,7 +100,7 @@ public class TestMobSnapshotFromClient {
   }
 
   protected int getNumReplicas() {
-    return 1;
+    return 3;
   }
 
   @After

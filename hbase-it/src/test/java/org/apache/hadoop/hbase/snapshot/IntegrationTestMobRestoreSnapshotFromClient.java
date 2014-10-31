@@ -1,4 +1,5 @@
 /**
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -15,52 +16,55 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.client;
+package org.apache.hadoop.hbase.snapshot;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.IOException;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.Set;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.LargeTests;
+import org.apache.hadoop.hbase.IntegrationTestBase;
+import org.apache.hadoop.hbase.IntegrationTestingUtility;
+import org.apache.hadoop.hbase.IntegrationTests;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.master.MasterFileSystem;
+import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
 import org.apache.hadoop.hbase.mob.MobConstants;
+import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
+import org.apache.hadoop.hbase.protobuf.generated.SnapshotProtos.SnapshotRegionManifest;
 import org.apache.hadoop.hbase.regionserver.NoSuchColumnFamilyException;
-import org.apache.hadoop.hbase.snapshot.CorruptedSnapshotException;
-import org.apache.hadoop.hbase.snapshot.MobSnapshotTestingUtils;
-import org.apache.hadoop.hbase.snapshot.SnapshotTestingUtils;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.FSUtils;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
+import org.apache.hadoop.util.ToolRunner;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+
+import com.google.common.collect.Sets;
 
 /**
  * Test restore snapshots from the client
  */
-@Category(LargeTests.class)
-public class TestMobRestoreSnapshotFromClient {
+@Category(IntegrationTests.class)
+public class IntegrationTestMobRestoreSnapshotFromClient extends IntegrationTestBase {
+
   final Log LOG = LogFactory.getLog(getClass());
-
-  private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
-
-  private final byte[] FAMILY = Bytes.toBytes("cf");
-
+  private static final byte[] FAMILY = Bytes.toBytes("cf");
   private byte[] emptySnapshot;
   private byte[] snapshotName0;
   private byte[] snapshotName1;
@@ -70,33 +74,13 @@ public class TestMobRestoreSnapshotFromClient {
   private TableName tableName;
   private Admin admin;
 
-  @BeforeClass
-  public static void setUpBeforeClass() throws Exception {
-    TEST_UTIL.getConfiguration().setBoolean(SnapshotManager.HBASE_SNAPSHOT_ENABLED, true);
-    TEST_UTIL.getConfiguration().setBoolean("hbase.online.schema.update.enable", true);
-    TEST_UTIL.getConfiguration().setInt("hbase.hstore.compactionThreshold", 10);
-    TEST_UTIL.getConfiguration().setInt("hbase.regionserver.msginterval", 100);
-    TEST_UTIL.getConfiguration().setInt("hbase.client.pause", 250);
-    TEST_UTIL.getConfiguration().setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 6);
-    TEST_UTIL.getConfiguration().setBoolean(
-        "hbase.master.enabletable.roundrobin", true);
-    TEST_UTIL.getConfiguration().setInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY, 0);
-    TEST_UTIL.startMiniCluster(3);
-  }
-
-  @AfterClass
-  public static void tearDownAfterClass() throws Exception {
-    TEST_UTIL.shutdownMiniCluster();
-  }
-
   /**
    * Initialize the tests with a table filled with some data
    * and two snapshots (snapshotName0, snapshotName1) of different states.
    * The tableName, snapshotNames and the number of rows in the snapshot are initialized.
    */
-  @Before
-  public void setup() throws Exception {
-    this.admin = TEST_UTIL.getHBaseAdmin();
+  public void setUpTest() throws Exception {
+    this.admin = util.getHBaseAdmin();
 
     long tid = System.currentTimeMillis();
     tableName =
@@ -107,17 +91,17 @@ public class TestMobRestoreSnapshotFromClient {
     snapshotName2 = Bytes.toBytes("snaptb2-" + tid);
 
     // create Table and disable it
-    MobSnapshotTestingUtils.createMobTable(TEST_UTIL, tableName, getNumReplicas(), FAMILY);
+    MobSnapshotTestingUtils.createMobTable(util, tableName, getNumReplicas(), FAMILY);
 
     admin.disableTable(tableName);
 
     // take an empty snapshot
     admin.snapshot(emptySnapshot, tableName);
 
-    HTable table = new HTable(TEST_UTIL.getConfiguration(), tableName);
+    HTable table = new HTable(util.getConfiguration(), tableName);
     // enable table and insert data
     admin.enableTable(tableName);
-    SnapshotTestingUtils.loadData(TEST_UTIL, table, 500, FAMILY);
+    MobSnapshotTestingUtils.loadMobData(util, table, 500, FAMILY);
     snapshot0Rows = MobSnapshotTestingUtils.countMobRows(table);
     admin.disableTable(tableName);
 
@@ -126,76 +110,108 @@ public class TestMobRestoreSnapshotFromClient {
 
     // enable table and insert more data
     admin.enableTable(tableName);
-    SnapshotTestingUtils.loadData(TEST_UTIL, table, 500, FAMILY);
+    MobSnapshotTestingUtils.loadMobData(util, table, 500, FAMILY);
     snapshot1Rows = MobSnapshotTestingUtils.countMobRows(table);
     table.close();
   }
 
-  @After
-  public void tearDown() throws Exception {
-    TEST_UTIL.deleteTable(tableName);
-    SnapshotTestingUtils.deleteAllSnapshots(TEST_UTIL.getHBaseAdmin());
-    SnapshotTestingUtils.deleteArchiveDirectory(TEST_UTIL);
+  public void cleanUpTest() throws Exception {
+    if (admin.tableExists(tableName)) {
+      util.deleteTable(tableName);
+    }
+    if (util.isDistributedCluster()) {
+      util.getHBaseClusterInterface().restoreInitialStatus();
+    } else {
+      SnapshotTestingUtils.deleteAllSnapshots(admin);
+      SnapshotTestingUtils.deleteArchiveDirectory(util);
+    }
+  }
+
+  protected int getNumReplicas() {
+    return 3;
+  }
+
+  @Override
+  public void setUpCluster() throws Exception {
+    util = getTestingUtil(getConf());
+    setUpBaseConf(util.getConfiguration());
+    util.initializeCluster(1);
+  }
+
+  public static void setUpBaseConf(Configuration conf) {
+    conf.setBoolean(SnapshotManager.HBASE_SNAPSHOT_ENABLED, true);
+    conf.setBoolean("hbase.online.schema.update.enable", true);
+    conf.setInt("hbase.hstore.compactionThreshold", 10);
+    conf.setInt("hbase.regionserver.msginterval", 100);
+    conf.setInt("hbase.client.pause", 250);
+    conf.setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 6);
+    conf.setBoolean(
+        "hbase.master.enabletable.roundrobin", true);
+    conf.setInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY, 0);
   }
 
   @Test
-  public void testRestoreSnapshot() throws IOException {
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot1Rows);
+  public void testAll() throws Exception {
+    testRestoreSnapshot();
+    testCloneAndRestoreSnapshot();
+    testCorruptedSnapshot();
+    testRestoreSchemaChange();
+    testCloneSnapshotOfCloned();
+  }
+
+  public void testRestoreSnapshot() throws Exception {
+    setUpTest();
+    MobSnapshotTestingUtils.verifyMobRowCount(util, tableName, snapshot1Rows);
     admin.disableTable(tableName);
     admin.snapshot(snapshotName1, tableName);
     // Restore from snapshot-0
     admin.restoreSnapshot(snapshotName0);
     admin.enableTable(tableName);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot0Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, tableName, snapshot0Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
 
     // Restore from emptySnapshot
     admin.disableTable(tableName);
     admin.restoreSnapshot(emptySnapshot);
     admin.enableTable(tableName);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, 0);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, tableName, 0);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
 
     // Restore from snapshot-1
     admin.disableTable(tableName);
     admin.restoreSnapshot(snapshotName1);
     admin.enableTable(tableName);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot1Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, tableName, snapshot1Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
 
     // Restore from snapshot-1
-    TEST_UTIL.deleteTable(tableName);
+    util.deleteTable(tableName);
     admin.restoreSnapshot(snapshotName1);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot1Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, tableName, snapshot1Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
+    cleanUpTest();
   }
 
-  protected int getNumReplicas() {
-    return 1;
-  }
-
-  @Test
   public void testRestoreSchemaChange() throws Exception {
+    setUpTest();
     byte[] TEST_FAMILY2 = Bytes.toBytes("cf2");
 
-    HTable table = new HTable(TEST_UTIL.getConfiguration(), tableName);
+    HTable table = new HTable(util.getConfiguration(), tableName);
 
     // Add one column family and put some data in it
     admin.disableTable(tableName);
     HColumnDescriptor hcd = new HColumnDescriptor(TEST_FAMILY2);
     hcd.setMobEnabled(true);
-    hcd.setMobThreshold(3L);
+    hcd.setMobThreshold(0L);
     admin.addColumn(tableName, hcd);
     admin.enableTable(tableName);
     assertEquals(2, table.getTableDescriptor().getFamilies().size());
     HTableDescriptor htd = admin.getTableDescriptor(tableName);
     assertEquals(2, htd.getFamilies().size());
-    SnapshotTestingUtils.loadData(TEST_UTIL, table, 500, TEST_FAMILY2);
-    long snapshot2Rows = snapshot1Rows + 500;
+    MobSnapshotTestingUtils.loadMobData(util, table, 100, TEST_FAMILY2);
+    long snapshot2Rows = snapshot1Rows + 100;
     assertEquals(snapshot2Rows, MobSnapshotTestingUtils.countMobRows(table));
-    assertEquals(500, MobSnapshotTestingUtils.countMobRows(table, TEST_FAMILY2));
-    Set<String> fsFamilies = getFamiliesFromFS(tableName);
-    assertEquals(2, fsFamilies.size());
+    assertEquals(100, MobSnapshotTestingUtils.countMobRows(table, TEST_FAMILY2));
 
     // Take a snapshot
     admin.disableTable(tableName);
@@ -214,8 +230,6 @@ public class TestMobRestoreSnapshotFromClient {
     assertEquals(snapshot0Rows, MobSnapshotTestingUtils.countMobRows(table));
     htd = admin.getTableDescriptor(tableName);
     assertEquals(1, htd.getFamilies().size());
-    fsFamilies = getFamiliesFromFS(tableName);
-    assertEquals(1, fsFamilies.size());
 
     // Restore back the snapshot (with the cf)
     admin.disableTable(tableName);
@@ -224,51 +238,52 @@ public class TestMobRestoreSnapshotFromClient {
     htd = admin.getTableDescriptor(tableName);
     assertEquals(2, htd.getFamilies().size());
     assertEquals(2, table.getTableDescriptor().getFamilies().size());
-    assertEquals(500, MobSnapshotTestingUtils.countMobRows(table, TEST_FAMILY2));
+    assertEquals(100, MobSnapshotTestingUtils.countMobRows(table, TEST_FAMILY2));
     assertEquals(snapshot2Rows, MobSnapshotTestingUtils.countMobRows(table));
-    fsFamilies = getFamiliesFromFS(tableName);
-    assertEquals(2, fsFamilies.size());
     table.close();
+    cleanUpTest();
   }
 
-  @Test
-  public void testCloneSnapshotOfCloned() throws IOException, InterruptedException {
+  public void testCloneSnapshotOfCloned() throws Exception {
+    setUpTest();
     TableName clonedTableName =
         TableName.valueOf("clonedtb-" + System.currentTimeMillis());
     admin.cloneSnapshot(snapshotName0, clonedTableName);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, clonedTableName, snapshot0Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, clonedTableName, snapshot0Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(clonedTableName, admin, getNumReplicas());
     admin.disableTable(clonedTableName);
     admin.snapshot(snapshotName2, clonedTableName);
-    TEST_UTIL.deleteTable(clonedTableName);
+    util.deleteTable(clonedTableName);
     waitCleanerRun();
 
     admin.cloneSnapshot(snapshotName2, clonedTableName);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, clonedTableName, snapshot0Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, clonedTableName, snapshot0Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(clonedTableName, admin, getNumReplicas());
-    TEST_UTIL.deleteTable(clonedTableName);
+    util.deleteTable(clonedTableName);
+    cleanUpTest();
   }
 
-  @Test
-  public void testCloneAndRestoreSnapshot() throws IOException, InterruptedException {
-    TEST_UTIL.deleteTable(tableName);
+  public void testCloneAndRestoreSnapshot() throws Exception {
+    setUpTest();
+    util.deleteTable(tableName);
     waitCleanerRun();
 
     admin.cloneSnapshot(snapshotName0, tableName);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot0Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, tableName, snapshot0Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
     waitCleanerRun();
 
     admin.disableTable(tableName);
     admin.restoreSnapshot(snapshotName0);
     admin.enableTable(tableName);
-    MobSnapshotTestingUtils.verifyMobRowCount(TEST_UTIL, tableName, snapshot0Rows);
+    MobSnapshotTestingUtils.verifyMobRowCount(util, tableName, snapshot0Rows);
     SnapshotTestingUtils.verifyReplicasCameOnline(tableName, admin, getNumReplicas());
+    cleanUpTest();
   }
 
-  @Test
-  public void testCorruptedSnapshot() throws IOException, InterruptedException {
-    SnapshotTestingUtils.corruptSnapshot(TEST_UTIL, Bytes.toString(snapshotName0));
+  public void testCorruptedSnapshot() throws Exception {
+    setUpTest();
+    corruptSnapshot(util, Bytes.toString(snapshotName0));
     TableName cloneName = TableName.valueOf("corruptedClone-" + System.currentTimeMillis());
     try {
       admin.cloneSnapshot(snapshotName0, cloneName);
@@ -280,24 +295,73 @@ public class TestMobRestoreSnapshotFromClient {
     } catch (Exception e) {
       fail("Expected CorruptedSnapshotException got: " + e);
     }
+    cleanUpTest();
   }
 
-  // ==========================================================================
-  //  Helpers
-  // ==========================================================================
   private void waitCleanerRun() throws InterruptedException {
-    TEST_UTIL.getMiniHBaseCluster().getMaster().getHFileCleaner().choreForTesting();
+    if (!util.isDistributedCluster()) {
+      util.getMiniHBaseCluster().getMaster().getHFileCleaner().choreForTesting();
+    }
   }
 
-  private Set<String> getFamiliesFromFS(final TableName tableName) throws IOException {
-    MasterFileSystem mfs = TEST_UTIL.getMiniHBaseCluster().getMaster().getMasterFileSystem();
-    Set<String> families = new HashSet<String>();
-    Path tableDir = FSUtils.getTableDir(mfs.getRootDir(), tableName);
-    for (Path regionDir: FSUtils.getRegionDirs(mfs.getFileSystem(), tableDir)) {
-      for (Path familyDir: FSUtils.getFamilyDirs(mfs.getFileSystem(), regionDir)) {
-        families.add(familyDir.getName());
+  /**
+   * Corrupt the specified snapshot by deleting some files.
+   *
+   * @param util {@link HBaseTestingUtility}
+   * @param snapshotName name of the snapshot to corrupt
+   * @return array of the corrupted HFiles
+   * @throws IOException on unexecpted error reading the FS
+   */
+  public static ArrayList corruptSnapshot(final HBaseTestingUtility util, final String snapshotName)
+      throws IOException {
+    Path rootDir = new Path(util.getConfiguration().get(HConstants.HBASE_DIR));
+    final FileSystem fs =rootDir.getFileSystem(util.getConfiguration());
+    Path snapshotDir = SnapshotDescriptionUtils.getCompletedSnapshotDir(snapshotName,
+                                                                       rootDir);
+    SnapshotDescription snapshotDesc = SnapshotDescriptionUtils.readSnapshotInfo(fs, snapshotDir);
+    final TableName table = TableName.valueOf(snapshotDesc.getTable());
+
+    final ArrayList corruptedFiles = new ArrayList();
+    final Configuration conf = util.getConfiguration();
+    SnapshotReferenceUtil.visitTableStoreFiles(conf, fs, snapshotDir, snapshotDesc,
+        new SnapshotReferenceUtil.StoreFileVisitor() {
+      @Override
+      public void storeFile(final HRegionInfo regionInfo, final String family,
+            final SnapshotRegionManifest.StoreFile storeFile) throws IOException {
+        String region = regionInfo.getEncodedName();
+        String hfile = storeFile.getName();
+        HFileLink link = HFileLink.create(conf, table, region, family, hfile);
+        if (corruptedFiles.size() % 2 == 0) {
+          fs.delete(link.getAvailablePath(fs), true);
+          corruptedFiles.add(hfile);
+        }
       }
-    }
-    return families;
+    });
+
+    assertTrue(corruptedFiles.size() > 0);
+    return corruptedFiles;
+  }
+
+  @Override
+  public int runTestFromCommandLine() throws Exception {
+    testAll();
+    return 0;
+  }
+
+  @Override
+  public TableName getTablename() {
+    return tableName;
+  }
+
+  @Override
+  protected Set<String> getColumnFamilies() {
+    return Sets.newHashSet(Bytes.toString(FAMILY));
+  }
+
+  public static void main(String[] args) throws Exception {
+    Configuration conf = HBaseConfiguration.create();
+    IntegrationTestingUtility.setUseDistributedCluster(conf);
+    int status =  ToolRunner.run(conf, new IntegrationTestMobRestoreSnapshotFromClient(), args);
+    System.exit(status);
   }
 }

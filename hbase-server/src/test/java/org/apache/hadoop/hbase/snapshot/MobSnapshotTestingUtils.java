@@ -23,6 +23,8 @@ import static org.junit.Assert.assertTrue;
 import java.io.IOException;
 import java.util.List;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
@@ -34,7 +36,9 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
@@ -45,9 +49,12 @@ import org.apache.hadoop.hbase.regionserver.HRegionFileSystem;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSTableDescriptors;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.MD5Hash;
 import org.junit.Assert;
 
 public class MobSnapshotTestingUtils {
+
+  private static byte[] KEYS = Bytes.toBytes("0123456789");
 
   /**
    * Create the Mob Table.
@@ -65,7 +72,6 @@ public class MobSnapshotTestingUtils {
     }
     byte[][] splitKeys = SnapshotTestingUtils.getSplitKeys();
     util.getHBaseAdmin().createTable(htd, splitKeys);
-    SnapshotTestingUtils.waitForTableToBeOnline(util, tableName);
     assertEquals((splitKeys.length + 1) * regionReplication, util
         .getHBaseAdmin().getTableRegions(tableName).size());
   }
@@ -99,6 +105,45 @@ public class MobSnapshotTestingUtils {
     // until they are assigned
     util.waitUntilAllRegionsAssigned(htd.getTableName());
     return new HTable(util.getConfiguration(), htd.getTableName());
+  }
+
+  public static void loadMobData(final HBaseTestingUtility util, final TableName tableName, int rows,
+      byte[]... families) throws IOException, InterruptedException {
+    loadMobData(util, new HTable(util.getConfiguration(), tableName), rows, families);
+  }
+
+  public static void loadMobData(final HBaseTestingUtility util, final HTable table, int rows,
+      byte[]... families) throws IOException, InterruptedException {
+    table.setAutoFlush(false, true);
+
+    // Ensure one row per region
+    assertTrue(rows >= KEYS.length);
+    for (byte k0: KEYS) {
+      byte[] k = new byte[] { k0 };
+      byte[] value = Bytes.add(Bytes.toBytes(System.currentTimeMillis()), k);
+      byte[] key = Bytes.add(k, Bytes.toBytes(MD5Hash.getMD5AsHex(value)));
+      putData(table, families, key, value);
+      rows--;
+    }
+
+    // Add other extra rows. more rows, more files
+    while (rows-- > 0) {
+      byte[] value = Bytes.add(Bytes.toBytes(System.currentTimeMillis()), Bytes.toBytes(rows));
+      byte[] key = Bytes.toBytes(MD5Hash.getMD5AsHex(value));
+      putData(table, families, key, value);
+    }
+    table.flushCommits();
+  }
+
+  private static void putData(final HTable table, final byte[][] families,
+      final byte[] key, final byte[] value) throws IOException {
+    byte[] q = Bytes.toBytes("q");
+    Put put = new Put(key);
+    put.setDurability(Durability.SKIP_WAL);
+    for (byte[] family: families) {
+      put.add(family, q, value);
+    }
+    table.put(put);
   }
 
   /**
