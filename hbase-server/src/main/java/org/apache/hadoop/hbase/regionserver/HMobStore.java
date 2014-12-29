@@ -165,7 +165,7 @@ public class HMobStore extends HStore {
   }
 
   /**
-   * Creates the temp directory of mob files for flushing.
+   * Creates the writer for the mob file in temp directory.
    * @param date The latest date of cells in the flushing.
    * @param maxKeyCount The key count.
    * @param compression The compression algorithm.
@@ -183,7 +183,28 @@ public class HMobStore extends HStore {
   }
 
   /**
-   * Creates the temp directory of mob files for flushing.
+   * Creates the writer for the del file in temp directory.
+   * @param date The latest date of cells in the flushing.
+   * @param maxKeyCount The key count.
+   * @param compression The compression algorithm.
+   * @param startKey The start key.
+   * @return The writer for the del file.
+   * @throws IOException
+   */
+  public StoreFile.Writer createDelFileWriterInTmp(Date date, long maxKeyCount,
+      Compression.Algorithm compression, byte[] startKey) throws IOException {
+    if (startKey == null) {
+      startKey = HConstants.EMPTY_START_ROW;
+    }
+    Path path = getTempDir();
+    String suffix = UUID
+        .randomUUID().toString().replaceAll("-", "") + "_del";
+    MobFileName mobFileName = MobFileName.create(startKey, MobUtils.formatDate(date), suffix);
+    return createWriterInTmp(mobFileName, path, maxKeyCount, compression);
+  }
+
+  /**
+   * Creates the writer for the mob file in temp directory.
    * @param date The date string, its format is yyyymmmdd.
    * @param basePath The basic path for a temp directory.
    * @param maxKeyCount The key count.
@@ -196,6 +217,20 @@ public class HMobStore extends HStore {
       Compression.Algorithm compression, byte[] startKey) throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID()
         .toString().replaceAll("-", ""));
+    return createWriterInTmp(mobFileName, basePath, maxKeyCount, compression);
+  }
+  
+  /**
+   * Creates the writer for the mob file in temp directory.
+   * @param mobFileName The mob file name.
+   * @param basePath The basic path for a temp directory.
+   * @param maxKeyCount The key count.
+   * @param compression The compression algorithm.
+   * @return The writer for the mob file.
+   * @throws IOException
+   */
+  public StoreFile.Writer createWriterInTmp(MobFileName mobFileName, Path basePath, long maxKeyCount,
+      Compression.Algorithm compression) throws IOException {
     final CacheConfig writerCacheConf = mobCacheConfig;
     HFileContext hFileContext = new HFileContextBuilder().withCompression(compression)
         .withIncludesMvcc(false).withIncludesTags(true)
