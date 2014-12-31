@@ -487,25 +487,19 @@ public class TestMobCompaction {
         hcd.getNameAsString());
     List<StoreFile> sfs = new ArrayList<StoreFile>();
     if (fs.exists(mobDirPath)) {
-      long maxMemstoreTS = 0;
       for (FileStatus f : fs.listStatus(mobDirPath)) {
         StoreFile sf = new StoreFile(fs, f.getPath(), conf, cacheConfig, BloomType.NONE);
-        if (sf.getReader() == null) {
-          sf.createReader();
-        }
         sfs.add(sf);
-        maxMemstoreTS = maxMemstoreTS < sf.getMaxMemstoreTS() ? sf.getMaxMemstoreTS()
-            : maxMemstoreTS;
       }
       List scanners = StoreFileScanner.getScannersForStoreFiles(sfs, false, true, false, null,
-          maxMemstoreTS);
+          HConstants.LATEST_TIMESTAMP);
       Scan scan = new Scan();
       scan.setMaxVersions(hcd.getMaxVersions());
       long timeToPurgeDeletes = Math.max(conf.getLong("hbase.hstore.time.to.purge.deletes", 0), 0);
       long ttl = HStore.determineTTLFromFamily(hcd);
       ScanInfo scanInfo = new ScanInfo(hcd, ttl, timeToPurgeDeletes, KeyValue.COMPARATOR);
-      StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_DROP_DELETES,
-          null, scanners, 0L, maxMemstoreTS);
+      StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_DROP_DELETES, null,
+          scanners, 0L, HConstants.LATEST_TIMESTAMP);
       List<Cell> results = new ArrayList<>();
       scanner.next(results);
       return results.size();
