@@ -501,8 +501,14 @@ public class TestMobCompaction {
       StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_DROP_DELETES, null,
           scanners, 0L, HConstants.LATEST_TIMESTAMP);
       List<Cell> results = new ArrayList<>();
-      scanner.next(results);
-      return results.size();
+      boolean hasMore = true;
+      int size = 0;
+      while (hasMore) {
+        hasMore = scanner.next(results);
+        size += results.size();
+        results.clear();
+      }
+      return size;
     }
     return 0;
   }
