@@ -50,7 +50,7 @@ public class StoreFileInfo implements Comparable<StoreFileInfo> {
    * A non-capture group, for hfiles, so that this can be embedded.
    * HFiles are uuid ([0-9a-z]+). Bulk loaded hfiles has (_SeqId_[0-9]+_) has suffix.
    */
-  public static final String HFILE_NAME_REGEX = "[0-9a-f]+(?:_SeqId_[0-9]+_)?";
+  public static final String HFILE_NAME_REGEX = "[0-9a-f]+(?:_SeqId_[0-9]+_)?(_del)?";
 
   /** Regex that will work for hfiles */
   private static final Pattern HFILE_NAME_PATTERN =

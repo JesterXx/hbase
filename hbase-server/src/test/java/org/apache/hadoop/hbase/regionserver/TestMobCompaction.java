@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.TreeSet;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -287,7 +286,7 @@ public class TestMobCompaction {
     byte[] dummyData = makeDummyData(200); // larger than mob threshold
     HRegionIncommon loader = new HRegionIncommon(region);
     int numHfiles = compactionThreshold - 1;
-    byte[] deleteRow = Bytes.toBytes(0);
+    byte[] deleteRow = Bytes.add(STARTROW, Bytes.toBytes(0));
     for (int i = 0; i < numHfiles; i++) {
       Put p = createPut(i, dummyData);
       loader.put(p);
@@ -306,7 +305,8 @@ public class TestMobCompaction {
     assertEquals("Before compaction: store files", compactionThreshold, countStoreFiles());
     region.compactStores(true);
     assertEquals("After compaction: store files", 1, countStoreFiles());
-    assertEquals("After compaction: store files", 2, countMobFiles());
+    // a new del file
+    assertEquals("After compaction: mob files", numHfiles + 1, countMobFiles());
 
     Scan scan = new Scan();
     scan.setRaw(true);
@@ -399,14 +399,15 @@ public class TestMobCompaction {
 
     int scannedCount = 0;
     List<Cell> results = new ArrayList<Cell>();
-    boolean hasMore = scanner.next(results);
+    boolean hasMore = true;
     while (hasMore) {
+      hasMore = scanner.next(results);
       for (Cell c : results) {
         if (MobUtils.isMobReferenceCell(c)) {
           scannedCount++;
         }
       }
-      hasMore = scanner.next(results);
+      results.clear();
     }
     scanner.close();
 
@@ -420,10 +421,11 @@ public class TestMobCompaction {
 
     int scannedCount = 0;
     List<Cell> results = new ArrayList<Cell>();
-    boolean hasMore = scanner.next(results);
+    boolean hasMore = true;
     while (hasMore) {
-      scannedCount += results.size();
       hasMore = scanner.next(results);
+      scannedCount += results.size();
+      results.clear();
     }
     scanner.close();
 
@@ -497,15 +499,13 @@ public class TestMobCompaction {
       }
       List scanners = StoreFileScanner.getScannersForStoreFiles(sfs, false, true, false, null,
           maxMemstoreTS);
-      TreeSet<byte[]> columns = new TreeSet<>(Bytes.BYTES_COMPARATOR);
-      columns.add(COLUMN_FAMILY);
       Scan scan = new Scan();
       scan.setMaxVersions(hcd.getMaxVersions());
       long timeToPurgeDeletes = Math.max(conf.getLong("hbase.hstore.time.to.purge.deletes", 0), 0);
       long ttl = HStore.determineTTLFromFamily(hcd);
       ScanInfo scanInfo = new ScanInfo(hcd, ttl, timeToPurgeDeletes, KeyValue.COMPARATOR);
       StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_DROP_DELETES,
-          columns, scanners, 0L, maxMemstoreTS);
+          null, scanners, 0L, maxMemstoreTS);
       List<Cell> results = new ArrayList<>();
       scanner.next(results);
       return results.size();
