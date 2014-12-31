@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeSet;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -280,6 +281,56 @@ public class TestMobCompaction {
     scanner.close();
   }
 
+  @Test
+  public void testMajorCompactionAfterDelete() throws Exception {
+    init(UTIL.getConfiguration(), 100);
+    byte[] dummyData = makeDummyData(200); // larger than mob threshold
+    HRegionIncommon loader = new HRegionIncommon(region);
+    int numHfiles = compactionThreshold - 1;
+    byte[] deleteRow = Bytes.toBytes(0);
+    for (int i = 0; i < numHfiles; i++) {
+      Put p = createPut(i, dummyData);
+      loader.put(p);
+      loader.flushcache();
+    }
+    assertEquals("Before compaction: store files", numHfiles, countStoreFiles());
+    assertEquals("Before compaction: mob file count", numHfiles, countMobFiles());
+    assertEquals("Before compaction: rows", numHfiles, countRows());
+    assertEquals("Before compaction: mob rows", numHfiles, countMobRows());
+    assertEquals("Before compaction: number of mob cells", numHfiles, countMobCellsInMetadata());
+    Delete delete = new Delete(deleteRow);
+    delete.deleteFamily(COLUMN_FAMILY);
+    region.delete(delete);
+    loader.flushcache();
+
+    assertEquals("Before compaction: store files", compactionThreshold, countStoreFiles());
+    region.compactStores(true);
+    assertEquals("After compaction: store files", 1, countStoreFiles());
+    assertEquals("After compaction: store files", 2, countMobFiles());
+
+    Scan scan = new Scan();
+    scan.setRaw(true);
+    InternalScanner scanner = region.getScanner(scan);
+    List<Cell> results = new ArrayList<Cell>();
+    scanner.next(results);
+    int deleteCount = 0;
+    while (!results.isEmpty()) {
+      for (Cell c : results) {
+        if (c.getTypeByte() == KeyValue.Type.DeleteFamily.getCode()) {
+          deleteCount++;
+          assertTrue(Bytes.equals(CellUtil.cloneRow(c), deleteRow));
+        }
+      }
+      results.clear();
+      scanner.next(results);
+    }
+    // assert the delete mark is not retained after the major compaction
+    assertEquals(0, deleteCount);
+    scanner.close();
+    // assert the deleted cell is not counted
+    assertEquals("The cells in mob files", numHfiles - 1, countMobCellsInMobFiles());
+  }
+
   private int countStoreFiles() throws IOException {
     Store store = region.getStore(COLUMN_FAMILY);
     return store.getStorefilesCount();
@@ -424,5 +475,41 @@ public class TestMobCompaction {
     scanner.close();
 
     return files.size();
+  }
+
+  private int countMobCellsInMobFiles() throws IOException {
+    Configuration copyOfConf = new Configuration(conf);
+    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
+    CacheConfig cacheConfig = new CacheConfig(copyOfConf);
+    Path mobDirPath = new Path(MobUtils.getMobRegionPath(conf, htd.getTableName()),
+        hcd.getNameAsString());
+    List<StoreFile> sfs = new ArrayList<StoreFile>();
+    if (fs.exists(mobDirPath)) {
+      long maxMemstoreTS = 0;
+      for (FileStatus f : fs.listStatus(mobDirPath)) {
+        StoreFile sf = new StoreFile(fs, f.getPath(), conf, cacheConfig, BloomType.NONE);
+        if (sf.getReader() == null) {
+          sf.createReader();
+        }
+        sfs.add(sf);
+        maxMemstoreTS = maxMemstoreTS < sf.getMaxMemstoreTS() ? sf.getMaxMemstoreTS()
+            : maxMemstoreTS;
+      }
+      List scanners = StoreFileScanner.getScannersForStoreFiles(sfs, false, true, false, null,
+          maxMemstoreTS);
+      TreeSet<byte[]> columns = new TreeSet<>(Bytes.BYTES_COMPARATOR);
+      columns.add(COLUMN_FAMILY);
+      Scan scan = new Scan();
+      scan.setMaxVersions(hcd.getMaxVersions());
+      long timeToPurgeDeletes = Math.max(conf.getLong("hbase.hstore.time.to.purge.deletes", 0), 0);
+      long ttl = HStore.determineTTLFromFamily(hcd);
+      ScanInfo scanInfo = new ScanInfo(hcd, ttl, timeToPurgeDeletes, KeyValue.COMPARATOR);
+      StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_DROP_DELETES,
+          columns, scanners, 0L, maxMemstoreTS);
+      List<Cell> results = new ArrayList<>();
+      scanner.next(results);
+      return results.size();
+    }
+    return 0;
   }
 }
