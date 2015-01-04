@@ -27,10 +27,10 @@ import org.apache.hadoop.hbase.client.Scan;
 /**
  * Scanner scans the MOB Store. Coalesce KeyValue stream into List<KeyValue>
  * for a single row. It's only used in the compaction of mob-enabled columns.
- *
+ * It outputs the normal cells and delete markers when outputDeleteMarkers is set as true.
  */
 @InterfaceAudience.Private
-public class MobMajorCompactionStoreScanner extends StoreScanner {
+public class MobCompactionStoreScanner extends StoreScanner {
 
   /*
    * The delete markers are probably contained in the output of the scanner, for instance the
@@ -49,7 +49,7 @@ public class MobMajorCompactionStoreScanner extends StoreScanner {
    * @param smallestReadPoint the readPoint that we should use for tracking
    *          versions
    */
-  public MobMajorCompactionStoreScanner(Store store, ScanInfo scanInfo, Scan scan,
+  public MobCompactionStoreScanner(Store store, ScanInfo scanInfo, Scan scan,
       List<? extends KeyValueScanner> scanners, ScanType scanType, long smallestReadPoint,
       long earliestPutTs, boolean outputDeleteMarkers) throws IOException {
     super(store, scanInfo, scan, scanners, scanType, smallestReadPoint, earliestPutTs);

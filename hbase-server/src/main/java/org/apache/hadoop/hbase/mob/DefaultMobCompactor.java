@@ -37,7 +37,7 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.regionserver.HMobStore;
 import org.apache.hadoop.hbase.regionserver.HStore;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
-import org.apache.hadoop.hbase.regionserver.MobMajorCompactionStoreScanner;
+import org.apache.hadoop.hbase.regionserver.MobCompactionStoreScanner;
 import org.apache.hadoop.hbase.regionserver.ScanType;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
@@ -90,10 +90,10 @@ public class DefaultMobCompactor extends DefaultCompactor {
     scan.setMaxVersions(store.getFamily().getMaxVersions());
     if (scanType == ScanType.COMPACT_DROP_DELETES) {
       scanType = ScanType.COMPACT_RETAIN_DELETES;
-      return new MobMajorCompactionStoreScanner(store, store.getScanInfo(), scan, scanners,
+      return new MobCompactionStoreScanner(store, store.getScanInfo(), scan, scanners,
           scanType, smallestReadPoint, earliestPutTs, true);
     } else {
-      return new MobMajorCompactionStoreScanner(store, store.getScanInfo(), scan, scanners,
+      return new MobCompactionStoreScanner(store, store.getScanInfo(), scan, scanners,
           scanType, smallestReadPoint, earliestPutTs, false);
     }
   }
@@ -124,6 +124,14 @@ public class DefaultMobCompactor extends DefaultCompactor {
    * Otherwise, directly write this cell into the store file.
    * </li>
    * </ol>
+   * In the mob compaction, the {@link MobCompactionStoreScanner} is used as a scanner
+   * which could output the normal cells and delete markers together when required.
+   * After the major compaction on the normal hfiles, we have a guarantee that we have purged all
+   * deleted or old version mob refs, and the delete markers are written to a del file with the
+   * suffix _del. Because of this, it is safe to use the del file in the mob compaction.
+   * The mob compaction doesn't take place in the normal hfiles, it occurs directly in the
+   * mob files. When the small mob files are merged into bigger ones, the del file is added into
+   * the scanner to filter the deleted cells.
    * @param fd File details
    * @param scanner Where to read from.
    * @param writer Where to write to.
@@ -135,11 +143,11 @@ public class DefaultMobCompactor extends DefaultCompactor {
   @Override
   protected boolean performCompaction(FileDetails fd, InternalScanner scanner, CellSink writer,
       long smallestReadPoint, boolean cleanSeqId, boolean major) throws IOException {
-    if (!(scanner instanceof MobMajorCompactionStoreScanner)) {
+    if (!(scanner instanceof MobCompactionStoreScanner)) {
       throw new IllegalArgumentException(
-          "The scanner should be an instance of MobMajorCompactionStoreScanner");
+          "The scanner should be an instance of MobCompactionStoreScanner");
     }
-    MobMajorCompactionStoreScanner compactionScanner = (MobMajorCompactionStoreScanner) scanner;
+    MobCompactionStoreScanner compactionScanner = (MobCompactionStoreScanner) scanner;
     int bytesWritten = 0;
     // Since scanner.next() can return 'false' but still be delivering data,
     // we have to use a do/while loop.

@@ -166,7 +166,7 @@ public class HMobStore extends HStore {
 
   /**
    * Creates the writer for the mob file in temp directory.
-   * @param date The latest date of cells in the flushing.
+   * @param date The latest date of written cells.
    * @param maxKeyCount The key count.
    * @param compression The compression algorithm.
    * @param startKey The start key.
@@ -184,7 +184,9 @@ public class HMobStore extends HStore {
 
   /**
    * Creates the writer for the del file in temp directory.
-   * @param date The latest date of cells in the flushing.
+   * The del file keeps tracking the delete markers. Its name has a suffix _del,
+   * the format is [0-9a-f]+(_del)?.
+   * @param date The latest date of written cells.
    * @param maxKeyCount The key count.
    * @param compression The compression algorithm.
    * @param startKey The start key.
@@ -219,7 +221,7 @@ public class HMobStore extends HStore {
         .toString().replaceAll("-", ""));
     return createWriterInTmp(mobFileName, basePath, maxKeyCount, compression);
   }
-  
+
   /**
    * Creates the writer for the mob file in temp directory.
    * @param mobFileName The mob file name.
