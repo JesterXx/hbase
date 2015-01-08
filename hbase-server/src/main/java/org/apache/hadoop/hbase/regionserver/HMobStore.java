@@ -453,7 +453,7 @@ public class HMobStore extends HStore {
         }
         return super.compact(compaction);
       } finally {
-        if (tableLocked) {
+        if (tableLocked && lock != null) {
           try {
             lock.release();
           } catch (IOException e) {
