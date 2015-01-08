@@ -206,7 +206,7 @@ public class TestMobSweepReducer {
     assertEquals(false, mobFile2.equalsIgnoreCase(mobFile1));
 
     //test sequence file
-    String workingPath = configuration.get("mob.compaction.visited.dir");
+    String workingPath = configuration.get(SweepJob.WORKING_VISITED_DIR_KEY);
     FileStatus[] statuses = TEST_UTIL.getTestFileSystem().listStatus(new Path(workingPath));
     Set<String> files = new TreeSet<String>();
     for (FileStatus st : statuses) {
