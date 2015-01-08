@@ -274,16 +274,6 @@ public class MobUtils {
   }
 
   /**
-   * Gets the znode name of column family.
-   * @param tableName The current table name.
-   * @param familyName The name of the current column family.
-   * @return The znode name of column family.
-   */
-  public static String getColumnFamilyZNodeName(String tableName, String familyName) {
-    return tableName + ":" + familyName;
-  }
-
-  /**
    * Gets the root dir of the mob files.
    * It's {HBASE_DIR}/mobdir.
    * @param conf The current configuration.

@@ -36,16 +36,21 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.MediumTests;
+import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
+import org.apache.hadoop.hbase.master.TableLockManager;
+import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
-import org.apache.hadoop.hbase.mob.MobZookeeper;
+import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.DummyMobAbortable;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.SweepCounter;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.zookeeper.ZKUtil;
+import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
@@ -126,11 +131,11 @@ public class TestMobSweepReducer {
   @Test
   public void testRun() throws Exception {
 
+    TableName tn = TableName.valueOf(tableName);
     byte[] mobValueBytes = new byte[100];
 
     //get the path where mob files lie in
-    Path mobFamilyPath = MobUtils.getMobFamilyPath(TEST_UTIL.getConfiguration(),
-    TableName.valueOf(tableName), family);
+    Path mobFamilyPath = MobUtils.getMobFamilyPath(TEST_UTIL.getConfiguration(), tn, family);
 
     Put put = new Put(Bytes.toBytes(row));
     put.add(Bytes.toBytes(family), Bytes.toBytes(qf), 1, mobValueBytes);
@@ -139,7 +144,7 @@ public class TestMobSweepReducer {
     table.put(put);
     table.put(put2);
     table.flushCommits();
-    admin.flush(TableName.valueOf(tableName));
+    admin.flush(tn);
 
     FileStatus[] fileStatuses = TEST_UTIL.getTestFileSystem().listStatus(mobFamilyPath);
     //check the generation of a mob file
@@ -159,11 +164,17 @@ public class TestMobSweepReducer {
     configuration.setLong(MobConstants.MOB_SWEEP_TOOL_COMPACTION_START_DATE,
         System.currentTimeMillis() + 24 * 3600 * 1000);
 
+    ZooKeeperWatcher zkw = new ZooKeeperWatcher(configuration, "1", new DummyMobAbortable());
+    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, tn.getNameAsString());
     configuration.set(SweepJob.SWEEP_JOB_ID, "1");
-    configuration.set(SweepJob.SWEEPER_NODE, "/hbase/MOB/testSweepReducer:family-sweeper");
+    configuration.set(SweepJob.SWEEP_JOB_TABLE_NODE, znode);
+    ServerName serverName = SweepJob.getCurrentServerName(configuration);
+    configuration.set(SweepJob.SWEEP_JOB_SERVERNAME, serverName.toString());
 
-    MobZookeeper zk = MobZookeeper.newInstance(configuration, "1");
-    zk.addSweeperZNode(tableName, family, Bytes.toBytes("1"));
+    TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
+        serverName);
+    TableLock lock = tableLockManager.writeLock(tn, "Run sweep tool");
+    lock.acquire();
 
     //use the same counter when mocking
     Counter counter = new GenericCounter();
@@ -186,6 +197,7 @@ public class TestMobSweepReducer {
 
     SweepReducer reducer = new SweepReducer();
     reducer.run(ctx);
+    lock.release();
 
     FileStatus[] filsStatuses2 = TEST_UTIL.getTestFileSystem().listStatus(mobFamilyPath);
     String mobFile2 = filsStatuses2[0].getPath().getName();

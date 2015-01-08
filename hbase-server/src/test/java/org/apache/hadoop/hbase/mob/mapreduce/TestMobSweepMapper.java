@@ -17,15 +17,26 @@
  */
 package org.apache.hadoop.hbase.mob.mapreduce;
 
+import static org.junit.Assert.assertEquals;
+import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.SmallTests;
+import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.hadoop.hbase.mob.MobZookeeper;
-import org.apache.hadoop.hbase.mob.mapreduce.SweepMapper;
+import org.apache.hadoop.hbase.master.TableLockManager;
+import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.DummyMobAbortable;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.zookeeper.ZKUtil;
+import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.junit.AfterClass;
@@ -34,9 +45,6 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-
-import static org.junit.Assert.assertEquals;
-import static org.mockito.Mockito.*;
 
 @Category(SmallTests.class)
 public class TestMobSweepMapper {
@@ -71,11 +79,18 @@ public class TestMobSweepMapper {
     when(columns.raw()).thenReturn(kvList);
 
     Configuration configuration = new Configuration(TEST_UTIL.getConfiguration());
+    ZooKeeperWatcher zkw = new ZooKeeperWatcher(configuration, "1", new DummyMobAbortable());
+    TableName tn = TableName.valueOf("testSweepMapper");
+    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, tn.getNameAsString());
     configuration.set(SweepJob.SWEEP_JOB_ID, "1");
-    configuration.set(SweepJob.SWEEPER_NODE, "/hbase/MOB/testSweepMapper:family-sweeper");
+    configuration.set(SweepJob.SWEEP_JOB_TABLE_NODE, znode);
+    ServerName serverName = SweepJob.getCurrentServerName(configuration);
+    configuration.set(SweepJob.SWEEP_JOB_SERVERNAME, serverName.toString());
 
-    MobZookeeper zk = MobZookeeper.newInstance(configuration, "1");
-    zk.addSweeperZNode("testSweepMapper", "family", Bytes.toBytes("1"));
+    TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
+        serverName);
+    TableLock lock = tableLockManager.writeLock(tn, "Run sweep tool");
+    lock.acquire();
 
     Mapper<ImmutableBytesWritable, Result, Text, KeyValue>.Context ctx =
             mock(Mapper.Context.class);
@@ -96,5 +111,6 @@ public class TestMobSweepMapper {
     }).when(ctx).write(any(Text.class), any(KeyValue.class));
 
     map.map(r, columns, ctx);
+    lock.release();
   }
 }
