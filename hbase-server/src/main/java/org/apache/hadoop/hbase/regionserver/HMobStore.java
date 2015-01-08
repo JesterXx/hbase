@@ -106,7 +106,9 @@ public class HMobStore extends HStore {
     TableName tn = region.getTableDesc().getTableName();
     mobDirLocations.add(HFileArchiveUtil.getStoreArchivePath(conf, tn, MobUtils
         .getMobRegionInfo(tn).getEncodedName(), family.getNameAsString()));
-    tableLockManager = region.getRegionServerServices().getTableLockManager();
+    if (region.getRegionServerServices() != null) {
+      tableLockManager = region.getRegionServerServices().getTableLockManager();
+    }
   }
 
   /**
