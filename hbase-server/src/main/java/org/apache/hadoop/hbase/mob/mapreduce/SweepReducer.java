@@ -148,7 +148,7 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
   @Override
   public void run(Context context) throws IOException, InterruptedException {
     String jobId = context.getConfiguration().get(SweepJob.SWEEP_JOB_ID);
-    String owner = context.getConfiguration().get(SweepJob.SWEEP_JOB_SERVERNAME); 
+    String owner = context.getConfiguration().get(SweepJob.SWEEP_JOB_SERVERNAME);
     String sweeperNode = context.getConfiguration().get(SweepJob.SWEEP_JOB_TABLE_NODE);
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(context.getConfiguration(), jobId,
         new DummyMobAbortable());
