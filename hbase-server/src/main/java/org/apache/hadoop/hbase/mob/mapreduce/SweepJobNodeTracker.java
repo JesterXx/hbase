@@ -63,7 +63,7 @@ public class SweepJobNodeTracker extends ZooKeeperListener {
     watcher.registerListener(this);
     List<String> children = ZKUtil.listChildrenNoWatch(watcher, parentNode);
     if (children != null && !children.isEmpty()) {
-      // there're locks
+      // there are locks
       TreeSet<String> sortedChildren = new TreeSet<String>();
       sortedChildren.addAll(children);
       // find all the write locks
@@ -83,10 +83,8 @@ public class SweepJobNodeTracker extends ZooKeeperListener {
           }
         }
       }
-      System.exit(1);
-    } else {
-      System.exit(1);
     }
+    System.exit(1);
   }
 
   @Override

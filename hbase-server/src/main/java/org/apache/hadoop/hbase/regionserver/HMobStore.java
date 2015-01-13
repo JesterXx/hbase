@@ -433,17 +433,20 @@ public class HMobStore extends HStore {
       if (tableLockManager != null) {
         lock = tableLockManager.readLock(getTableName(), "Major compaction in HMobStore");
       }
-      boolean tableLocked = true;
+      boolean tableLocked = false;
       String tableName = getTableName().getNameAsString();
       if (lock != null) {
         try {
           LOG.info("Start to acquire a read lock for the table[" + tableName
               + "], ready to perform the major compaction");
           lock.acquire();
+          tableLocked = true;
         } catch (Exception e) {
-          tableLocked = false;
           LOG.error("Fail to lock the table " + tableName, e);
         }
+      } else {
+        // If the tableLockManager is null, mark the tableLocked as true.
+        tableLocked = true;
       }
       try {
         if (!tableLocked) {
