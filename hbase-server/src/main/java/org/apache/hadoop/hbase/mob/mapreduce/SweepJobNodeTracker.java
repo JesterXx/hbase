@@ -83,10 +83,8 @@ public class SweepJobNodeTracker extends ZooKeeperListener {
           }
         }
       }
-      System.exit(1);
-    } else {
-      System.exit(1);
     }
+    System.exit(1);
   }
 
   @Override

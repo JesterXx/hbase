@@ -125,7 +125,7 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
     }
     // disable the block cache.
     Configuration copyOfConf = new Configuration(conf);
-    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0.00001f);
+    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
     this.cacheConfig = new CacheConfig(copyOfConf);
 
     table = new HTable(this.conf, Bytes.toBytes(tableName));
