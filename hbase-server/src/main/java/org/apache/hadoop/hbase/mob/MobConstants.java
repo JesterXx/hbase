@@ -73,6 +73,9 @@ public class MobConstants {
 
   public final static String TEMP_DIR_NAME = ".tmp";
   public final static String EMPTY_STRING = "";
+
+  public static final String MOB_COMPACTION_MERGEABLE_SIZE = "hbase.mob.compaction.mergeable.size";
+  public static final long DEFAULT_MOB_COMPACTION_MERGEABLE_SIZE = 128 * 1024 * 1024;
   private MobConstants() {
 
   }
