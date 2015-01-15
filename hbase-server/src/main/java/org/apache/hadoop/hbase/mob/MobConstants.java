@@ -72,10 +72,17 @@ public class MobConstants {
   public static final long DEFAULT_MOB_CACHE_EVICT_PERIOD = 3600l;
 
   public final static String TEMP_DIR_NAME = ".tmp";
+  public final static String BULKLOAD_DIR_NAME = ".bulkload";
   public final static String EMPTY_STRING = "";
 
   public static final String MOB_COMPACTION_MERGEABLE_SIZE = "hbase.mob.compaction.mergeable.size";
   public static final long DEFAULT_MOB_COMPACTION_MERGEABLE_SIZE = 128 * 1024 * 1024;
+  public static final String MOB_DELFILE_MAX_COUNT = "hbase.mob.delfile.max.count";
+  public static final int DEFAULT_MOB_DELFILE_MAX_COUNT = 3;
+  public static final String MOB_COMPACTION_BATCH_SIZE = "hbase.mob.compaction.batch.size";
+  public static final int DEFAULT_MOB_COMPACTION_BATCH_SIZE = Integer.MAX_VALUE;
+  public static final String MOB_COMPACTION_CHORE_PERIOD = "hbase.master.mob.compaction.chore.period";
+  public static final int DEFAULT_MOB_COMPACTION_CHORE_PERIOD = 24 * 60 * 60 * 1000 * 7; // a week
   private MobConstants() {
 
   }
