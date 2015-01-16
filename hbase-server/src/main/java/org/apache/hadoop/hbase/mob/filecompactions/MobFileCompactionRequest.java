@@ -18,7 +18,10 @@
  */
 package org.apache.hadoop.hbase.mob.filecompactions;
 
-public abstract class MobFileCompactRequest {
+/**
+ * The compaction request for mob files.
+ */
+public abstract class MobFileCompactionRequest {
 
   protected long selectionTime;
   protected CompactionType type = CompactionType.PART_FILES;
@@ -28,6 +31,15 @@ public abstract class MobFileCompactRequest {
   }
 
   protected enum CompactionType {
-    PART_FILES, ALL_FILES;
+    
+    /**
+     * Part of mob files are selected.
+     */
+    PART_FILES,
+
+    /**
+     * All of mob files are selected.
+     */
+    ALL_FILES;
   }
 }

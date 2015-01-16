@@ -31,6 +31,9 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.util.FSUtils;
 
+/**
+ * A mob file compactor to directly compacts the mob files.
+ */
 public abstract class MobFileCompactor {
 
   protected FileSystem fs;
@@ -51,9 +54,20 @@ public abstract class MobFileCompactor {
     mobFamilyDir = new Path(mobTableDir, column.getNameAsString());
   }
 
+  /**
+   * Compacts the mob files for the current column family.
+   * @return The paths of new mob files generated in the compaction.
+   * @throws IOException
+   */
   public List<Path> compact() throws IOException {
     return compact(Arrays.asList(fs.listStatus(mobFamilyDir)));
   }
 
+  /**
+   * Compacts the candidate mob files.
+   * @param files The candidate mob files.
+   * @return The paths of new mob files generated in the compaction.
+   * @throws IOException
+   */
   public abstract List<Path> compact(List<FileStatus> files) throws IOException;
 }

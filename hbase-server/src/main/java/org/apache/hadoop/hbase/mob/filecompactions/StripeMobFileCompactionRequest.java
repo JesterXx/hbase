@@ -26,12 +26,12 @@ import java.util.List;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 
-public class StripeMobFileCompactRequest extends MobFileCompactRequest {
+public class StripeMobFileCompactionRequest extends MobFileCompactionRequest {
 
   protected Collection<FileStatus> allDelFiles;
   protected Collection<CompactedStripe> compactedStripes;
 
-  public StripeMobFileCompactRequest(Collection<CompactedStripe> compactedStripes,
+  public StripeMobFileCompactionRequest(Collection<CompactedStripe> compactedStripes,
     Collection<FileStatus> allDelFiles) {
     this.selectionTime = EnvironmentEdgeManager.currentTime();
     this.compactedStripes = compactedStripes;
