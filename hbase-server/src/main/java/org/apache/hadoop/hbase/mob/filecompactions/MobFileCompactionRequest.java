@@ -31,7 +31,7 @@ public abstract class MobFileCompactionRequest {
   }
 
   protected enum CompactionType {
-    
+
     /**
      * Part of mob files are selected.
      */

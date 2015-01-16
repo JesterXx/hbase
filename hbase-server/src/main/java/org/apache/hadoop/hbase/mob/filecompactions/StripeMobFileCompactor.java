@@ -144,7 +144,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
             compactedStripe.addFile(file);
           }
           ir.remove();
-        } 
+        }
       } else {
         // directory is not counted.
         ir.remove();
