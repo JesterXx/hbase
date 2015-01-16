@@ -304,7 +304,6 @@ public class StripeMobFileCompactor extends MobFileCompactor {
         }
       }
     }
-    // No cells left
     if (mobCells > 0) {
       // commit mob file
       MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
@@ -314,8 +313,8 @@ public class StripeMobFileCompactor extends MobFileCompactor {
         bulkload.doBulkLoad(bulkloadPath, table);
       } catch (Exception e) {
         // delete the committed mob file and bulkload files in bulkloadPath
-        fs.delete(new Path(mobFamilyDir, filePath.getName()), true);
-        fs.delete(bulkloadPath, true);
+        deletePath(new Path(mobFamilyDir, filePath.getName()));
+        deletePath(bulkloadPath);
         throw new IOException(e);
       }
       // archive old files
@@ -326,23 +325,11 @@ public class StripeMobFileCompactor extends MobFileCompactor {
         LOG.error("Fail to archive the files " + archivedFiles, e);
       }
     } else {
-      // remove the new file
-      try {
-        if (filePath != null) {
-          // If the mob file is empty, delete it instead of committing.
-          fs.delete(filePath, true);
-        }
-      } catch (IOException e) {
-        LOG.error("Fail to delete the temp mob file", e);
-      }
-      try {
-        if (refFilePath != null) {
-          // If the mob file is empty, delete it instead of committing.
-          fs.delete(refFilePath, true);
-        }
-      } catch (IOException e) {
-        LOG.error("Fail to delete the temp ref file", e);
-      }
+      // remove the new files
+      // the mob file is empty, delete it instead of committing.
+      deletePath(filePath);
+      // the mob file is empty, delete it instead of committing.
+      deletePath(refFilePath);
     }
     // next round
     if (!isLastBatch) {
@@ -455,5 +442,15 @@ public class StripeMobFileCompactor extends MobFileCompactor {
       }
     }
     return new Pair<Long, Long>(Long.valueOf(maxSeqId), Long.valueOf(maxKeyCount));
+  }
+
+  private void deletePath(Path path) {
+    try {
+      if (path != null) {
+        fs.delete(path, true);
+      }
+    } catch (IOException e) {
+      LOG.error("Fail to delete the file " + path, e);
+    }
   }
 }
