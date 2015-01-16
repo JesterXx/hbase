@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.mob.filecompactions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -71,6 +72,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
   private static final Log LOG = LogFactory.getLog(StripeMobFileCompactor.class);
   protected long mergeableSize;
   protected int delFileMaxCount;
+  /** The number of files compacted in a batch */
   protected int compactionBatch;
   protected int compactionKVMax;
 
@@ -86,6 +88,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_SIZE);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
       MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
+    // default is no limit
     compactionBatch = conf.getInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_COMPACTION_BATCH_SIZE);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
@@ -96,7 +99,6 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     Configuration copyOfConf = new Configuration(conf);
     copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
     compactionCacheConfig = new CacheConfig(copyOfConf);
-
     tableNameTag = new Tag(TagType.MOB_TABLE_NAME_TAG_TYPE, tableName.getName());
   }
 
@@ -105,29 +107,32 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     if (files == null || files.isEmpty()) {
       return null;
     }
+    // find the files to compact.
     StripeMobFileCompactionRequest request = select(files);
+    // compact the files.
     return performCompact(request);
   }
 
   /**
    * Selects the compacted mob/del files.
    * Iterates the candidates to find out all the del files and small mob files.
-   * @param files All the candidates.
+   * @param candidates All the candidates.
    * @return A compaction request.
    */
-  protected StripeMobFileCompactionRequest select(List<FileStatus> files) {
+  protected StripeMobFileCompactionRequest select(List<FileStatus> candidates) {
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
     Map<CompactedStripeId, CompactedStripe> filesToCompact =
       new HashMap<CompactedStripeId, CompactedStripe>();
-    Iterator<FileStatus> ir = files.iterator();
-    for (; ir.hasNext();) {
+    Iterator<FileStatus> ir = candidates.iterator();
+    while (ir.hasNext()) {
       FileStatus file = ir.next();
       if (file.isFile()) {
+        // group the del files and small files.
         if (StoreFileInfo.isDelFile(file.getPath())) {
           allDelFiles.add(file);
           ir.remove();
         } else if (file.getLen() < mergeableSize) {
-          // add it to the merge pool
+          // add the small files to the merge pool
           MobFileName fileName = MobFileName.create(file.getPath().getName());
           CompactedStripeId id = new CompactedStripeId(fileName.getStartKey(), fileName.getDate());
           CompactedStripe compactedStripe = filesToCompact.get(id);
@@ -141,12 +146,13 @@ public class StripeMobFileCompactor extends MobFileCompactor {
           ir.remove();
         } 
       } else {
+        // directory is not counted.
         ir.remove();
       }
     }
     StripeMobFileCompactionRequest request = new StripeMobFileCompactionRequest(
       filesToCompact.values(), allDelFiles);
-    if (files.isEmpty()) {
+    if (candidates.isEmpty()) {
       // all the files are selected
       request.setCompactionType(CompactionType.ALL_FILES);
     }
@@ -167,7 +173,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
   protected List<Path> performCompact(StripeMobFileCompactionRequest request) throws IOException {
     // merge the del files
     List<Path> delFilePaths = new ArrayList<Path>();
-    for (FileStatus delFile : request.allDelFiles) {
+    for (FileStatus delFile : request.delFiles) {
       delFilePaths.add(delFile.getPath());
     }
     List<Path> newDelPaths = compactDelFiles(request, delFilePaths);
@@ -200,11 +206,12 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     List<StoreFile> delFiles) throws IOException {
     Collection<CompactedStripe> stripes = request.compactedStripes;
     if (stripes == null || stripes.isEmpty()) {
-      return null;
+      return Collections.emptyList();
     }
     List<Path> paths = new ArrayList<Path>();
     HTable table = new HTable(conf, tableName);
     try {
+      // compact the mob files by stripes.
       for (CompactedStripe stripe : stripes) {
         paths.addAll(compactMobFileStripe(request, stripe, 0, delFiles, table));
       }
@@ -239,6 +246,10 @@ public class StripeMobFileCompactor extends MobFileCompactor {
       isLastBatch = true;
       batch = files.size() - offset;
     }
+    if (batch == 1 && delFiles.isEmpty()) {
+      // only one file left and no del files, do not compact it.
+      return Collections.emptyList();
+    }
     // add the selected mob files and del files into filesToCompact
     List<StoreFile> filesToCompact = new ArrayList<StoreFile>();
     for (int i = offset; i < batch + offset; i++) {
@@ -246,8 +257,10 @@ public class StripeMobFileCompactor extends MobFileCompactor {
         BloomType.NONE);
       filesToCompact.add(sf);
     }
+    // Pair(maxSeqId, cellsCount)
     Pair<Long, Long> fileInfo = getFileInfo(filesToCompact);
     filesToCompact.addAll(delFiles);
+    // open scanners to the selected mob files and del files.
     List scanners = StoreFileScanner.getScannersForStoreFiles(filesToCompact, false, true, false,
       null, HConstants.LATEST_TIMESTAMP);
     Scan scan = new Scan();
@@ -256,6 +269,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     ScanInfo scanInfo = new ScanInfo(column, ttl, 0, KeyValue.COMPARATOR);
     StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_DROP_DELETES, null,
       scanners, 0L, HConstants.LATEST_TIMESTAMP);
+    // open writers for the mob files and new ref store files.
     Writer writer = null;
     Writer refFileWriter = null;
     Path filePath = null;
@@ -267,6 +281,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
         compactionCacheConfig);
       filePath = writer.getPath();
       byte[] fileName = Bytes.toBytes(filePath.getName());
+      // create a temp file and open a write for it in the bulkloadPath
       refFileWriter = MobUtils.createRefFileWriter(conf, fs, column, bulkloadPath, fileInfo
         .getSecond().longValue(), compactionCacheConfig);
       refFilePath = refFileWriter.getPath();
@@ -340,7 +355,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
   }
 
   /**
-   * Compacts the del files in batches.
+   * Compacts the del files in batches which avoids opening too many files.
    * @param request The compaction request.
    * @param delFilePaths
    * @return
@@ -349,27 +364,31 @@ public class StripeMobFileCompactor extends MobFileCompactor {
   protected List<Path> compactDelFiles(StripeMobFileCompactionRequest request,
     List<Path> delFilePaths) throws IOException {
     if (delFilePaths.size() > delFileMaxCount) {
+      // when there are more del files than the number that is allowed, merge it firstly.
       int index = 0;
       List<StoreFile> delFiles = new ArrayList<StoreFile>();
       List<Path> paths = new ArrayList<Path>();
       for (Path delFilePath : delFilePaths) {
+        // compact the del files in batches.
         if (index < compactionBatch) {
           StoreFile delFile = new StoreFile(fs, delFilePath, conf, compactionCacheConfig,
             BloomType.NONE);
           delFiles.add(delFile);
           index++;
         } else {
-          // merge del store files.
+          // merge del store files in a batch.
           paths.add(mergeDelFiles(request, delFiles));
           delFiles.clear();
           index = 0;
         }
       }
       if (index > 0) {
-        // merge del store files.
+        // when the number of del files does not reach the compactionBatch and no more del
+        // files are left, directly merge them.
         paths.add(mergeDelFiles(request, delFiles));
         delFiles.clear();
       }
+      // check whether the number of the del files is less than delFileMaxCount.
       return compactDelFiles(request, paths);
     } else {
       return delFilePaths;
@@ -385,6 +404,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
    */
   private Path mergeDelFiles(StripeMobFileCompactionRequest request, List<StoreFile> delFiles)
     throws IOException {
+    // create a scanner for the del files.
     List scanners = StoreFileScanner.getScannersForStoreFiles(delFiles, false, true, false, null,
       HConstants.LATEST_TIMESTAMP);
     Scan scan = new Scan();

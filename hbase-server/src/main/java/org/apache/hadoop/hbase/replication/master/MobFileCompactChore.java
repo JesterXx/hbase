@@ -34,6 +34,9 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactor;
 import org.apache.hadoop.hbase.mob.filecompactions.StripeMobFileCompactor;
 
+/**
+ * The Class MobFileCompactChore for running compaction regularly to merge small mob files.
+ */
 public class MobFileCompactChore extends Chore{
 
   private static final Log LOG = LogFactory.getLog(MobFileCompactChore.class);
@@ -56,6 +59,9 @@ public class MobFileCompactChore extends Chore{
       for (HTableDescriptor htd : map.values()) {
         for (HColumnDescriptor hcd : htd.getColumnFamilies()) {
           if (hcd.isMobEnabled()) {
+            // compact only for mob-enabled column.
+            // obtain a write table lock before performing compaction to avoid race condition
+            // with major compaction in mob-enabled column.
             boolean tableLocked = false;
             TableLock lock = null;
             if (tableLockManager != null) {

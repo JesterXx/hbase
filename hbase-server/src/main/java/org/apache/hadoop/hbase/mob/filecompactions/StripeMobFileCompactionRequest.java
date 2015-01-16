@@ -28,14 +28,14 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 
 public class StripeMobFileCompactionRequest extends MobFileCompactionRequest {
 
-  protected Collection<FileStatus> allDelFiles;
+  protected Collection<FileStatus> delFiles;
   protected Collection<CompactedStripe> compactedStripes;
 
   public StripeMobFileCompactionRequest(Collection<CompactedStripe> compactedStripes,
-    Collection<FileStatus> allDelFiles) {
+    Collection<FileStatus> delFiles) {
     this.selectionTime = EnvironmentEdgeManager.currentTime();
     this.compactedStripes = compactedStripes;
-    this.allDelFiles = allDelFiles;
+    this.delFiles = delFiles;
   }
 
   protected static class CompactedStripe {
