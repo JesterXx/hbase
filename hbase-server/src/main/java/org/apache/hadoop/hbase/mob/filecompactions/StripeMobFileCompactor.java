@@ -63,6 +63,9 @@ import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 
+/**
+ *
+ */
 public class StripeMobFileCompactor extends MobFileCompactor {
 
   private static final Log LOG = LogFactory.getLog(StripeMobFileCompactor.class);
@@ -106,7 +109,13 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     return performCompact(request);
   }
 
-  public StripeMobFileCompactRequest select(List<FileStatus> files) {
+  /**
+   * Selects the compacted mob/del files.
+   * Iterates the candidates to find out all the del files and small mob files.
+   * @param files All the candidates.
+   * @return The compact request.
+   */
+  protected StripeMobFileCompactRequest select(List<FileStatus> files) {
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
     Map<CompactedStripeId, CompactedStripe> filesToCompact =
       new HashMap<CompactedStripeId, CompactedStripe>();
@@ -144,7 +153,18 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     return request;
   }
 
-  public List<Path> performCompact(StripeMobFileCompactRequest request) throws IOException {
+  /**
+   * Performs the compaction on the selected files.
+   * <ol>
+   * <li>Compacts the del files.</li>
+   * <li>Compacts the selected small mob files and all the del files.</li>
+   * <li>If all the candidates are selected, delete the del files.</li>
+   * </ol>
+   * @param request
+   * @return
+   * @throws IOException
+   */
+  protected List<Path> performCompact(StripeMobFileCompactRequest request) throws IOException {
     // merge the del files
     List<Path> delFilePaths = new ArrayList<Path>();
     for (FileStatus delFile : request.allDelFiles) {
@@ -169,7 +189,13 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     return paths;
   }
 
-  // should bulkload the new ref files.
+  /**
+   * Compacts the selected small mob files and all the del files.
+   * @param request
+   * @param delFiles
+   * @return The paths of new mob files after compactions.
+   * @throws IOException
+   */
   protected List<Path> compactMobFiles(StripeMobFileCompactRequest request,
     List<StoreFile> delFiles) throws IOException {
     Collection<CompactedStripe> stripes = request.compactedStripes;
@@ -192,6 +218,16 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     return paths;
   }
 
+  /**
+   * Compacts a stripe of selected small mob files and all the del files.
+   * @param request
+   * @param stripe
+   * @param offset
+   * @param delFiles
+   * @param table
+   * @return The paths of new mob files after compactions.
+   * @throws IOException
+   */
   private List<Path> compactMobFileStripe(StripeMobFileCompactRequest request,
     CompactedStripe stripe, int offset, List<StoreFile> delFiles, HTable table)
       throws IOException {
@@ -316,20 +352,13 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     return newFiles;
   }
 
-  private Pair<Long, Long> getFileInfo(List<StoreFile> storeFiles) throws IOException {
-    long maxSeqId = 0;
-    long maxKeyCount = 0;
-    for (StoreFile sf : storeFiles) {
-      // the readers will be closed later after the merge.
-      maxSeqId = Math.max(maxSeqId, sf.getMaxSequenceId());
-      byte[] count = sf.createReader().loadFileInfo().get(StoreFile.MOB_CELLS_COUNT);
-      if (count != null) {
-        maxKeyCount += Bytes.toLong(count);
-      }
-    }
-    return new Pair<Long, Long>(Long.valueOf(maxSeqId), Long.valueOf(maxKeyCount));
-  }
-
+  /**
+   * Compacts the del files in batches.
+   * @param request
+   * @param filePaths
+   * @return
+   * @throws IOException
+   */
   protected List<Path> compactDelFiles(StripeMobFileCompactRequest request, List<Path> filePaths)
     throws IOException {
     if (filePaths.size() > delFileMaxCount) {
@@ -340,6 +369,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
         if (index < compactionBatch) {
           StoreFile sf = new StoreFile(fs, filePath, conf, compactionCacheConfig, BloomType.NONE);
           sfs.add(sf);
+          index++;
         } else {
           // merge del store files.
           paths.add(mergeDelFiles(request, sfs));
@@ -347,12 +377,24 @@ public class StripeMobFileCompactor extends MobFileCompactor {
           index = 0;
         }
       }
+      if (index > 0) {
+        // merge del store files.
+        paths.add(mergeDelFiles(request, sfs));
+        sfs.clear();
+      }
       return compactDelFiles(request, paths);
     } else {
       return filePaths;
     }
   }
 
+  /**
+   * Merges the del file in a batch.
+   * @param request
+   * @param storeFiles
+   * @return The path of new del file after merging.
+   * @throws IOException
+   */
   private Path mergeDelFiles(StripeMobFileCompactRequest request, List<StoreFile> storeFiles)
     throws IOException {
     List scanners = StoreFileScanner.getScannersForStoreFiles(storeFiles, false, true, false, null,
@@ -399,5 +441,19 @@ public class StripeMobFileCompactor extends MobFileCompactor {
       LOG.error("Fail to archive the old del files " + storeFiles, e);
     }
     return path;
+  }
+
+  private Pair<Long, Long> getFileInfo(List<StoreFile> storeFiles) throws IOException {
+    long maxSeqId = 0;
+    long maxKeyCount = 0;
+    for (StoreFile sf : storeFiles) {
+      // the readers will be closed later after the merge.
+      maxSeqId = Math.max(maxSeqId, sf.getMaxSequenceId());
+      byte[] count = sf.createReader().loadFileInfo().get(StoreFile.MOB_CELLS_COUNT);
+      if (count != null) {
+        maxKeyCount += Bytes.toLong(count);
+      }
+    }
+    return new Pair<Long, Long>(Long.valueOf(maxSeqId), Long.valueOf(maxKeyCount));
   }
 }
