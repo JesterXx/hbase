@@ -81,7 +81,8 @@ public class MobConstants {
   public static final int DEFAULT_MOB_DELFILE_MAX_COUNT = 3;
   public static final String MOB_COMPACTION_BATCH_SIZE = "hbase.mob.compaction.batch.size";
   public static final int DEFAULT_MOB_COMPACTION_BATCH_SIZE = Integer.MAX_VALUE;
-  public static final String MOB_COMPACTION_CHORE_PERIOD = "hbase.master.mob.compaction.chore.period";
+  public static final String MOB_COMPACTION_CHORE_PERIOD =
+    "hbase.master.mob.compaction.chore.period";
   public static final int DEFAULT_MOB_COMPACTION_CHORE_PERIOD = 24 * 60 * 60 * 1000 * 7; // a week
   private MobConstants() {
 
