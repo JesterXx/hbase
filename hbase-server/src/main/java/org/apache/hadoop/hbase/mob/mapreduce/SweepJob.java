@@ -218,11 +218,14 @@ public class SweepJob {
           return 4;
         }
       } finally {
-        cleanup(job, tn, familyName);
         try {
-          lock.release();
-        } catch (IOException e) {
-          LOG.error("Fail to release the table lock " + tableName, e);
+          cleanup(job, tn, familyName);
+        } finally {
+          try {
+            lock.release();
+          } catch (IOException e) {
+            LOG.error("Fail to release the table lock " + tableName, e);
+          }
         }
       }
     } finally {
