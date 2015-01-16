@@ -51,7 +51,7 @@ public abstract class MobFileCompactor {
     this.tableName = tableName;
     this.column = column;
     mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
-    mobFamilyDir = new Path(mobTableDir, column.getNameAsString());
+    mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
   }
 
   /**
