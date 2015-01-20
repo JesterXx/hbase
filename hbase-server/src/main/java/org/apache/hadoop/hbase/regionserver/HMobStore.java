@@ -92,6 +92,7 @@ public class HMobStore extends HStore {
   private List<Path> mobDirLocations;
   private HColumnDescriptor family;
   private TableLockManager tableLockManager;
+  private TableName tableLockName;
 
   public HMobStore(final HRegion region, final HColumnDescriptor family,
       final Configuration confParam) throws IOException {
@@ -108,6 +109,7 @@ public class HMobStore extends HStore {
         .getMobRegionInfo(tn).getEncodedName(), family.getNameAsString()));
     if (region.getRegionServerServices() != null) {
       tableLockManager = region.getRegionServerServices().getTableLockManager();
+      tableLockName = MobUtils.getTableLockName(getTableName());
     }
   }
 
@@ -431,7 +433,7 @@ public class HMobStore extends HStore {
       //             run the compaction directly.
       TableLock lock = null;
       if (tableLockManager != null) {
-        lock = tableLockManager.readLock(getTableName(), "Major compaction in HMobStore");
+        lock = tableLockManager.readLock(tableLockName, "Major compaction in HMobStore");
       }
       boolean tableLocked = false;
       String tableName = getTableName().getNameAsString();

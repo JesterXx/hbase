@@ -33,6 +33,7 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.master.TableLockManager;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.DummyMobAbortable;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
@@ -81,7 +82,8 @@ public class TestMobSweepMapper {
     Configuration configuration = new Configuration(TEST_UTIL.getConfiguration());
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(configuration, "1", new DummyMobAbortable());
     TableName tn = TableName.valueOf("testSweepMapper");
-    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, tn.getNameAsString());
+    TableName lockName = MobUtils.getTableLockName(tn);
+    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, lockName.getNameAsString());
     configuration.set(SweepJob.SWEEP_JOB_ID, "1");
     configuration.set(SweepJob.SWEEP_JOB_TABLE_NODE, znode);
     ServerName serverName = SweepJob.getCurrentServerName(configuration);
@@ -89,7 +91,7 @@ public class TestMobSweepMapper {
 
     TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
         serverName);
-    TableLock lock = tableLockManager.writeLock(tn, "Run sweep tool");
+    TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
     lock.acquire();
 
     Mapper<ImmutableBytesWritable, Result, Text, KeyValue>.Context ctx =

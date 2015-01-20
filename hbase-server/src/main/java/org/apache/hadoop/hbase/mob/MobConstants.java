@@ -73,6 +73,7 @@ public class MobConstants {
 
   public final static String TEMP_DIR_NAME = ".tmp";
   public final static String BULKLOAD_DIR_NAME = ".bulkload";
+  public final static byte[] MOB_TABLE_LOCK_SUFFIX = Bytes.toBytes(".mobLock");
   public final static String EMPTY_STRING = "";
 
   public static final String MOB_COMPACTION_MERGEABLE_SIZE = "hbase.mob.compaction.mergeable.size";

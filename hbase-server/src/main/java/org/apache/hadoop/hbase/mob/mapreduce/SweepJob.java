@@ -171,7 +171,8 @@ public class SweepJob {
     try {
       ServerName serverName = getCurrentServerName(conf);
       tableLockManager = TableLockManager.createTableLockManager(conf, zkw, serverName);
-      TableLock lock = tableLockManager.writeLock(tn, "Run sweep tool");
+      TableName lockName = MobUtils.getTableLockName(tn);
+      TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
       String tableName = tn.getNameAsString();
       // Try to obtain the lock. Use this lock to synchronize all the query
       try {
@@ -196,7 +197,7 @@ public class SweepJob {
             JavaSerialization.class.getName() + "," + WritableSerialization.class.getName());
         conf.set(SWEEP_JOB_ID, id);
         conf.set(SWEEP_JOB_SERVERNAME, serverName.toString());
-        String tableLockNode = ZKUtil.joinZNode(zkw.tableLockZNode, tableName);
+        String tableLockNode = ZKUtil.joinZNode(zkw.tableLockZNode, lockName.getNameAsString());
         conf.set(SWEEP_JOB_TABLE_NODE, tableLockNode);
         job = prepareJob(tn, familyName, scan, conf);
         job.getConfiguration().set(TableInputFormat.SCAN_COLUMN_FAMILY, familyName);
