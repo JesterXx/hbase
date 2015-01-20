@@ -32,6 +32,7 @@ import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.TableLockManager;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
+import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactor;
 import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactor;
 
@@ -67,7 +68,8 @@ public class MobFileCompactChore extends Chore{
             boolean tableLocked = false;
             TableLock lock = null;
             if (tableLockManager != null) {
-              lock = tableLockManager.writeLock(htd.getTableName(), "Run MobFileCompactChore");
+              lock = tableLockManager.writeLock(MobUtils.getTableLockName(htd.getTableName()),
+                "Run MobFileCompactChore");
             }
             try {
               if (lock != null) {
