@@ -33,6 +33,7 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.master.TableLockManager;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.DummyMobAbortable;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
@@ -89,7 +90,7 @@ public class TestMobSweepMapper {
 
     TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
         serverName);
-    TableLock lock = tableLockManager.writeLock(tn, "Run sweep tool");
+    TableLock lock = tableLockManager.writeLock(MobUtils.getTableLockName(tn), "Run sweep tool");
     lock.acquire();
 
     Mapper<ImmutableBytesWritable, Result, Text, KeyValue>.Context ctx =

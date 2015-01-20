@@ -173,7 +173,7 @@ public class TestMobSweepReducer {
 
     TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
         serverName);
-    TableLock lock = tableLockManager.writeLock(tn, "Run sweep tool");
+    TableLock lock = tableLockManager.writeLock(MobUtils.getTableLockName(tn), "Run sweep tool");
     lock.acquire();
 
     //use the same counter when mocking
