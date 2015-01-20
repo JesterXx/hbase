@@ -165,7 +165,8 @@ public class TestMobSweepReducer {
         System.currentTimeMillis() + 24 * 3600 * 1000);
 
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(configuration, "1", new DummyMobAbortable());
-    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, tn.getNameAsString());
+    TableName lockName = MobUtils.getTableLockName(tn);
+    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, lockName.getNameAsString());
     configuration.set(SweepJob.SWEEP_JOB_ID, "1");
     configuration.set(SweepJob.SWEEP_JOB_TABLE_NODE, znode);
     ServerName serverName = SweepJob.getCurrentServerName(configuration);
@@ -173,7 +174,7 @@ public class TestMobSweepReducer {
 
     TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
         serverName);
-    TableLock lock = tableLockManager.writeLock(MobUtils.getTableLockName(tn), "Run sweep tool");
+    TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
     lock.acquire();
 
     //use the same counter when mocking
