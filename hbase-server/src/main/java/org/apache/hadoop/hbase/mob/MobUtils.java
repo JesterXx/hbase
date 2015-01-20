@@ -547,6 +547,6 @@ public class MobUtils {
    */
   public static TableName getTableLockName(TableName tn) {
     byte[] tableName = tn.getName();
-    return TableName.valueOf(Bytes.add(tableName, MobConstants.TABLE_LOCK_SUFFIX));
+    return TableName.valueOf(Bytes.add(tableName, MobConstants.MOB_TABLE_LOCK_SUFFIX));
   }
 }
