@@ -24,7 +24,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -123,14 +122,12 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
     Map<CompactedStripeId, CompactedStripe> filesToCompact =
       new HashMap<CompactedStripeId, CompactedStripe>();
-    Iterator<FileStatus> ir = candidates.iterator();
-    while (ir.hasNext()) {
-      FileStatus file = ir.next();
+    int smallFilesCount = 0;
+    for (FileStatus file : candidates) {
       if (file.isFile()) {
         // group the del files and small files.
         if (StoreFileInfo.isDelFile(file.getPath())) {
           allDelFiles.add(file);
-          ir.remove();
         } else if (file.getLen() < mergeableSize) {
           // add the small files to the merge pool
           MobFileName fileName = MobFileName.create(file.getPath().getName());
@@ -143,16 +140,13 @@ public class StripeMobFileCompactor extends MobFileCompactor {
           } else {
             compactedStripe.addFile(file);
           }
-          ir.remove();
+          smallFilesCount++;
         }
-      } else {
-        // directory is not counted.
-        ir.remove();
       }
     }
     StripeMobFileCompactionRequest request = new StripeMobFileCompactionRequest(
       filesToCompact.values(), allDelFiles);
-    if (candidates.isEmpty()) {
+    if (candidates.size() == (allDelFiles.size() + smallFilesCount)) {
       // all the files are selected
       request.setCompactionType(CompactionType.ALL_FILES);
     }
@@ -253,7 +247,7 @@ public class StripeMobFileCompactor extends MobFileCompactor {
     // add the selected mob files and del files into filesToCompact
     List<StoreFile> filesToCompact = new ArrayList<StoreFile>();
     for (int i = offset; i < batch + offset; i++) {
-      StoreFile sf = new StoreFile(fs, files.get(offset).getPath(), conf, compactionCacheConfig,
+      StoreFile sf = new StoreFile(fs, files.get(i).getPath(), conf, compactionCacheConfig,
         BloomType.NONE);
       filesToCompact.add(sf);
     }

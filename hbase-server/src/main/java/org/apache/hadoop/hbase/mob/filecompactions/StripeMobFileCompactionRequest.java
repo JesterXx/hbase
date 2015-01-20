@@ -100,12 +100,12 @@ public class StripeMobFileCompactionRequest extends MobFileCompactionRequest {
       CompactedStripeId another = (CompactedStripeId) obj;
       if (this.startKey != null && !this.startKey.equals(another.startKey)) {
         return false;
-      } else if (another.startKey != null) {
+      } else if (this.startKey == null && another.startKey != null) {
         return false;
       }
       if (this.date != null && !this.date.equals(another.date)) {
         return false;
-      } else if (another.date != null) {
+      } else if (this.date == null && another.date != null) {
         return false;
       }
       return true;
