@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 
@@ -30,6 +31,7 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
  * An implementation of {@link MobFileCompactionRequest} that is used in
  * {@link PartitionMobFileCompactor}.
  */
+@InterfaceAudience.Private
 public class PartitionMobFileCompactionRequest extends MobFileCompactionRequest {
 
   protected Collection<FileStatus> delFiles;
@@ -42,6 +44,11 @@ public class PartitionMobFileCompactionRequest extends MobFileCompactionRequest 
     this.delFiles = delFiles;
   }
 
+  /**
+   * The partition in the mob file compaction.
+   * The mob files that have the same start key and date in their names belong to
+   * the same partition.
+   */
   protected static class CompactedPartition {
     private List<FileStatus> files = new ArrayList<FileStatus>();
     private CompactedPartitionId partitionId;
@@ -63,12 +70,18 @@ public class PartitionMobFileCompactionRequest extends MobFileCompactionRequest 
     }
   }
 
+  /**
+   * The partition id this consists of start key and date of the mob file name. 
+   */
   protected static class CompactedPartitionId {
 
     private String startKey;
     private String date;
 
     public CompactedPartitionId(String startKey, String date) {
+      if (startKey == null || date == null) {
+        throw new IllegalArgumentException("Neither of start key and date could be null");
+      }
       this.startKey = startKey;
       this.date = date;
     }
@@ -84,12 +97,8 @@ public class PartitionMobFileCompactionRequest extends MobFileCompactionRequest 
     @Override
     public int hashCode() {
       int result = 17;
-      if (this.startKey != null) {
-        result = 31 * result + startKey.hashCode();
-      }
-      if (this.date != null) {
-        result = 31 * result + date.hashCode();
-      }
+      result = 31 * result + startKey.hashCode();
+      result = 31 * result + date.hashCode();
       return result;
     }
 
@@ -102,14 +111,10 @@ public class PartitionMobFileCompactionRequest extends MobFileCompactionRequest 
         return false;
       }
       CompactedPartitionId another = (CompactedPartitionId) obj;
-      if (this.startKey != null && !this.startKey.equals(another.startKey)) {
-        return false;
-      } else if (this.startKey == null && another.startKey != null) {
+      if (!this.startKey.equals(another.startKey)) {
         return false;
       }
-      if (this.date != null && !this.date.equals(another.date)) {
-        return false;
-      } else if (this.date == null && another.date != null) {
+      if (!this.date.equals(another.date)) {
         return false;
       }
       return true;

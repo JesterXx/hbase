@@ -18,9 +18,12 @@
  */
 package org.apache.hadoop.hbase.mob.filecompactions;
 
+import org.apache.hadoop.classification.InterfaceAudience;
+
 /**
  * The compaction request for mob files.
  */
+@InterfaceAudience.Private
 public abstract class MobFileCompactionRequest {
 
   protected long selectionTime;

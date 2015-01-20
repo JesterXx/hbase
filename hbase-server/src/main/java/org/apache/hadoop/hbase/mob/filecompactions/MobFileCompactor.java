@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -32,8 +33,9 @@ import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.util.FSUtils;
 
 /**
- * A mob file compactor to directly compacts the mob files.
+ * A mob file compactor to directly compact the mob files.
  */
+@InterfaceAudience.Private
 public abstract class MobFileCompactor {
 
   protected FileSystem fs;

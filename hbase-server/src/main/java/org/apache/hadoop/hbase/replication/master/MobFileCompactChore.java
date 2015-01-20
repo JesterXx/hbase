@@ -23,6 +23,7 @@ import java.util.Map;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.Chore;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -37,6 +38,7 @@ import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactor;
 /**
  * The Class MobFileCompactChore for running compaction regularly to merge small mob files.
  */
+@InterfaceAudience.Private
 public class MobFileCompactChore extends Chore{
 
   private static final Log LOG = LogFactory.getLog(MobFileCompactChore.class);
