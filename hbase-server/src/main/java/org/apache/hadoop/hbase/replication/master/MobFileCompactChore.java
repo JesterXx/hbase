@@ -32,7 +32,7 @@ import org.apache.hadoop.hbase.master.TableLockManager;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactor;
-import org.apache.hadoop.hbase.mob.filecompactions.StripeMobFileCompactor;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactor;
 
 /**
  * The Class MobFileCompactChore for running compaction regularly to merge small mob files.
@@ -74,7 +74,7 @@ public class MobFileCompactChore extends Chore{
               } else {
                 tableLocked = true;
               }
-              MobFileCompactor compactor = new StripeMobFileCompactor(master.getConfiguration(),
+              MobFileCompactor compactor = new PartitionMobFileCompactor(master.getConfiguration(),
                 master.getFileSystem(), htd.getTableName(), hcd);
               compactor.compact();
             } catch (Exception e) {

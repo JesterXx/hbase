@@ -26,28 +26,32 @@ import java.util.List;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 
-public class StripeMobFileCompactionRequest extends MobFileCompactionRequest {
+/**
+ * An implementation of {@link MobFileCompactionRequest} that is used in
+ * {@link PartitionMobFileCompactor}.
+ */
+public class PartitionMobFileCompactionRequest extends MobFileCompactionRequest {
 
   protected Collection<FileStatus> delFiles;
-  protected Collection<CompactedStripe> compactedStripes;
+  protected Collection<CompactedPartition> compactedPartitions;
 
-  public StripeMobFileCompactionRequest(Collection<CompactedStripe> compactedStripes,
+  public PartitionMobFileCompactionRequest(Collection<CompactedPartition> compactedPartitions,
     Collection<FileStatus> delFiles) {
     this.selectionTime = EnvironmentEdgeManager.currentTime();
-    this.compactedStripes = compactedStripes;
+    this.compactedPartitions = compactedPartitions;
     this.delFiles = delFiles;
   }
 
-  protected static class CompactedStripe {
+  protected static class CompactedPartition {
     private List<FileStatus> files = new ArrayList<FileStatus>();
-    private CompactedStripeId stripeId;
+    private CompactedPartitionId partitionId;
 
-    public CompactedStripe(CompactedStripeId stripeId) {
-      this.stripeId = stripeId;
+    public CompactedPartition(CompactedPartitionId partitionId) {
+      this.partitionId = partitionId;
     }
 
-    public CompactedStripeId getStripeId() {
-      return this.stripeId;
+    public CompactedPartitionId getPartitionId() {
+      return this.partitionId;
     }
 
     public void addFile(FileStatus file) {
@@ -59,12 +63,12 @@ public class StripeMobFileCompactionRequest extends MobFileCompactionRequest {
     }
   }
 
-  protected static class CompactedStripeId {
+  protected static class CompactedPartitionId {
 
     private String startKey;
     private String date;
 
-    public CompactedStripeId(String startKey, String date) {
+    public CompactedPartitionId(String startKey, String date) {
       this.startKey = startKey;
       this.date = date;
     }
@@ -94,10 +98,10 @@ public class StripeMobFileCompactionRequest extends MobFileCompactionRequest {
       if (this == obj) {
         return true;
       }
-      if (!(obj instanceof CompactedStripeId)) {
+      if (!(obj instanceof CompactedPartitionId)) {
         return false;
       }
-      CompactedStripeId another = (CompactedStripeId) obj;
+      CompactedPartitionId another = (CompactedPartitionId) obj;
       if (this.startKey != null && !this.startKey.equals(another.startKey)) {
         return false;
       } else if (this.startKey == null && another.startKey != null) {
