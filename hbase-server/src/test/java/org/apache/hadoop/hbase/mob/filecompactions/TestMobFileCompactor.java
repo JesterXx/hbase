@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.mob.filecompactions;
 import static org.junit.Assert.assertEquals;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
@@ -61,7 +62,8 @@ public class TestMobFileCompactor {
   static final Log LOG = LogFactory.getLog(TestMobCompaction.class.getName());
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private Configuration conf = null;
-  private String tableName;
+  private String tableNameAsString;
+  private TableName tableName;
   private static HTable hTable;
   private static Admin admin;
   private static HTableDescriptor desc;
@@ -88,8 +90,9 @@ public class TestMobFileCompactor {
     fs = TEST_UTIL.getTestFileSystem();
     conf = TEST_UTIL.getConfiguration();
     long tid = System.currentTimeMillis();
-    tableName = "testMob" + tid;
-    desc = new HTableDescriptor(TableName.valueOf(tableName));
+    tableNameAsString = "testMob" + tid;
+    tableName = TableName.valueOf(tableNameAsString);
+    desc = new HTableDescriptor(tableName);
     hcd = new HColumnDescriptor(family);
     hcd.setMobEnabled(true);
     hcd.setMobThreshold(0L);
@@ -97,14 +100,14 @@ public class TestMobFileCompactor {
     desc.addFamily(hcd);
     admin = TEST_UTIL.getHBaseAdmin();
     admin.createTable(desc);
-    hTable = new HTable(conf, tableName);
+    hTable = new HTable(conf, tableNameAsString);
     hTable.setAutoFlush(false, false);
   }
 
   @After
   public void tearDown() throws Exception {
-    admin.disableTable(TableName.valueOf(tableName));
-    admin.deleteTable(TableName.valueOf(tableName));
+    admin.disableTable(tableName);
+    admin.deleteTable(tableName);
     admin.close();
     fs.delete(TEST_UTIL.getDataTestDir(), true);
   }
@@ -113,13 +116,14 @@ public class TestMobFileCompactor {
   public void testCompactionWithoutDelFiles() throws Exception {
     int count = 10;
     //create table and generate 10 mob files
-    generateMobTable(count, 1);
+    createMobTableAndAddData(count, 1);
 
     assertEquals("Before compaction: mob rows", count, countMobRows(hTable));
     assertEquals("Before compaction: mob file count", count, countMobFiles());
     assertEquals("Before compaction: del file count", 0, countDelFiles());
 
-    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    MobFileCompactor compactor =
+      new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count, countMobRows(hTable));
@@ -131,7 +135,7 @@ public class TestMobFileCompactor {
   public void testCompactionWithDelFiles() throws Exception {
     int count = 8;
     //create table and generate 8 mob files
-    generateMobTable(count, 1);
+    createMobTableAndAddData(count, 1);
 
     //get mob files
     assertEquals("Before compaction: mob file count", count, countMobFiles());
@@ -142,9 +146,9 @@ public class TestMobFileCompactor {
     delete.deleteFamily(Bytes.toBytes(family));
     hTable.delete(delete);
     hTable.flushCommits();
-    admin.flush(TableName.valueOf(tableName));
+    admin.flush(tableName);
 
-    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(Bytes.toBytes(tableName));
+    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(Bytes.toBytes(tableNameAsString));
     for(HRegion region : regions) {
       region.waitForFlushesAndCompactions();
       region.compactStores(true);
@@ -155,7 +159,8 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: del file count", 1, countDelFiles());
 
     // do the mob file compaction
-    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    MobFileCompactor compactor =
+      new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count-1, countMobRows(hTable));
@@ -171,7 +176,7 @@ public class TestMobFileCompactor {
 
     int count = 8;
     // create table and generate 8 mob files
-    generateMobTable(count, 1);
+    createMobTableAndAddData(count, 1);
 
     // get mob files
     assertEquals("Before compaction: mob file count", count, countMobFiles());
@@ -184,9 +189,9 @@ public class TestMobFileCompactor {
     delete.deleteFamily(Bytes.toBytes(family));
     hTable.delete(delete);
     hTable.flushCommits();
-    admin.flush(TableName.valueOf(tableName));
+    admin.flush(tableName);
 
-    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(Bytes.toBytes(tableName));
+    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(Bytes.toBytes(tableNameAsString));
     for(HRegion region : regions) {
       region.waitForFlushesAndCompactions();
       region.compactStores(true);
@@ -196,11 +201,13 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: del file count", 1, countDelFiles());
 
     // do the mob file compaction
-    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    MobFileCompactor compactor =
+      new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count-1, countMobRows(hTable));
-    // After the compaction, the files smaller than the mob compaction merge size is merge to one file
+    // After the compaction, the files smaller than the mob compaction merge size
+    // is merge to one file
     assertEquals("After compaction: mob file count", largeFilesCount + 1, countMobFiles());
     assertEquals("After compaction: del file count", 1, countDelFiles());
 
@@ -210,8 +217,7 @@ public class TestMobFileCompactor {
   }
 
   /**
-   * count the number of rows in the given table.
-   * @param table
+   * Gets the number of rows in the given table.
    * @return the number of rows
    */
   private int countMobRows(final HTable table) throws IOException {
@@ -228,12 +234,12 @@ public class TestMobFileCompactor {
   }
 
   /**
-   * count the number of mob files in the mob path.
+   * Gets the number of mob files in the mob path.
    * @return the number of the mob files
    */
   private int countMobFiles() throws IOException {
     Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
-        TableName.valueOf(tableName)), family);
+      tableName), family);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
@@ -247,12 +253,12 @@ public class TestMobFileCompactor {
   }
 
   /**
-   * count the number of del files in the mob path.
+   * Gets the number of del files in the mob path.
    * @return the number of the del files
    */
   private int countDelFiles() throws IOException {
     Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
-        TableName.valueOf(tableName)), family);
+      tableName), family);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
@@ -266,13 +272,13 @@ public class TestMobFileCompactor {
   }
 
   /**
-   * count the number of files.
+   * Gets the number of files.
    * @param size the size of the file
    * @return the number of files large than the size
    */
   private int countLargeFiles(int size) throws IOException {
     Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(
-        TEST_UTIL.getConfiguration(), TableName.valueOf(tableName)), family);
+        TEST_UTIL.getConfiguration(), tableName), family);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
@@ -287,14 +293,15 @@ public class TestMobFileCompactor {
   }
 
   /**
-   * generate the mob table and insert some data in the table.
+   * Creates a mob table and inserts some data in the table.
    * @param count the mob file number
-   * @param flushStep the number of flush step
+   * @param cellsPerFlush the number of cells per flush
    */
-  private void generateMobTable(int count, int flushStep)
+  private void createMobTableAndAddData(int count, int cellsPerFlush)
       throws IOException, InterruptedException {
-    if (count <= 0 || flushStep <= 0)
-      return;
+    if (count <= 0 || cellsPerFlush <= 0) {
+      throw new IllegalArgumentException();
+    }
     int index = 0;
     for (int i = 0; i < count; i++) {
       byte[] mobVal = makeDummyData(100*(i+1));
@@ -302,15 +309,16 @@ public class TestMobFileCompactor {
       put.setDurability(Durability.SKIP_WAL);
       put.add(Bytes.toBytes(family), Bytes.toBytes(column), mobVal);
       hTable.put(put);
-      if (index++ % flushStep == 0) {
+      if (++index == cellsPerFlush) {
         hTable.flushCommits();
-        admin.flush(TableName.valueOf(tableName));
+        admin.flush(tableName);
+        index = 0;
       }
     }
   }
 
   /**
-   * make the dummy data with the size.
+   * Creates the dummy data with a specific size.
    * @param the size of data
    * @return the dummy data
    */

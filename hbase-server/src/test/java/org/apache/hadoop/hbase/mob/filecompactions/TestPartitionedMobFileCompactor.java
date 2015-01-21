@@ -187,7 +187,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * test the selectFiles
+   * Tests the selectFiles
    * @param tableName the table name
    * @param type the expected compaction type
    * @param expected the expected start keys
@@ -215,7 +215,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * test the compacteDelFile
+   * Tests the compacteDelFile
    * @param tableName the table name
    * @param expectedFileCount the expected file count
    * @param expectedCellCount the expected cell count
@@ -243,7 +243,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * list the files in the path
+   * Lists the files in the path
    */
   private void listFiles() throws IOException {
     for (FileStatus file : fs.listStatus(basePath)) {
@@ -257,7 +257,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * compare the compacted partitions.
+   * Compares the compacted partitions.
    * @param partitions the collection of CompactedPartitions
    */
   private void compareCompactedPartitions(List<String> expected,
@@ -275,7 +275,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * compare the del files.
+   * Compares the del files.
    * @param allDelFiles all the del files
    */
   private void compareDelFiles(Collection<FileStatus> allDelFiles) {
@@ -287,7 +287,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * create store file
+   * Creates store files.
    * @param basePath the path to create file
    * @family the family name
    * @qualifier the column qualifier
@@ -317,7 +317,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * write data to store file
+   * Writes data to store file.
    * @param writer the store file writer
    * @param row the row key
    * @param family the family name
@@ -338,7 +338,7 @@ public class TestPartitionedMobFileCompactor {
   }
 
   /**
-   * count the number of del cell in the del files
+   * Gets the number of del cell in the del files
    * @param paths the del file paths
    * @return the cell size
    */
