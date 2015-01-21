@@ -143,11 +143,11 @@ public class TestPartitionedMobFileCompactor {
       }
     }
     // set the mob file compaction mergeable threshold
-    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
+    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
 
     testSelectFiles(tableName, CompactionType.PART_FILES, expectedStartKeys);
 
-    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD,
+    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
         MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
   }
 

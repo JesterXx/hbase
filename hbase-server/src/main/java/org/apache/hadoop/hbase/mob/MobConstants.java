@@ -79,7 +79,7 @@ public class MobConstants {
    * If the size of a mob file is less than this value, it's regarded as a small file and needs to
    * be merged in mob file compaction. The default value is 128MB.
    */
-  public static final String MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD =
+  public static final String MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD =
     "hbase.mob.file.compaction.mergeable.threshold";
   public static final long DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD = 128 * 1024 * 1024;
   /**

@@ -167,7 +167,7 @@ public class TestMobFileCompactor {
   public void testCompactionWithDelFilesAndNotMergeAllFiles() throws Exception {
     int mergeSize = 5000;
     // change the mob compaction merge size
-    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
+    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
 
     int count = 8;
     // create table and generate 8 mob files
@@ -205,7 +205,7 @@ public class TestMobFileCompactor {
     assertEquals("After compaction: del file count", 1, countDelFiles());
 
     // reset the conf the the default
-    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD,
+    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
         MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
   }
 

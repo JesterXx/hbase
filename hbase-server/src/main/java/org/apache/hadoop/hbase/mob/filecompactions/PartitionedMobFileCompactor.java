@@ -86,7 +86,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
   public PartitionedMobFileCompactor(Configuration conf, FileSystem fs, TableName tableName,
     HColumnDescriptor column) {
     super(conf, fs, tableName, column);
-    mergeableSize = conf.getLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD,
+    mergeableSize = conf.getLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
       MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
