@@ -1548,7 +1548,7 @@ possible configurations would overwhelm and obscure the important.
   </property>
   <property>
     <name>hbase.master.mob.file.compaction.chore.period</name>
-    <value>86400000</value>
+    <value>604800000</value>
     <description>
       The period that MobFileCompactionChore runs. The unit is millisecond.
       The default value is one week.
