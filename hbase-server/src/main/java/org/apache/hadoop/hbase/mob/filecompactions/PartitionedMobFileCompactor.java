@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -362,30 +363,41 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     if (delFilePaths.size() > delFileMaxCount) {
       // when there are more del files than the number that is allowed, merge it firstly.
       int index = 0;
-      List<StoreFile> delFiles = new ArrayList<StoreFile>();
+      List<StoreFile> batchedDelFiles = new ArrayList<StoreFile>();
       List<Path> paths = new ArrayList<Path>();
-      for (Path delFilePath : delFilePaths) {
+      Iterator<Path> pathIterator = delFilePaths.iterator();
+      boolean hasNext = pathIterator.hasNext();
+      while (hasNext) {
         // compact the del files in batches.
         if (index < compactionBatch) {
-          StoreFile delFile = new StoreFile(fs, delFilePath, conf, compactionCacheConfig,
+          StoreFile delFile = new StoreFile(fs, pathIterator.next(), conf, compactionCacheConfig,
             BloomType.NONE);
-          delFiles.add(delFile);
+          batchedDelFiles.add(delFile);
           index++;
         } else {
           // merge del store files in a batch.
-          paths.add(mergeDelFiles(request, delFiles));
-          delFiles.clear();
+          paths.add(mergeDelFiles(request, batchedDelFiles));
+          batchedDelFiles.clear();
           index = 0;
         }
+        hasNext = pathIterator.hasNext();
+        if (!hasNext) {
+          if (index > 0) {
+            // when the number of del files does not reach the compactionBatch and no more del
+            // files are left, directly merge them.
+            paths.add(mergeDelFiles(request, batchedDelFiles));
+            batchedDelFiles.clear();
+          }
+          // check whether the number of the remaining del files is not larger than the max count.
+          if (paths.size() > delFileMaxCount) {
+            // continue next round of merging.
+            pathIterator = paths.iterator();
+            hasNext = true;
+            paths = new ArrayList<>();
+          }
+        }
       }
-      if (index > 0) {
-        // when the number of del files does not reach the compactionBatch and no more del
-        // files are left, directly merge them.
-        paths.add(mergeDelFiles(request, delFiles));
-        delFiles.clear();
-      }
-      // check whether the number of the del files is less than delFileMaxCount.
-      return compactDelFiles(request, paths);
+      return paths;
     } else {
       return delFilePaths;
     }
