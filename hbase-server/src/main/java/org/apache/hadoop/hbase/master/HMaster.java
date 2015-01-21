@@ -105,7 +105,6 @@ import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.SplitLogTask.R
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.RSRpcServices;
 import org.apache.hadoop.hbase.regionserver.RegionSplitPolicy;
-import org.apache.hadoop.hbase.replication.master.MobFileCompactChore;
 import org.apache.hadoop.hbase.replication.regionserver.Replication;
 import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -210,7 +209,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   private LogCleaner logCleaner;
   private HFileCleaner hfileCleaner;
   private ExpiredMobFileCleanerChore expiredMobFileCleanerChore;
-  private MobFileCompactChore mobFileCompactChore;
+  private MobFileCompactionChore mobFileCompactChore;
 
   MasterCoprocessorHost cpHost;
 
@@ -615,7 +614,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
 
     this.expiredMobFileCleanerChore = new ExpiredMobFileCleanerChore(this);
     Threads.setDaemonThreadRunning(expiredMobFileCleanerChore.getThread());
-    this.mobFileCompactChore = new MobFileCompactChore(this);
+    this.mobFileCompactChore = new MobFileCompactionChore(this);
     Threads.setDaemonThreadRunning(mobFileCompactChore.getThread());
 
     if (this.cpHost != null) {

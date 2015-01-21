@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.replication.master;
+package org.apache.hadoop.hbase.master;
 
 import java.io.IOException;
 import java.util.Map;
@@ -28,28 +28,26 @@ import org.apache.hadoop.hbase.Chore;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableDescriptors;
-import org.apache.hadoop.hbase.master.HMaster;
-import org.apache.hadoop.hbase.master.TableLockManager;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactor;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactor;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactor;
 
 /**
  * The Class MobFileCompactChore for running compaction regularly to merge small mob files.
  */
 @InterfaceAudience.Private
-public class MobFileCompactChore extends Chore{
+public class MobFileCompactionChore extends Chore{
 
-  private static final Log LOG = LogFactory.getLog(MobFileCompactChore.class);
+  private static final Log LOG = LogFactory.getLog(MobFileCompactionChore.class);
   private HMaster master;
   private TableLockManager tableLockManager;
 
-  public MobFileCompactChore(HMaster master) {
+  public MobFileCompactionChore(HMaster master) {
     super(master.getServerName() + "-MobFileCompactChore", master.getConfiguration().getInt(
-      MobConstants.MOB_COMPACTION_CHORE_PERIOD, MobConstants.DEFAULT_MOB_COMPACTION_CHORE_PERIOD),
-      master);
+      MobConstants.MOB_FILE_COMPACTION_CHORE_PERIOD,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_CHORE_PERIOD), master);
     this.master = master;
     this.tableLockManager = master.getTableLockManager();
   }
@@ -78,7 +76,7 @@ public class MobFileCompactChore extends Chore{
               } else {
                 tableLocked = true;
               }
-              MobFileCompactor compactor = new PartitionMobFileCompactor(master.getConfiguration(),
+              MobFileCompactor compactor = new PartitionedMobFileCompactor(master.getConfiguration(),
                 master.getFileSystem(), htd.getTableName(), hcd);
               compactor.compact();
             } catch (Exception e) {

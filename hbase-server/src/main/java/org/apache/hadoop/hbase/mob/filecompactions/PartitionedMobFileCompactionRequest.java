@@ -29,15 +29,15 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 
 /**
  * An implementation of {@link MobFileCompactionRequest} that is used in
- * {@link PartitionMobFileCompactor}.
+ * {@link PartitionedMobFileCompactor}.
  */
 @InterfaceAudience.Private
-public class PartitionMobFileCompactionRequest extends MobFileCompactionRequest {
+public class PartitionedMobFileCompactionRequest extends MobFileCompactionRequest {
 
   protected Collection<FileStatus> delFiles;
   protected Collection<CompactedPartition> compactedPartitions;
 
-  public PartitionMobFileCompactionRequest(Collection<CompactedPartition> compactedPartitions,
+  public PartitionedMobFileCompactionRequest(Collection<CompactedPartition> compactedPartitions,
     Collection<FileStatus> delFiles) {
     this.selectionTime = EnvironmentEdgeManager.currentTime();
     this.compactedPartitions = compactedPartitions;

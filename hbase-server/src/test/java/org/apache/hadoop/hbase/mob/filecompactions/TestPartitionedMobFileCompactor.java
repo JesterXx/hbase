@@ -43,7 +43,7 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactionRequest.CompactionType;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactionRequest.CompactedPartition;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartition;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -54,7 +54,7 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 @Category(LargeTests.class)
-public class TestPartitionMobFileCompactor {
+public class TestPartitionedMobFileCompactor {
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private final static String family = "family";
   private final static String qf = "qf";
@@ -124,14 +124,14 @@ public class TestPartitionMobFileCompactor {
   public void testCompactionSelect() throws Exception {
     String tableName = "testCompactionSelect";
     init(tableName);
-    PartitionMobFileCompactor compactor = new PartitionMobFileCompactor(conf, fs,
+    PartitionedMobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs,
         TableName.valueOf(tableName), hcd) {
       @Override
       public List<Path> compact(List<FileStatus> files) throws IOException {
         if (files == null || files.isEmpty()) {
           return null;
         }
-        PartitionMobFileCompactionRequest request = select(files);
+        PartitionedMobFileCompactionRequest request = select(files);
         // assert the compaction type is all files
          Assert.assertTrue((request.type).equals(CompactionType.ALL_FILES));
         // assert get the right partitions
@@ -150,10 +150,10 @@ public class TestPartitionMobFileCompactor {
     init(tableName);
     // set the max del file count
     TEST_UTIL.getConfiguration().setInt(MobConstants.MOB_DELFILE_MAX_COUNT, 1);
-    PartitionMobFileCompactor compactor = new PartitionMobFileCompactor(conf, fs,
+    PartitionedMobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs,
         TableName.valueOf(tableName), hcd) {
       @Override
-      protected List<Path> performCompact(PartitionMobFileCompactionRequest request)
+      protected List<Path> performCompact(PartitionedMobFileCompactionRequest request)
           throws IOException {
         List<Path> delFilePaths = new ArrayList<Path>();
         for (FileStatus delFile : request.delFiles) {

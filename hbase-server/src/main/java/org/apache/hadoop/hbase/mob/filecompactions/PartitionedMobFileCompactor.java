@@ -50,8 +50,8 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactionRequest.CompactionType;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactionRequest.CompactedPartition;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactionRequest.CompactedPartitionId;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartition;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartitionId;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
 import org.apache.hadoop.hbase.regionserver.ScanInfo;
@@ -68,9 +68,9 @@ import org.apache.hadoop.hbase.util.Pair;
  * An implementation of {@link MobFileCompactor} that compacts the mob files in partitions.
  */
 @InterfaceAudience.Private
-public class PartitionMobFileCompactor extends MobFileCompactor {
+public class PartitionedMobFileCompactor extends MobFileCompactor {
 
-  private static final Log LOG = LogFactory.getLog(PartitionMobFileCompactor.class);
+  private static final Log LOG = LogFactory.getLog(PartitionedMobFileCompactor.class);
   protected long mergeableSize;
   protected int delFileMaxCount;
   /** The number of files compacted in a batch */
@@ -82,16 +82,16 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
   private CacheConfig compactionCacheConfig;
   private Tag tableNameTag;
 
-  public PartitionMobFileCompactor(Configuration conf, FileSystem fs, TableName tableName,
+  public PartitionedMobFileCompactor(Configuration conf, FileSystem fs, TableName tableName,
     HColumnDescriptor column) {
     super(conf, fs, tableName, column);
-    mergeableSize = conf.getLong(MobConstants.MOB_COMPACTION_MERGEABLE_SIZE,
-      MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_SIZE);
+    mergeableSize = conf.getLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
       MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
     // default is no limit
-    compactionBatch = conf.getInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
-      MobConstants.DEFAULT_MOB_COMPACTION_BATCH_SIZE);
+    compactionBatch = conf.getInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
     bulkloadPath = new Path(tempPath, new Path(MobConstants.BULKLOAD_DIR_NAME,
       column.getNameAsString()));
@@ -109,7 +109,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
       return null;
     }
     // find the files to compact.
-    PartitionMobFileCompactionRequest request = select(files);
+    PartitionedMobFileCompactionRequest request = select(files);
     // compact the files.
     return performCompact(request);
   }
@@ -120,7 +120,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
    * @param candidates All the candidates.
    * @return A compaction request.
    */
-  protected PartitionMobFileCompactionRequest select(List<FileStatus> candidates) {
+  protected PartitionedMobFileCompactionRequest select(List<FileStatus> candidates) {
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
     Map<CompactedPartitionId, CompactedPartition> filesToCompact =
       new HashMap<CompactedPartitionId, CompactedPartition>();
@@ -146,7 +146,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
         }
       }
     }
-    PartitionMobFileCompactionRequest request = new PartitionMobFileCompactionRequest(
+    PartitionedMobFileCompactionRequest request = new PartitionedMobFileCompactionRequest(
       filesToCompact.values(), allDelFiles);
     if (candidates.size() == (allDelFiles.size() + smallFilesCount)) {
       // all the files are selected
@@ -166,7 +166,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
    * @return The paths of new mob files generated in the compaction.
    * @throws IOException
    */
-  protected List<Path> performCompact(PartitionMobFileCompactionRequest request) throws IOException {
+  protected List<Path> performCompact(PartitionedMobFileCompactionRequest request) throws IOException {
     // merge the del files
     List<Path> delFilePaths = new ArrayList<Path>();
     for (FileStatus delFile : request.delFiles) {
@@ -180,12 +180,12 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
     }
     // compact the mob files by partitions.
     List<Path> paths = compactMobFiles(request, delFiles);
-    // archive the del files if the all mob files are selected.
+    // archive the del files if all the mob files are selected.
     if (request.type == CompactionType.ALL_FILES && !newDelPaths.isEmpty()) {
       try {
         MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
       } catch (IOException e) {
-        LOG.error("Fail to archive the del files " + delFiles, e);
+        LOG.error("Failed to archive the del files " + delFiles, e);
       }
     }
     return paths;
@@ -198,7 +198,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
    * @return The paths of new mob files after compactions.
    * @throws IOException
    */
-  protected List<Path> compactMobFiles(PartitionMobFileCompactionRequest request,
+  protected List<Path> compactMobFiles(PartitionedMobFileCompactionRequest request,
     List<StoreFile> delFiles) throws IOException {
     Collection<CompactedPartition> partitions = request.compactedPartitions;
     if (partitions == null || partitions.isEmpty()) {
@@ -215,7 +215,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
       try {
         table.close();
       } catch (IOException e) {
-        LOG.error("Fail to close the HTable", e);
+        LOG.error("Failed to close the HTable", e);
       }
     }
     return paths;
@@ -231,7 +231,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
    * @return The paths of new mob files after compactions.
    * @throws IOException
    */
-  private List<Path> compactMobFilePartition(PartitionMobFileCompactionRequest request,
+  private List<Path> compactMobFilePartition(PartitionedMobFileCompactionRequest request,
     CompactedPartition partition, int offset, List<StoreFile> delFiles, HTable table)
       throws IOException {
     List<Path> newFiles = new ArrayList<Path>();
@@ -277,7 +277,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
         compactionCacheConfig);
       filePath = writer.getPath();
       byte[] fileName = Bytes.toBytes(filePath.getName());
-      // create a temp file and open a write for it in the bulkloadPath
+      // create a temp file and open a writer for it in the bulkloadPath
       refFileWriter = MobUtils.createRefFileWriter(conf, fs, column, bulkloadPath, fileInfo
         .getSecond().longValue(), compactionCacheConfig);
       refFilePath = refFileWriter.getPath();
@@ -301,7 +301,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
         try {
           writer.close();
         } catch (IOException e) {
-          LOG.error("Fail to close the writer of the file " + filePath, e);
+          LOG.error("Failed to close the writer of the file " + filePath, e);
         }
       }
       if (refFileWriter != null) {
@@ -311,7 +311,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
         try {
           refFileWriter.close();
         } catch (IOException e) {
-          LOG.error("Fail to close the writer of the ref file " + refFilePath, e);
+          LOG.error("Failed to close the writer of the ref file " + refFilePath, e);
         }
       }
     }
@@ -333,7 +333,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
       try {
         MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), archivedFiles);
       } catch (IOException e) {
-        LOG.error("Fail to archive the files " + archivedFiles, e);
+        LOG.error("Failed to archive the files " + archivedFiles, e);
       }
     } else {
       // remove the new files
@@ -354,10 +354,10 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
    * Compacts the del files in batches which avoids opening too many files.
    * @param request The compaction request.
    * @param delFilePaths
-   * @return
+   * @return The paths of new del files after merging.
    * @throws IOException
    */
-  protected List<Path> compactDelFiles(PartitionMobFileCompactionRequest request,
+  protected List<Path> compactDelFiles(PartitionedMobFileCompactionRequest request,
     List<Path> delFilePaths) throws IOException {
     if (delFilePaths.size() > delFileMaxCount) {
       // when there are more del files than the number that is allowed, merge it firstly.
@@ -398,7 +398,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
    * @return The path of new del file after merging.
    * @throws IOException
    */
-  private Path mergeDelFiles(PartitionMobFileCompactionRequest request, List<StoreFile> delFiles)
+  private Path mergeDelFiles(PartitionedMobFileCompactionRequest request, List<StoreFile> delFiles)
     throws IOException {
     // create a scanner for the del files.
     List scanners = StoreFileScanner.getScannersForStoreFiles(delFiles, false, true, false, null,
@@ -432,7 +432,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
         try {
           writer.close();
         } catch (IOException e) {
-          LOG.error("Fail to close the writer of the file " + filePath, e);
+          LOG.error("Failed to close the writer of the file " + filePath, e);
         }
       }
     }
@@ -442,7 +442,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
     try {
       MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
     } catch (IOException e) {
-      LOG.error("Fail to archive the old del files " + delFiles, e);
+      LOG.error("Failed to archive the old del files " + delFiles, e);
     }
     return path;
   }
@@ -469,7 +469,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
 
   /**
    * Deletes a file.
-   * @param path The path of the deleted file.
+   * @param path The path of the file to be deleted.
    */
   private void deletePath(Path path) {
     try {
@@ -477,7 +477,7 @@ public class PartitionMobFileCompactor extends MobFileCompactor {
         fs.delete(path, true);
       }
     } catch (IOException e) {
-      LOG.error("Fail to delete the file " + path, e);
+      LOG.error("Failed to delete the file " + path, e);
     }
   }
 }

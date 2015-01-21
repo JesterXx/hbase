@@ -21,14 +21,14 @@ package org.apache.hadoop.hbase.mob.filecompactions;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.SmallTests;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactionRequest.CompactedPartition;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionMobFileCompactionRequest.CompactedPartitionId;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartition;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartitionId;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 @Category(SmallTests.class)
-public class TestPartitionMobFileCompactionRequest {
+public class TestPartitionedMobFileCompactionRequest {
 
   @Test
   public void testCompactedPartitionId() {

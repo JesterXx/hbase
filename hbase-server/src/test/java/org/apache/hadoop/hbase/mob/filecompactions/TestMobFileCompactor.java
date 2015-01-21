@@ -119,7 +119,7 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: mob file count", count, countMobFiles());
     assertEquals("Before compaction: del file count", 0, countDelFiles());
 
-    MobFileCompactor compactor = new PartitionMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count, countMobRows(hTable));
@@ -155,7 +155,7 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: del file count", 1, countDelFiles());
 
     // do the mob file compaction
-    MobFileCompactor compactor = new PartitionMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count-1, countMobRows(hTable));
@@ -167,7 +167,7 @@ public class TestMobFileCompactor {
   public void testCompactionWithDelFilesAndNotMergeAllFiles() throws Exception {
     int mergeSize = 5000;
     // change the mob compaction merge size
-    conf.setLong(MobConstants.MOB_COMPACTION_MERGEABLE_SIZE, mergeSize);
+    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
 
     int count = 8;
     // create table and generate 8 mob files
@@ -196,7 +196,7 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: del file count", 1, countDelFiles());
 
     // do the mob file compaction
-    MobFileCompactor compactor = new PartitionMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count-1, countMobRows(hTable));
@@ -205,8 +205,8 @@ public class TestMobFileCompactor {
     assertEquals("After compaction: del file count", 1, countDelFiles());
 
     // reset the conf the the default
-    conf.setLong(MobConstants.MOB_COMPACTION_MERGEABLE_SIZE,
-        MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_SIZE);
+    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD,
+        MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
   }
 
   /**
