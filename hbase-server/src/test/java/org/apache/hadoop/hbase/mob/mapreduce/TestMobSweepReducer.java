@@ -176,30 +176,30 @@ public class TestMobSweepReducer {
         serverName);
     TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
     lock.acquire();
+    try {
+      // use the same counter when mocking
+      Counter counter = new GenericCounter();
+      Reducer<Text, KeyValue, Writable, Writable>.Context ctx = mock(Reducer.Context.class);
+      when(ctx.getConfiguration()).thenReturn(configuration);
+      when(ctx.getCounter(Matchers.any(SweepCounter.class))).thenReturn(counter);
+      when(ctx.nextKey()).thenReturn(true).thenReturn(false);
+      when(ctx.getCurrentKey()).thenReturn(new Text(mobFile1));
 
-    //use the same counter when mocking
-    Counter counter = new GenericCounter();
-    Reducer<Text, KeyValue, Writable, Writable>.Context ctx =
-            mock(Reducer.Context.class);
-    when(ctx.getConfiguration()).thenReturn(configuration);
-    when(ctx.getCounter(Matchers.any(SweepCounter.class))).thenReturn(counter);
-    when(ctx.nextKey()).thenReturn(true).thenReturn(false);
-    when(ctx.getCurrentKey()).thenReturn(new Text(mobFile1));
+      byte[] refBytes = Bytes.toBytes(mobFile1);
+      long valueLength = refBytes.length;
+      byte[] newValue = Bytes.add(Bytes.toBytes(valueLength), refBytes);
+      KeyValue kv2 = new KeyValue(Bytes.toBytes(row), Bytes.toBytes(family), Bytes.toBytes(qf), 1,
+        KeyValue.Type.Put, newValue);
+      List<KeyValue> list = new ArrayList<KeyValue>();
+      list.add(kv2);
 
-    byte[] refBytes = Bytes.toBytes(mobFile1);
-    long valueLength = refBytes.length;
-    byte[] newValue = Bytes.add(Bytes.toBytes(valueLength), refBytes);
-    KeyValue kv2 = new KeyValue(Bytes.toBytes(row), Bytes.toBytes(family),
-            Bytes.toBytes(qf), 1, KeyValue.Type.Put, newValue);
-    List<KeyValue> list = new ArrayList<KeyValue>();
-    list.add(kv2);
+      when(ctx.getValues()).thenReturn(list);
 
-    when(ctx.getValues()).thenReturn(list);
-
-    SweepReducer reducer = new SweepReducer();
-    reducer.run(ctx);
-    lock.release();
-
+      SweepReducer reducer = new SweepReducer();
+      reducer.run(ctx);
+    } finally {
+      lock.release();
+    }
     FileStatus[] filsStatuses2 = TEST_UTIL.getTestFileSystem().listStatus(mobFamilyPath);
     String mobFile2 = filsStatuses2[0].getPath().getName();
     //new mob file is generated, old one has been archived

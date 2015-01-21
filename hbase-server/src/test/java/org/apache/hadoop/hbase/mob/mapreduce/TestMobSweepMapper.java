@@ -93,26 +93,28 @@ public class TestMobSweepMapper {
         serverName);
     TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
     lock.acquire();
+    try {
+      Mapper<ImmutableBytesWritable, Result, Text, KeyValue>.Context ctx =
+        mock(Mapper.Context.class);
+      when(ctx.getConfiguration()).thenReturn(configuration);
+      SweepMapper map = new SweepMapper();
+      doAnswer(new Answer<Void>() {
 
-    Mapper<ImmutableBytesWritable, Result, Text, KeyValue>.Context ctx =
-            mock(Mapper.Context.class);
-    when(ctx.getConfiguration()).thenReturn(configuration);
-    SweepMapper map = new SweepMapper();
-    doAnswer(new Answer<Void>() {
+        @Override
+        public Void answer(InvocationOnMock invocation) throws Throwable {
+          Text text = (Text) invocation.getArguments()[0];
+          KeyValue kv = (KeyValue) invocation.getArguments()[1];
 
-      @Override
-      public Void answer(InvocationOnMock invocation) throws Throwable {
-        Text text = (Text) invocation.getArguments()[0];
-        KeyValue kv = (KeyValue) invocation.getArguments()[1];
+          assertEquals(Bytes.toString(text.getBytes(), 0, text.getLength()), fileName);
+          assertEquals(0, Bytes.compareTo(kv.getKey(), kvList[0].getKey()));
 
-        assertEquals(Bytes.toString(text.getBytes(), 0, text.getLength()), fileName);
-        assertEquals(0, Bytes.compareTo(kv.getKey(), kvList[0].getKey()));
+          return null;
+        }
+      }).when(ctx).write(any(Text.class), any(KeyValue.class));
 
-        return null;
-      }
-    }).when(ctx).write(any(Text.class), any(KeyValue.class));
-
-    map.map(r, columns, ctx);
-    lock.release();
+      map.map(r, columns, ctx);
+    } finally {
+      lock.release();
+    }
   }
 }
