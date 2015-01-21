@@ -391,6 +391,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
             // continue next round of merging.
             pathIterator = paths.iterator();
             hasNext = true;
+            index = 0;
             paths = new ArrayList<>();
           }
         }
