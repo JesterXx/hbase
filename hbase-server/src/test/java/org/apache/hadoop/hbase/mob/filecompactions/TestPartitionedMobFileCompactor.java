@@ -31,11 +31,15 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.LargeTests;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
@@ -44,7 +48,13 @@ import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactionRequest.CompactionType;
 import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartition;
+import org.apache.hadoop.hbase.regionserver.BloomType;
+import org.apache.hadoop.hbase.regionserver.HStore;
+import org.apache.hadoop.hbase.regionserver.ScanInfo;
+import org.apache.hadoop.hbase.regionserver.ScanType;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
+import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.junit.AfterClass;
@@ -59,17 +69,15 @@ public class TestPartitionedMobFileCompactor {
   private final static String family = "family";
   private final static String qf = "qf";
   private HColumnDescriptor hcd = new HColumnDescriptor(family);
-  protected static final char FIRST_CHAR = 'a';
-  protected static final char LAST_CHAR = 'z';
   private Configuration conf = TEST_UTIL.getConfiguration();
   private CacheConfig cacheConf = new CacheConfig(conf);
-  private byte[] startKey1;
-  private byte[] startKey2;
-  private Random random = new Random();
   private FileSystem fs;
-  private List<String> expectedStartKeys = new ArrayList<>();
+  private List<FileStatus> mobFiles = new ArrayList<>();
   private List<FileStatus> delFiles = new ArrayList<>();
   private List<FileStatus> allFiles = new ArrayList<>();
+  private Path basePath;
+  private String mobSuffix;
+  private String delSuffix;
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
@@ -88,42 +96,104 @@ public class TestPartitionedMobFileCompactor {
     fs = FileSystem.get(conf);
     Path testDir = FSUtils.getRootDir(conf);
     Path mobTestDir = new Path(testDir, MobConstants.MOB_DIR_NAME);
-    Path basePath = new Path(new Path(mobTestDir, tableName), family);
-
-    String mobSuffix = UUID.randomUUID().toString().replaceAll("-", "");
-    startKey1 = Bytes.toBytes(random.nextInt());
-    startKey2 = Bytes.toBytes(random.nextInt());
-    MobFileName mobFileName1 = MobFileName.create(startKey1, MobUtils.formatDate(new Date()),
-        mobSuffix);
-    MobFileName mobFileName2 = MobFileName.create(startKey2, MobUtils.formatDate(new Date()),
-        mobSuffix);
-    expectedStartKeys.add(mobFileName1.getStartKey());
-    expectedStartKeys.add(mobFileName2.getStartKey());
-    // create two mob files.
-    createStoreFile(basePath, mobFileName1, family, qf);
-    createStoreFile(basePath, mobFileName2, family, qf);
-
-    String delSuffix = UUID.randomUUID().toString().replaceAll("-", "") + "_del";
-    MobFileName delFileName1 = MobFileName.create(startKey1, MobUtils.formatDate(new Date()),
-        delSuffix);
-    MobFileName delFileName2 = MobFileName.create(startKey2, MobUtils.formatDate(new Date()),
-        delSuffix);
-    // create two del files
-    createStoreFile(basePath, delFileName1, family, qf);
-    createStoreFile(basePath, delFileName2, family, qf);
-
-    for (FileStatus file : fs.listStatus(basePath)) {
-      allFiles.add(file);
-      if (file.getPath().getName().endsWith("_del")) {
-        delFiles.add(file);
-      }
-    }
+    basePath = new Path(new Path(mobTestDir, tableName), family);
+    mobSuffix = UUID.randomUUID().toString().replaceAll("-", "");
+    delSuffix = UUID.randomUUID().toString().replaceAll("-", "") + "_del";
   }
 
   @Test
-  public void testCompactionSelect() throws Exception {
-    String tableName = "testCompactionSelect";
+  public void testCompactionSelectWithAllFiles() throws Exception {
+    String tableName = "testCompactionSelectWithAllFiles";
     init(tableName);
+    int count = 10;
+    // create 10 mob files.
+    createStoreFiles(basePath, family, qf, count, Type.Put);
+    // create 10 del files
+    createStoreFiles(basePath, family, qf, count, Type.Delete);
+    listFiles();
+    long mergeSize = MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD;
+    List<String> expectedStartKeys = new ArrayList<>();
+    for(FileStatus file : mobFiles) {
+      if(file.getLen() < mergeSize) {
+        String fileName = file.getPath().getName();
+        String startKey = fileName.substring(0, 32);
+        expectedStartKeys.add(startKey);
+      }
+    }
+    testSelectFiles(tableName, CompactionType.ALL_FILES, expectedStartKeys);
+  }
+
+  @Test
+  public void testCompactionSelectWithPartFiles() throws Exception {
+    String tableName = "testCompactionSelectWithPartFiles";
+    init(tableName);
+    int count = 10;
+    // create 10 mob files.
+    createStoreFiles(basePath, family, qf, count, Type.Put);
+    // create 10 del files
+    createStoreFiles(basePath, family, qf, count, Type.Delete);
+    listFiles();
+    long mergeSize = 4000;
+    List<String> expectedStartKeys = new ArrayList<>();
+    for(FileStatus file : mobFiles) {
+      if(file.getLen() < 4000) {
+        String fileName = file.getPath().getName();
+        String startKey = fileName.substring(0, 32);
+        expectedStartKeys.add(startKey);
+      }
+    }
+    // set the mob file compaction mergeable threshold
+    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
+
+    testSelectFiles(tableName, CompactionType.PART_FILES, expectedStartKeys);
+
+    conf.setLong(MobConstants.MOB_FILEL_COMPACTION_MERGEABLE_THRESHOLD,
+        MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
+  }
+
+  @Test
+  public void testCompactDelFilesWithDefaultBatchSize() throws Exception {
+    String tableName = "testCompactDelFilesWithDefaultBatchSize";
+    init(tableName);
+    // create 20 mob files.
+    createStoreFiles(basePath, family, qf, 20, Type.Put);
+    // create 13 del files
+    createStoreFiles(basePath, family, qf, 13, Type.Delete);
+    listFiles();
+
+    testCompactDelFiles(tableName, 1, 13);
+  }
+
+  @Test
+  public void testCompactDelFilesWithSmallBatchSize() throws Exception {
+    String tableName = "testCompactDelFilesWithSmallBatchSize";
+    init(tableName);
+    // create 20 mob files.
+    createStoreFiles(basePath, family, qf, 20, Type.Put);
+    // create 13 del files
+    createStoreFiles(basePath, family, qf, 13, Type.Delete);
+    listFiles();
+
+    // set the max del file count
+    conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, 5);
+    // set the mob file compaction batch size
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, 2);
+
+    testCompactDelFiles(tableName, 4, 13);
+
+    conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
+        MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
+  }
+
+  /**
+   * test the selectFiles
+   * @param tableName the table name
+   * @param type the expected compaction type
+   * @param expected the expected start keys
+   */
+  private void testSelectFiles(String tableName, final CompactionType type,
+      final List<String> expected) throws IOException {
     PartitionedMobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs,
         TableName.valueOf(tableName), hcd) {
       @Override
@@ -132,10 +202,10 @@ public class TestPartitionedMobFileCompactor {
           return null;
         }
         PartitionedMobFileCompactionRequest request = select(files);
-        // assert the compaction type is all files
-         Assert.assertTrue((request.type).equals(CompactionType.ALL_FILES));
+        // assert the compaction type is ALL_FILES
+        Assert.assertEquals(type, request.type);
         // assert get the right partitions
-        compareCompactedPartitions(request.compactedPartitions);
+        compareCompactedPartitions(expected, request.compactedPartitions);
         // assert get the right del files
         compareDelFiles(request.delFiles);
         return null;
@@ -144,12 +214,14 @@ public class TestPartitionedMobFileCompactor {
     compactor.compact(allFiles);
   }
 
-  @Test
-  public void testCompactDelFiles() throws Exception {
-    String tableName = "testCompactDelFiles";
-    init(tableName);
-    // set the max del file count
-    TEST_UTIL.getConfiguration().setInt(MobConstants.MOB_DELFILE_MAX_COUNT, 1);
+  /**
+   * test the compacteDelFile
+   * @param tableName the table name
+   * @param expectedFileCount the expected file count
+   * @param expectedCellCount the expected cell count
+   */
+  private void testCompactDelFiles(String tableName, final int expectedFileCount,
+      final int expectedCellCount) throws IOException {
     PartitionedMobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs,
         TableName.valueOf(tableName), hcd) {
       @Override
@@ -161,27 +233,44 @@ public class TestPartitionedMobFileCompactor {
         }
         List<Path> newDelPaths = compactDelFiles(request, delFilePaths);
         // assert the del files are merged.
-        Assert.assertTrue(newDelPaths.size() == 1);
+        Assert.assertEquals(expectedFileCount, newDelPaths.size());
+        Assert.assertEquals(expectedCellCount, countDelCellsInDelFiles(newDelPaths));
         return null;
       }
     };
+
     compactor.compact(allFiles);
+  }
+
+  /**
+   * list the files in the path
+   */
+  private void listFiles() throws IOException {
+    for (FileStatus file : fs.listStatus(basePath)) {
+      allFiles.add(file);
+      if (file.getPath().getName().endsWith("_del")) {
+        delFiles.add(file);
+      } else {
+        mobFiles.add(file);
+      }
+    }
   }
 
   /**
    * compare the compacted partitions.
    * @param partitions the collection of CompactedPartitions
    */
-  private void compareCompactedPartitions(Collection<CompactedPartition> partitions) {
+  private void compareCompactedPartitions(List<String> expected,
+      Collection<CompactedPartition> partitions) {
     List<String> actualKeys = new ArrayList<>();
     for (CompactedPartition partition : partitions) {
       actualKeys.add(partition.getPartitionId().getStartKey());
     }
-    Collections.sort(expectedStartKeys);
+    Collections.sort(expected);
     Collections.sort(actualKeys);
-    Assert.assertEquals(expectedStartKeys.size(), actualKeys.size());
-    for (int i = 0; i < expectedStartKeys.size(); i++) {
-      Assert.assertEquals(expectedStartKeys.get(i), actualKeys.get(i));
+    Assert.assertEquals(expected.size(), actualKeys.size());
+    for (int i = 0; i < expected.size(); i++) {
+      Assert.assertEquals(expected.get(i), actualKeys.get(i));
     }
   }
 
@@ -200,36 +289,83 @@ public class TestPartitionedMobFileCompactor {
   /**
    * create store file
    * @param basePath the path to create file
-   * @mobFileName the mob file name
    * @family the family name
    * @qualifier the column qualifier
+   * @count the store file number
+   * @type the key type
    */
-  private void createStoreFile(Path basePath, MobFileName mobFileName, String family, String qualifier)
-      throws IOException {
+  private void createStoreFiles(Path basePath, String family, String qualifier, int count,
+      Type type) throws IOException {
     HFileContext meta = new HFileContextBuilder().withBlockSize(8 * 1024).build();
-    StoreFile.Writer mobFileWriter = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-        .withFileContext(meta).withFilePath(new Path(basePath, mobFileName.getFileName())).build();
-    writeStoreFile(mobFileWriter, Bytes.toBytes(family), Bytes.toBytes(qualifier));
+    String startKey = "row_";
+    MobFileName mobFileName = null;
+    for (int i = 0; i < count; i++) {
+      byte[] startRow = Bytes.toBytes(startKey + i) ;
+      if(type.equals(Type.Delete)) {
+        mobFileName = MobFileName.create(startRow, MobUtils.formatDate(
+            new Date()), delSuffix);
+      }
+      if(type.equals(Type.Put)){
+        mobFileName = MobFileName.create(Bytes.toBytes(startKey + i), MobUtils.formatDate(
+            new Date()), mobSuffix);
+      }
+      StoreFile.Writer mobFileWriter = new StoreFile.WriterBuilder(conf, cacheConf, fs)
+      .withFileContext(meta).withFilePath(new Path(basePath, mobFileName.getFileName())).build();
+      writeStoreFile(mobFileWriter, startRow, Bytes.toBytes(family), Bytes.toBytes(qualifier),
+          type, (i+1)*1000);
+    }
   }
 
   /**
    * write data to store file
-   * @param writer the storefile writer
-   * @family the family name
-   * @qualifier the column qualifier
+   * @param writer the store file writer
+   * @param row the row key
+   * @param family the family name
+   * @param qualifier the column qualifier
+   * @param type the key type
+   * @param size the size of value
    */
-  private static void writeStoreFile(final StoreFile.Writer writer, byte[] family, byte[] qualifier)
-      throws IOException {
+  private static void writeStoreFile(final StoreFile.Writer writer, byte[]row, byte[] family,
+      byte[] qualifier, Type type, int size) throws IOException {
     long now = System.currentTimeMillis();
     try {
-      for (char d = FIRST_CHAR; d <= LAST_CHAR; d++) {
-        for (char e = FIRST_CHAR; e <= LAST_CHAR; e++) {
-          byte[] b = new byte[] { (byte) d, (byte) e };
-          writer.append(new KeyValue(b, family, qualifier, now, b));
-        }
-      }
+      byte[] dummyData = new byte[size];
+      new Random().nextBytes(dummyData);
+      writer.append(new KeyValue(row, family, qualifier, now, type, dummyData));
     } finally {
       writer.close();
     }
+  }
+
+  /**
+   * count the number of del cell in the del files
+   * @param paths the del file paths
+   * @return the cell size
+   */
+  private int countDelCellsInDelFiles(List<Path> paths) throws IOException {
+    List<StoreFile> sfs = new ArrayList<StoreFile>();
+    int size = 0;
+    for(Path path : paths) {
+      StoreFile sf = new StoreFile(fs, path, conf, cacheConf, BloomType.NONE);
+      sfs.add(sf);
+    }
+    List scanners = StoreFileScanner.getScannersForStoreFiles(sfs, false, true,
+        false, null, HConstants.LATEST_TIMESTAMP);
+    Scan scan = new Scan();
+    scan.setMaxVersions(hcd.getMaxVersions());
+    long timeToPurgeDeletes = Math.max(conf.getLong("hbase.hstore.time.to.purge.deletes", 0), 0);
+    long ttl = HStore.determineTTLFromFamily(hcd);
+    ScanInfo scanInfo = new ScanInfo(hcd, ttl, timeToPurgeDeletes, KeyValue.COMPARATOR);
+    StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_RETAIN_DELETES, null,
+        scanners, 0L, HConstants.LATEST_TIMESTAMP);
+    List<Cell> results = new ArrayList<>();
+    boolean hasMore = true;
+    while (hasMore) {
+      hasMore = scanner.next(results);
+      size += results.size();
+      results.clear();
+    }
+    scanner.close();
+    return size;
   }
 }
