@@ -35,13 +35,29 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 public class PartitionedMobFileCompactionRequest extends MobFileCompactionRequest {
 
   protected Collection<FileStatus> delFiles;
-  protected Collection<CompactedPartition> compactedPartitions;
+  protected Collection<CompactionPartition> compactionPartitions;
 
-  public PartitionedMobFileCompactionRequest(Collection<CompactedPartition> compactedPartitions,
+  public PartitionedMobFileCompactionRequest(Collection<CompactionPartition> compactionPartitions,
     Collection<FileStatus> delFiles) {
     this.selectionTime = EnvironmentEdgeManager.currentTime();
-    this.compactedPartitions = compactedPartitions;
+    this.compactionPartitions = compactionPartitions;
     this.delFiles = delFiles;
+  }
+
+  /**
+   * Gets the compaction partitions.
+   * @return The compaction partitions.
+   */
+  public Collection<CompactionPartition> getCompactionPartitions() {
+    return this.compactionPartitions;
+  }
+
+  /**
+   * Gets the del files.
+   * @return The del files.
+   */
+  public Collection<FileStatus> getDelFiles() {
+    return this.delFiles;
   }
 
   /**
@@ -49,15 +65,15 @@ public class PartitionedMobFileCompactionRequest extends MobFileCompactionReques
    * The mob files that have the same start key and date in their names belong to
    * the same partition.
    */
-  protected static class CompactedPartition {
+  protected static class CompactionPartition {
     private List<FileStatus> files = new ArrayList<FileStatus>();
-    private CompactedPartitionId partitionId;
+    private CompactionPartitionId partitionId;
 
-    public CompactedPartition(CompactedPartitionId partitionId) {
+    public CompactionPartition(CompactionPartitionId partitionId) {
       this.partitionId = partitionId;
     }
 
-    public CompactedPartitionId getPartitionId() {
+    public CompactionPartitionId getPartitionId() {
       return this.partitionId;
     }
 
@@ -73,12 +89,12 @@ public class PartitionedMobFileCompactionRequest extends MobFileCompactionReques
   /**
    * The partition id that consists of start key and date of the mob file name.
    */
-  protected static class CompactedPartitionId {
+  protected static class CompactionPartitionId {
 
     private String startKey;
     private String date;
 
-    public CompactedPartitionId(String startKey, String date) {
+    public CompactionPartitionId(String startKey, String date) {
       if (startKey == null || date == null) {
         throw new IllegalArgumentException("Neither of start key and date could be null");
       }
@@ -107,10 +123,10 @@ public class PartitionedMobFileCompactionRequest extends MobFileCompactionReques
       if (this == obj) {
         return true;
       }
-      if (!(obj instanceof CompactedPartitionId)) {
+      if (!(obj instanceof CompactionPartitionId)) {
         return false;
       }
-      CompactedPartitionId another = (CompactedPartitionId) obj;
+      CompactionPartitionId another = (CompactionPartitionId) obj;
       if (!this.startKey.equals(another.startKey)) {
         return false;
       }

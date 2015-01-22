@@ -33,6 +33,22 @@ public abstract class MobFileCompactionRequest {
     this.type = type;
   }
 
+  /**
+   * Gets the selection time.
+   * @return The selection time.
+   */
+  public long getSelectionTime() {
+    return this.selectionTime;
+  }
+
+  /**
+   * Gets the compaction type.
+   * @return The compaction type.
+   */
+  public CompactionType getCompactionType() {
+    return type;
+  }
+
   protected enum CompactionType {
 
     /**

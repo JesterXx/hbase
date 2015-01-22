@@ -47,7 +47,7 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactionRequest.CompactionType;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartition;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactionPartition;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
 import org.apache.hadoop.hbase.regionserver.ScanInfo;
@@ -205,7 +205,7 @@ public class TestPartitionedMobFileCompactor {
         // assert the compaction type is ALL_FILES
         Assert.assertEquals(type, request.type);
         // assert get the right partitions
-        compareCompactedPartitions(expected, request.compactedPartitions);
+        compareCompactedPartitions(expected, request.compactionPartitions);
         // assert get the right del files
         compareDelFiles(request.delFiles);
         return null;
@@ -261,9 +261,9 @@ public class TestPartitionedMobFileCompactor {
    * @param partitions the collection of CompactedPartitions
    */
   private void compareCompactedPartitions(List<String> expected,
-      Collection<CompactedPartition> partitions) {
+      Collection<CompactionPartition> partitions) {
     List<String> actualKeys = new ArrayList<>();
-    for (CompactedPartition partition : partitions) {
+    for (CompactionPartition partition : partitions) {
       actualKeys.add(partition.getPartitionId().getStartKey());
     }
     Collections.sort(expected);

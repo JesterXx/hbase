@@ -21,8 +21,8 @@ package org.apache.hadoop.hbase.mob.filecompactions;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.SmallTests;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartition;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartitionId;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactionPartition;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactionPartitionId;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -36,9 +36,9 @@ public class TestPartitionedMobFileCompactionRequest {
     String startKey2 = "startKey2";
     String date1 = "date1";
     String date2 = "date2";
-    CompactedPartitionId partitionId1 = new CompactedPartitionId(startKey1, date1);
-    CompactedPartitionId partitionId2 = new CompactedPartitionId(startKey2, date2);
-    CompactedPartitionId partitionId3 = new CompactedPartitionId(startKey1, date2);
+    CompactionPartitionId partitionId1 = new CompactionPartitionId(startKey1, date1);
+    CompactionPartitionId partitionId2 = new CompactionPartitionId(startKey2, date2);
+    CompactionPartitionId partitionId3 = new CompactionPartitionId(startKey1, date2);
 
     Assert.assertTrue(partitionId1.equals(partitionId1));
     Assert.assertFalse(partitionId1.equals(partitionId2));
@@ -51,8 +51,8 @@ public class TestPartitionedMobFileCompactionRequest {
 
   @Test
   public void testCompactedPartition() {
-    CompactedPartitionId partitionId = new CompactedPartitionId("startKey1", "date1");
-    CompactedPartition partition = new CompactedPartition(partitionId);
+    CompactionPartitionId partitionId = new CompactionPartitionId("startKey1", "date1");
+    CompactionPartition partition = new CompactionPartition(partitionId);
     FileStatus file = new FileStatus(1, false, 1, 1024, 1, new Path("/test"));
     partition.addFile(file);
     Assert.assertEquals(file, partition.listFiles().get(0));

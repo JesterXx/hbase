@@ -51,8 +51,8 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactionRequest.CompactionType;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartition;
-import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactedPartitionId;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactionPartition;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest.CompactionPartitionId;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
 import org.apache.hadoop.hbase.regionserver.ScanInfo;
@@ -123,8 +123,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    */
   protected PartitionedMobFileCompactionRequest select(List<FileStatus> candidates) {
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
-    Map<CompactedPartitionId, CompactedPartition> filesToCompact =
-      new HashMap<CompactedPartitionId, CompactedPartition>();
+    Map<CompactionPartitionId, CompactionPartition> filesToCompact =
+      new HashMap<CompactionPartitionId, CompactionPartition>();
     int smallFilesCount = 0;
     for (FileStatus file : candidates) {
       if (file.isFile()) {
@@ -134,14 +134,14 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
         } else if (file.getLen() < mergeableSize) {
           // add the small files to the merge pool
           MobFileName fileName = MobFileName.create(file.getPath().getName());
-          CompactedPartitionId id = new CompactedPartitionId(fileName.getStartKey(), fileName.getDate());
-          CompactedPartition compactedPartition = filesToCompact.get(id);
-          if (compactedPartition == null) {
-            compactedPartition = new CompactedPartition(id);
-            compactedPartition.addFile(file);
-            filesToCompact.put(id, compactedPartition);
+          CompactionPartitionId id = new CompactionPartitionId(fileName.getStartKey(), fileName.getDate());
+          CompactionPartition compactionPartition = filesToCompact.get(id);
+          if (compactionPartition == null) {
+            compactionPartition = new CompactionPartition(id);
+            compactionPartition.addFile(file);
+            filesToCompact.put(id, compactionPartition);
           } else {
-            compactedPartition.addFile(file);
+            compactionPartition.addFile(file);
           }
           smallFilesCount++;
         }
@@ -201,7 +201,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    */
   protected List<Path> compactMobFiles(PartitionedMobFileCompactionRequest request,
     List<StoreFile> delFiles) throws IOException {
-    Collection<CompactedPartition> partitions = request.compactedPartitions;
+    Collection<CompactionPartition> partitions = request.compactionPartitions;
     if (partitions == null || partitions.isEmpty()) {
       return Collections.emptyList();
     }
@@ -209,7 +209,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     HTable table = new HTable(conf, tableName);
     try {
       // compact the mob files by partitions.
-      for (CompactedPartition partition : partitions) {
+      for (CompactionPartition partition : partitions) {
         paths.addAll(compactMobFilePartition(request, partition, delFiles, table));
       }
     } finally {
@@ -232,7 +232,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    * @throws IOException
    */
   private List<Path> compactMobFilePartition(PartitionedMobFileCompactionRequest request,
-    CompactedPartition partition, List<StoreFile> delFiles, HTable table) throws IOException {
+    CompactionPartition partition, List<StoreFile> delFiles, HTable table) throws IOException {
     List<Path> newFiles = new ArrayList<Path>();
     List<FileStatus> files = partition.listFiles();
     int offset = 0;
