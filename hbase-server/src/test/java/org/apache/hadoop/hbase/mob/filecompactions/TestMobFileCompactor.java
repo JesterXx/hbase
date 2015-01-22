@@ -41,6 +41,8 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.HFileLink;
+import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.HRegion;
@@ -111,7 +113,7 @@ public class TestMobFileCompactor {
   @Test
   public void testCompactionWithoutDelFiles() throws Exception {
     int count = 10;
-    //create table and generate 10 mob files
+    //create table and generate mob files
     createMobTableAndAddData(count, 1);
 
     assertEquals("Before compaction: mob rows", count, countMobRows(hTable));
@@ -130,7 +132,7 @@ public class TestMobFileCompactor {
   @Test
   public void testCompactionWithDelFiles() throws Exception {
     int count = 8;
-    //create table and generate 8 mob files
+    //create table and generate mob files
     createMobTableAndAddData(count, 1);
 
     //get mob files
@@ -172,7 +174,7 @@ public class TestMobFileCompactor {
     conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
 
     int count = 8;
-    // create table and generate 8 mob files
+    // create table and generate mob files
     createMobTableAndAddData(count, 1);
 
     // get mob files
@@ -214,6 +216,62 @@ public class TestMobFileCompactor {
         MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
   }
 
+  @Test
+  public void testCompactionWithHFileLink() throws IOException, InterruptedException {
+    int count = 4;
+    // create table and generate mob files
+    createMobTableAndAddData(count, 1);
+
+    long tid = System.currentTimeMillis();
+    byte[] snapshotName1 = Bytes.toBytes("snaptb-" + tid);
+    // take a snapshot
+    admin.snapshot(snapshotName1, tableName);
+
+    // now let's delete one cell
+    Delete delete = new Delete(Bytes.toBytes(row + 0));
+    delete.deleteFamily(Bytes.toBytes(family));
+    hTable.delete(delete);
+    hTable.flushCommits();
+    admin.flush(tableName);
+    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(
+        Bytes.toBytes(tableNameAsString));
+    for(HRegion region : regions) {
+      region.waitForFlushesAndCompactions();
+      region.compactStores(true);
+    }
+
+    assertEquals("Before compaction: mob rows", count-1, countMobRows(hTable));
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
+    assertEquals("Before compaction: del file count", 1, countFiles(false));
+
+    // do the mob file compaction
+    MobFileCompactor compactor =
+      new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    compactor.compact();
+
+    assertEquals("After first compaction: mob rows", count-1, countMobRows(hTable));
+    assertEquals("After first compaction: mob file count", 1, countFiles(true));
+    assertEquals("After first compaction: del file count", 0, countFiles(false));
+    assertEquals("After first compaction: hfilelink count", 0, countHFileLinks());
+
+    admin.disableTable(tableName);
+    // Restore from snapshot, the hfilelink will exist in mob dir
+    admin.restoreSnapshot(snapshotName1);
+    admin.enableTable(tableName);
+
+    assertEquals("After restoring snapshot: mob rows", count, countMobRows(hTable));
+    assertEquals("After restoring snapshot: mob file count", count, countFiles(true));
+    assertEquals("After restoring snapshot: del file count", 0, countFiles(false));
+    assertEquals("After restoring snapshot: hfilelink count", 4, countHFileLinks());
+
+    compactor.compact();
+
+    assertEquals("After second compaction: mob rows", count, countMobRows(hTable));
+    assertEquals("After second compaction: mob file count", 1, countFiles(true));
+    assertEquals("After second compaction: del file count", 0, countFiles(false));
+    assertEquals("After second compaction: hfilelink count", 0, countHFileLinks());
+  }
+
   /**
    * Gets the number of rows in the given table.
    * @return the number of rows
@@ -251,6 +309,25 @@ public class TestMobFileCompactor {
           if(StoreFileInfo.isDelFile(file.getPath())) {
             count++;
           }
+        }
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Gets the number of HFileLink in the mob path.
+   * @return the number of the HFileLink
+   */
+  private int countHFileLinks() throws IOException {
+    Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
+      tableName), family);
+    int count = 0;
+    if (fs.exists(mobDirPath)) {
+      FileStatus[] files = fs.listStatus(mobDirPath);
+      for(FileStatus file : files) {
+        if(HFileLink.isHFileLink(file.getPath())) {
+          count++;
         }
       }
     }
