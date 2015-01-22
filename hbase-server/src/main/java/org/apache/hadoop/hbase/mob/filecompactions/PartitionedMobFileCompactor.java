@@ -510,11 +510,14 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
   }
 
   private FileStatus getLinkedFileStatus(HFileLink link) throws IOException {
-    FileStatus file = getFileStatus(link.getMobPath());
-    if (file == null) {
-      file = getFileStatus(link.getArchivePath());
+    Path[] locations = link.getLocations();
+    for (Path location : locations) {
+      FileStatus file = getFileStatus(location);
+      if (file != null) {
+        return file;
+      }
     }
-    return file;
+    return null;
   }
 
   private FileStatus getFileStatus(Path path) throws IOException {
