@@ -24,8 +24,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Random;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -146,7 +144,8 @@ public class TestMobFileCompactor {
     hTable.flushCommits();
     admin.flush(tableName);
 
-    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(Bytes.toBytes(tableNameAsString));
+    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(
+        Bytes.toBytes(tableNameAsString));
     for(HRegion region : regions) {
       region.waitForFlushesAndCompactions();
       region.compactStores(true);
@@ -189,7 +188,8 @@ public class TestMobFileCompactor {
     hTable.flushCommits();
     admin.flush(tableName);
 
-    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(Bytes.toBytes(tableNameAsString));
+    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(
+        Bytes.toBytes(tableNameAsString));
     for(HRegion region : regions) {
       region.waitForFlushesAndCompactions();
       region.compactStores(true);
@@ -234,7 +234,7 @@ public class TestMobFileCompactor {
   /**
    * Gets the number of files in the mob path.
    * @param isMobFile gets number of the mob files or del files
-   * @return the number of the mob files
+   * @return the number of the files
    */
   private int countFiles(boolean isMobFile) throws IOException {
     Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
