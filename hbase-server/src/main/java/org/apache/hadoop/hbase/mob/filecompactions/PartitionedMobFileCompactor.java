@@ -114,7 +114,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     // find the files to compact.
     PartitionedMobFileCompactionRequest request = select(files);
     // compact the files.
-    return performCompact(request);
+    return performCompaction(request);
   }
 
   /**
@@ -184,7 +184,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    * @return The paths of new mob files generated in the compaction.
    * @throws IOException
    */
-  protected List<Path> performCompact(PartitionedMobFileCompactionRequest request) throws IOException {
+  protected List<Path> performCompaction(PartitionedMobFileCompactionRequest request)
+    throws IOException {
     // merge the del files
     List<Path> delFilePaths = new ArrayList<Path>();
     for (FileStatus delFile : request.delFiles) {
@@ -414,9 +415,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
         }
       }
       return paths;
-    } else {
-      return delFilePaths;
     }
+    return delFilePaths;
   }
 
   /**

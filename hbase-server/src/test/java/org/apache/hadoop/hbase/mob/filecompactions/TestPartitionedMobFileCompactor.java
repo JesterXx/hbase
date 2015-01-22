@@ -225,7 +225,7 @@ public class TestPartitionedMobFileCompactor {
     PartitionedMobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs,
         TableName.valueOf(tableName), hcd) {
       @Override
-      protected List<Path> performCompact(PartitionedMobFileCompactionRequest request)
+      protected List<Path> performCompaction(PartitionedMobFileCompactionRequest request)
           throws IOException {
         List<Path> delFilePaths = new ArrayList<Path>();
         for (FileStatus delFile : request.delFiles) {
