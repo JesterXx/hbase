@@ -18,6 +18,7 @@
  */
 package org.apache.hadoop.hbase.mob.filecompactions;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -45,6 +46,7 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.mapreduce.LoadIncrementalHFiles;
 import org.apache.hadoop.hbase.mob.MobConstants;
@@ -120,20 +122,33 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    * Iterates the candidates to find out all the del files and small mob files.
    * @param candidates All the candidates.
    * @return A compaction request.
+   * @throws IOException 
    */
-  protected PartitionedMobFileCompactionRequest select(List<FileStatus> candidates) {
+  protected PartitionedMobFileCompactionRequest select(List<FileStatus> candidates)
+    throws IOException {
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
     Map<CompactionPartitionId, CompactionPartition> filesToCompact =
       new HashMap<CompactionPartitionId, CompactionPartition>();
-    int smallFilesCount = 0;
+    int selectedFileCount = 0;
+    int irrelevantFileCount = 0;
     for (FileStatus file : candidates) {
       if (file.isFile()) {
         // group the del files and small files.
-        if (StoreFileInfo.isDelFile(file.getPath())) {
+        FileStatus linkedFile = file;
+        if (HFileLink.isHFileLink(file.getPath())) {
+          HFileLink link = new HFileLink(conf, file.getPath());
+          linkedFile = getLinkedFileStatus(link);
+          if (linkedFile == null) {
+            // If the linked file cannot be found, regard it as an irrelevantFileCount file
+            irrelevantFileCount++;
+            continue;
+          }
+        }
+        if (StoreFileInfo.isDelFile(linkedFile.getPath())) {
           allDelFiles.add(file);
-        } else if (file.getLen() < mergeableSize) {
+        } else if (linkedFile.getLen() < mergeableSize) {
           // add the small files to the merge pool
-          MobFileName fileName = MobFileName.create(file.getPath().getName());
+          MobFileName fileName = MobFileName.create(linkedFile.getPath().getName());
           CompactionPartitionId id = new CompactionPartitionId(fileName.getStartKey(), fileName.getDate());
           CompactionPartition compactionPartition = filesToCompact.get(id);
           if (compactionPartition == null) {
@@ -143,13 +158,15 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
           } else {
             compactionPartition.addFile(file);
           }
-          smallFilesCount++;
+          selectedFileCount++;
         }
+      } else {
+        irrelevantFileCount++;
       }
     }
     PartitionedMobFileCompactionRequest request = new PartitionedMobFileCompactionRequest(
       filesToCompact.values(), allDelFiles);
-    if (candidates.size() == (allDelFiles.size() + smallFilesCount)) {
+    if (candidates.size() == (allDelFiles.size() + selectedFileCount + irrelevantFileCount)) {
       // all the files are selected
       request.setCompactionType(CompactionType.ALL_FILES);
     }
@@ -490,5 +507,25 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     } catch (IOException e) {
       LOG.error("Failed to delete the file " + path, e);
     }
+  }
+
+  private FileStatus getLinkedFileStatus(HFileLink link) throws IOException {
+    FileStatus file = getFileStatus(link.getMobPath());
+    if (file == null) {
+      file = getFileStatus(link.getArchivePath());
+    }
+    return file;
+  }
+
+  private FileStatus getFileStatus(Path path) throws IOException {
+    try {
+      if (path != null) {
+        FileStatus file = fs.getFileStatus(path);
+        return file;
+      }
+    } catch (FileNotFoundException e) {
+      LOG.warn("The file " + path + " can not be found", e);
+    }
+    return null;
   }
 }
