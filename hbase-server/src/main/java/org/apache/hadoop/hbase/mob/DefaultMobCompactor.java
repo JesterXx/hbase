@@ -283,7 +283,7 @@ public class DefaultMobCompactor extends DefaultCompactor {
     if (delFileWriter != null) {
       if (deleteMarkersCount > 0) {
         // If the del file is not empty, commit it.
-        // If the commit of del file fails, the compaction is re-performed again.
+        // If the commit fails, the compaction is re-performed again.
         mobStore.commitFile(delFileWriter.getPath(), path);
       } else {
         try {
