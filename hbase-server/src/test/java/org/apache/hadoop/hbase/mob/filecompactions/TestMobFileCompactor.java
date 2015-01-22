@@ -21,7 +21,6 @@ package org.apache.hadoop.hbase.mob.filecompactions;
 import static org.junit.Assert.assertEquals;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
@@ -48,7 +47,6 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
-import org.apache.hadoop.hbase.regionserver.TestMobCompaction;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -59,7 +57,6 @@ import org.junit.experimental.categories.Category;
 
 @Category(LargeTests.class)
 public class TestMobFileCompactor {
-  static final Log LOG = LogFactory.getLog(TestMobCompaction.class.getName());
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private Configuration conf = null;
   private String tableNameAsString;
@@ -109,6 +106,7 @@ public class TestMobFileCompactor {
     admin.disableTable(tableName);
     admin.deleteTable(tableName);
     admin.close();
+    hTable.close();
     fs.delete(TEST_UTIL.getDataTestDir(), true);
   }
 
@@ -119,16 +117,16 @@ public class TestMobFileCompactor {
     createMobTableAndAddData(count, 1);
 
     assertEquals("Before compaction: mob rows", count, countMobRows(hTable));
-    assertEquals("Before compaction: mob file count", count, countMobFiles());
-    assertEquals("Before compaction: del file count", 0, countDelFiles());
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
+    assertEquals("Before compaction: del file count", 0, countFiles(false));
 
     MobFileCompactor compactor =
       new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count, countMobRows(hTable));
-    assertEquals("After compaction: mob file count", 1, countMobFiles());
-    assertEquals("After compaction: del file count", 0, countDelFiles());
+    assertEquals("After compaction: mob file count", 1, countFiles(true));
+    assertEquals("After compaction: del file count", 0, countFiles(false));
   }
 
   @Test
@@ -138,7 +136,7 @@ public class TestMobFileCompactor {
     createMobTableAndAddData(count, 1);
 
     //get mob files
-    assertEquals("Before compaction: mob file count", count, countMobFiles());
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
     assertEquals(count, countMobRows(hTable));
 
     // now let's delete one cell
@@ -155,8 +153,8 @@ public class TestMobFileCompactor {
     }
 
     assertEquals("Before compaction: mob rows", count-1, countMobRows(hTable));
-    assertEquals("Before compaction: mob file count", count, countMobFiles());
-    assertEquals("Before compaction: del file count", 1, countDelFiles());
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
+    assertEquals("Before compaction: del file count", 1, countFiles(false));
 
     // do the mob file compaction
     MobFileCompactor compactor =
@@ -164,8 +162,8 @@ public class TestMobFileCompactor {
     compactor.compact();
 
     assertEquals("After compaction: mob rows", count-1, countMobRows(hTable));
-    assertEquals("After compaction: mob file count", 1, countMobFiles());
-    assertEquals("After compaction: del file count", 0, countDelFiles());
+    assertEquals("After compaction: mob file count", 1, countFiles(true));
+    assertEquals("After compaction: del file count", 0, countFiles(false));
   }
 
   @Test
@@ -179,7 +177,7 @@ public class TestMobFileCompactor {
     createMobTableAndAddData(count, 1);
 
     // get mob files
-    assertEquals("Before compaction: mob file count", count, countMobFiles());
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
     assertEquals(count, countMobRows(hTable));
 
     int largeFilesCount = countLargeFiles(mergeSize);;
@@ -197,8 +195,8 @@ public class TestMobFileCompactor {
       region.compactStores(true);
     }
     assertEquals("Before compaction: mob rows", count-1, countMobRows(hTable));
-    assertEquals("Before compaction: mob file count", count, countMobFiles());
-    assertEquals("Before compaction: del file count", 1, countDelFiles());
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
+    assertEquals("Before compaction: del file count", 1, countFiles(false));
 
     // do the mob file compaction
     MobFileCompactor compactor =
@@ -208,8 +206,8 @@ public class TestMobFileCompactor {
     assertEquals("After compaction: mob rows", count-1, countMobRows(hTable));
     // After the compaction, the files smaller than the mob compaction merge size
     // is merge to one file
-    assertEquals("After compaction: mob file count", largeFilesCount + 1, countMobFiles());
-    assertEquals("After compaction: del file count", 1, countDelFiles());
+    assertEquals("After compaction: mob file count", largeFilesCount + 1, countFiles(true));
+    assertEquals("After compaction: del file count", 1, countFiles(false));
 
     // reset the conf the the default
     conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
@@ -234,37 +232,25 @@ public class TestMobFileCompactor {
   }
 
   /**
-   * Gets the number of mob files in the mob path.
+   * Gets the number of files in the mob path.
+   * @param isMobFile gets number of the mob files or del files
    * @return the number of the mob files
    */
-  private int countMobFiles() throws IOException {
+  private int countFiles(boolean isMobFile) throws IOException {
     Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
       tableName), family);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
       for(FileStatus file : files) {
-        if(!StoreFileInfo.isDelFile(file.getPath())) {
-          count++;
-        }
-      }
-    }
-    return count;
-  }
-
-  /**
-   * Gets the number of del files in the mob path.
-   * @return the number of the del files
-   */
-  private int countDelFiles() throws IOException {
-    Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
-      tableName), family);
-    int count = 0;
-    if (fs.exists(mobDirPath)) {
-      FileStatus[] files = fs.listStatus(mobDirPath);
-      for(FileStatus file : files) {
-        if(StoreFileInfo.isDelFile(file.getPath())) {
-          count++;
+        if(isMobFile == true) {
+          if(!StoreFileInfo.isDelFile(file.getPath())) {
+            count++;
+          }
+        } else {
+          if(StoreFileInfo.isDelFile(file.getPath())) {
+            count++;
+          }
         }
       }
     }
