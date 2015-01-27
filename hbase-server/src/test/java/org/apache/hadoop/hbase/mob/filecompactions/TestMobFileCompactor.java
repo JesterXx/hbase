@@ -217,6 +217,47 @@ public class TestMobFileCompactor {
   }
 
   @Test
+  public void testCompactionWithDelFilesAndWithSmallCompactionBatchSize() throws Exception {
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, 2);
+    int count = 8;
+    //create table and generate mob files
+    createMobTableAndAddData(count, 1);
+
+    //get mob files
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
+    assertEquals(count, countMobRows(hTable));
+
+    // now let's delete one cell
+    Delete delete1 = new Delete(Bytes.toBytes(row + 0));
+    delete1.deleteFamily(Bytes.toBytes(family));
+    hTable.delete(delete1);
+    hTable.flushCommits();
+    admin.flush(tableName);
+
+    List<HRegion> regions = TEST_UTIL.getHBaseCluster().getRegions(
+        Bytes.toBytes(tableNameAsString));
+    for(HRegion region : regions) {
+      region.waitForFlushesAndCompactions();
+      region.compactStores(true);
+    }
+
+    assertEquals("Before compaction: mob rows", count-1, countMobRows(hTable));
+    assertEquals("Before compaction: mob file count", count, countFiles(true));
+    assertEquals("Before compaction: del file count", 1, countFiles(false));
+
+    // do the mob file compaction
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, desc.getTableName(), hcd);
+    compactor.compact();
+
+    assertEquals("After compaction: mob rows", count-1, countMobRows(hTable));
+    assertEquals("After compaction: mob file count", 4, countFiles(true));
+    assertEquals("After compaction: del file count", 0, countFiles(false));
+
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
+        MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
+  }
+
+  @Test
   public void testCompactionWithHFileLink() throws IOException, InterruptedException {
     int count = 4;
     // create table and generate mob files
