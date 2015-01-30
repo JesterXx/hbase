@@ -183,7 +183,7 @@ public class TestMobFileCompactor {
 
     int largeFilesCount = countLargeFiles(mergeSize);;
 
-    // now let's delete one cell
+    // now let's delete a family
     Delete delete = new Delete(Bytes.toBytes(row + 0));
     delete.deleteFamily(Bytes.toBytes(family));
     hTable.delete(delete);
@@ -227,7 +227,7 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: mob file count", count, countFiles(true));
     assertEquals(count, countMobRows(hTable));
 
-    // now let's delete one cell
+    // now let's delete a family
     Delete delete1 = new Delete(Bytes.toBytes(row + 0));
     delete1.deleteFamily(Bytes.toBytes(family));
     hTable.delete(delete1);
@@ -268,7 +268,7 @@ public class TestMobFileCompactor {
     // take a snapshot
     admin.snapshot(snapshotName1, tableName);
 
-    // now let's delete one cell
+    // now let's delete a family
     Delete delete = new Delete(Bytes.toBytes(row + 0));
     delete.deleteFamily(Bytes.toBytes(family));
     hTable.delete(delete);
