@@ -92,7 +92,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
       MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
-    // default is no limit
+    // default is 100
     compactionBatch = conf.getInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
@@ -132,36 +132,37 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     int selectedFileCount = 0;
     int irrelevantFileCount = 0;
     for (FileStatus file : candidates) {
-      if (file.isFile()) {
-        // group the del files and small files.
-        FileStatus linkedFile = file;
-        if (HFileLink.isHFileLink(file.getPath())) {
-          HFileLink link = new HFileLink(conf, file.getPath());
-          linkedFile = getLinkedFileStatus(link);
-          if (linkedFile == null) {
-            // If the linked file cannot be found, regard it as an irrelevantFileCount file
-            irrelevantFileCount++;
-            continue;
-          }
-        }
-        if (StoreFileInfo.isDelFile(linkedFile.getPath())) {
-          allDelFiles.add(file);
-        } else if (linkedFile.getLen() < mergeableSize) {
-          // add the small files to the merge pool
-          MobFileName fileName = MobFileName.create(linkedFile.getPath().getName());
-          CompactionPartitionId id = new CompactionPartitionId(fileName.getStartKey(), fileName.getDate());
-          CompactionPartition compactionPartition = filesToCompact.get(id);
-          if (compactionPartition == null) {
-            compactionPartition = new CompactionPartition(id);
-            compactionPartition.addFile(file);
-            filesToCompact.put(id, compactionPartition);
-          } else {
-            compactionPartition.addFile(file);
-          }
-          selectedFileCount++;
-        }
-      } else {
+      if (!file.isFile()) {
         irrelevantFileCount++;
+        continue;
+      }
+      // group the del files and small files.
+      FileStatus linkedFile = file;
+      if (HFileLink.isHFileLink(file.getPath())) {
+        HFileLink link = new HFileLink(conf, file.getPath());
+        linkedFile = getLinkedFileStatus(link);
+        if (linkedFile == null) {
+          // If the linked file cannot be found, regard it as an irrelevantFileCount file
+          irrelevantFileCount++;
+          continue;
+        }
+      }
+      if (StoreFileInfo.isDelFile(linkedFile.getPath())) {
+        allDelFiles.add(file);
+      } else if (linkedFile.getLen() < mergeableSize) {
+        // add the small files to the merge pool
+        MobFileName fileName = MobFileName.create(linkedFile.getPath().getName());
+        CompactionPartitionId id = new CompactionPartitionId(fileName.getStartKey(),
+          fileName.getDate());
+        CompactionPartition compactionPartition = filesToCompact.get(id);
+        if (compactionPartition == null) {
+          compactionPartition = new CompactionPartition(id);
+          compactionPartition.addFile(file);
+          filesToCompact.put(id, compactionPartition);
+        } else {
+          compactionPartition.addFile(file);
+        }
+        selectedFileCount++;
       }
     }
     PartitionedMobFileCompactionRequest request = new PartitionedMobFileCompactionRequest(
@@ -192,19 +193,19 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       delFilePaths.add(delFile.getPath());
     }
     List<Path> newDelPaths = compactDelFiles(request, delFilePaths);
-    List<StoreFile> delFiles = new ArrayList<StoreFile>();
+    List<StoreFile> newDelFiles = new ArrayList<StoreFile>();
     for (Path newDelPath : newDelPaths) {
       StoreFile sf = new StoreFile(fs, newDelPath, conf, compactionCacheConfig, BloomType.NONE);
-      delFiles.add(sf);
+      newDelFiles.add(sf);
     }
     // compact the mob files by partitions.
-    List<Path> paths = compactMobFiles(request, delFiles);
+    List<Path> paths = compactMobFiles(request, newDelFiles);
     // archive the del files if all the mob files are selected.
     if (request.type == CompactionType.ALL_FILES && !newDelPaths.isEmpty()) {
       try {
-        MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
+        MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), newDelFiles);
       } catch (IOException e) {
-        LOG.error("Failed to archive the del files " + delFiles, e);
+        LOG.error("Failed to archive the del files " + newDelFiles, e);
       }
     }
     return paths;
@@ -254,6 +255,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     List<Path> newFiles = new ArrayList<Path>();
     List<FileStatus> files = partition.listFiles();
     int offset = 0;
+    Path bulkloadPathOfPartition = new Path(bulkloadPath, partition.getPartitionId().toString());
     while (offset < files.size()) {
       int batch = compactionBatch;
       if (files.size() - offset < compactionBatch) {
@@ -264,6 +266,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
         offset++;
         continue;
       }
+      // clean the bulkload directory to avoid loading old files.
+      fs.delete(bulkloadPathOfPartition, true);
       // add the selected mob files and del files into filesToCompact
       List<StoreFile> filesToCompact = new ArrayList<StoreFile>();
       for (int i = offset; i < batch + offset; i++) {
@@ -271,152 +275,158 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
           BloomType.NONE);
         filesToCompact.add(sf);
       }
-      // Pair(maxSeqId, cellsCount)
-      Pair<Long, Long> fileInfo = getFileInfo(filesToCompact);
       filesToCompact.addAll(delFiles);
-      // open scanners to the selected mob files and del files.
-      List scanners = StoreFileScanner.getScannersForStoreFiles(filesToCompact, false, true, false,
-        null, HConstants.LATEST_TIMESTAMP);
-      Scan scan = new Scan();
-      scan.setMaxVersions(column.getMaxVersions());
-      long ttl = HStore.determineTTLFromFamily(column);
-      ScanInfo scanInfo = new ScanInfo(column, ttl, 0, KeyValue.COMPARATOR);
-      StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_DROP_DELETES, null,
-        scanners, 0L, HConstants.LATEST_TIMESTAMP);
-      // open writers for the mob files and new ref store files.
-      Writer writer = null;
-      Writer refFileWriter = null;
-      Path filePath = null;
-      Path refFilePath = null;
-      long mobCells = 0;
-      try {
-        writer = MobUtils.createWriter(conf, fs, column, partition.getPartitionId().getDate(),
-          tempPath, Long.MAX_VALUE, column.getCompactionCompression(), partition.getPartitionId()
-            .getStartKey(), compactionCacheConfig);
-        filePath = writer.getPath();
-        byte[] fileName = Bytes.toBytes(filePath.getName());
-        // create a temp file and open a writer for it in the bulkloadPath
-        refFileWriter = MobUtils.createRefFileWriter(conf, fs, column, bulkloadPath, fileInfo
-          .getSecond().longValue(), compactionCacheConfig);
-        refFilePath = refFileWriter.getPath();
-        List<Cell> cells = new ArrayList<Cell>();
-        boolean hasMore = false;
-        do {
-          hasMore = scanner.next(cells, compactionKVMax);
-          for (Cell cell : cells) {
-            KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
-            writer.append(kv);
-            KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName, tableNameTag);
-            refFileWriter.append(reference);
-            mobCells++;
-          }
-          cells.clear();
-        } while (hasMore);
-      } finally {
-        scanner.close();
-        if (writer != null) {
-          writer.appendMetadata(fileInfo.getFirst(), false, mobCells);
-          try {
-            writer.close();
-          } catch (IOException e) {
-            LOG.error("Failed to close the writer of the file " + filePath, e);
-          }
-        }
-        if (refFileWriter != null) {
-          refFileWriter.appendMetadata(fileInfo.getFirst(), false);
-          refFileWriter.appendFileInfo(StoreFile.BULKLOAD_TIME_KEY,
-            Bytes.toBytes(request.selectionTime));
-          try {
-            refFileWriter.close();
-          } catch (IOException e) {
-            LOG.error("Failed to close the writer of the ref file " + refFilePath, e);
-          }
-        }
-      }
-      if (mobCells > 0) {
-        // commit mob file
-        MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
-        // bulkload the ref file
-        try {
-          LoadIncrementalHFiles bulkload = new LoadIncrementalHFiles(conf);
-          bulkload.doBulkLoad(bulkloadPath, table);
-        } catch (Exception e) {
-          // delete the committed mob file and bulkload files in bulkloadPath
-          deletePath(new Path(mobFamilyDir, filePath.getName()));
-          deletePath(bulkloadPath);
-          throw new IOException(e);
-        }
-        // archive old mob files, but not include the del files.
-        List<StoreFile> archivedFiles = filesToCompact.subList(0, batch);
-        try {
-          MobUtils
-            .removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), archivedFiles);
-        } catch (IOException e) {
-          LOG.error("Failed to archive the files " + archivedFiles, e);
-        }
-        newFiles.add(new Path(mobFamilyDir, filePath.getName()));
-      } else {
-        // remove the new files
-        // the mob file is empty, delete it instead of committing.
-        deletePath(filePath);
-        // the mob file is empty, delete it instead of committing.
-        deletePath(refFilePath);
-      }
+      // compact the mob files in a batch.
+      compactMobFilesInBatch(request, partition, table, filesToCompact, batch,
+        bulkloadPathOfPartition, newFiles);
+      // move to the next batch.
       offset += batch;
     }
     return newFiles;
   }
 
   /**
+   * Compacts a partition of selected small mob files and all the del files in a batch.
+   * @param request The compaction request.
+   * @param partition A compaction partition.
+   * @param table The current table.
+   * @param filesToCompact The files to be compacted.
+   * @param batch The number of mob files to be compacted in a batch.
+   * @param bulkloadPathOfPartition The directory where the bulkload files of the current
+   *        partition are saved.
+   * @param newFiles The paths of new mob files after compactions.
+   * @throws IOException
+   */
+  private void compactMobFilesInBatch(PartitionedMobFileCompactionRequest request,
+    CompactionPartition partition, HTable table, List<StoreFile> filesToCompact, int batch,
+    Path bulkloadPathOfPartition, List<Path> newFiles)
+    throws IOException {
+    // open scanner to the selected mob files and del files.
+    StoreScanner scanner = createScanner(filesToCompact, ScanType.COMPACT_DROP_DELETES);
+    // the mob files to be compacted, not include the del files.
+    List<StoreFile> mobFilesToCompact = filesToCompact.subList(0, batch);
+    // Pair(maxSeqId, cellsCount)
+    Pair<Long, Long> fileInfo = getFileInfo(mobFilesToCompact);
+    // open writers for the mob files and new ref store files.
+    Writer writer = null;
+    Writer refFileWriter = null;
+    Path filePath = null;
+    Path refFilePath = null;
+    long mobCells = 0;
+    try {
+      writer = MobUtils.createWriter(conf, fs, column, partition.getPartitionId().getDate(),
+        tempPath, Long.MAX_VALUE, column.getCompactionCompression(), partition.getPartitionId()
+          .getStartKey(), compactionCacheConfig);
+      filePath = writer.getPath();
+      byte[] fileName = Bytes.toBytes(filePath.getName());
+      // create a temp file and open a writer for it in the bulkloadPath
+      refFileWriter = MobUtils.createRefFileWriter(conf, fs, column, bulkloadPathOfPartition,
+        fileInfo.getSecond().longValue(), compactionCacheConfig);
+      refFilePath = refFileWriter.getPath();
+      List<Cell> cells = new ArrayList<Cell>();
+      boolean hasMore = false;
+      do {
+        hasMore = scanner.next(cells, compactionKVMax);
+        for (Cell cell : cells) {
+          // TODO remove this after the new code are introduced.
+          KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
+          // write the mob cell to the mob file.
+          writer.append(kv);
+          // write the new reference cell to the store file.
+          KeyValue reference = MobUtils.createMobRefKeyValue(kv, fileName, tableNameTag);
+          refFileWriter.append(reference);
+          mobCells++;
+        }
+        cells.clear();
+      } while (hasMore);
+    } finally {
+      // close the scanner.
+      scanner.close();
+      // append metadata to the mob file, and close the mob file writer.
+      closeMobFileWriter(writer, fileInfo.getFirst(), mobCells);
+      // append metadata and bulkload info to the ref mob file, and close the writer.
+      closeRefFileWriter(refFileWriter, fileInfo.getFirst(), request.selectionTime);
+    }
+    if (mobCells > 0) {
+      // commit mob file
+      MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
+      // bulkload the ref file
+      bulkloadRefFile(table, bulkloadPathOfPartition, filePath.getName());
+      // archive the old mob files, do not archive the del files.
+      try {
+        MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(),
+          mobFilesToCompact);
+      } catch (IOException e) {
+        LOG.error("Failed to archive the files " + mobFilesToCompact, e);
+      }
+      newFiles.add(new Path(mobFamilyDir, filePath.getName()));
+    } else {
+      // remove the new files
+      // the mob file is empty, delete it instead of committing.
+      deletePath(filePath);
+      // the ref file is empty, delete it instead of committing.
+      deletePath(refFilePath);
+    }
+  }
+
+  /**
    * Compacts the del files in batches which avoids opening too many files.
    * @param request The compaction request.
    * @param delFilePaths
-   * @return The paths of new del files after merging.
+   * @return The paths of new del files after merging or the original files if no merging
+   *         is necessary.
    * @throws IOException
    */
   protected List<Path> compactDelFiles(PartitionedMobFileCompactionRequest request,
     List<Path> delFilePaths) throws IOException {
-    if (delFilePaths.size() > delFileMaxCount) {
-      // when there are more del files than the number that is allowed, merge it firstly.
-      int index = 0;
-      List<StoreFile> batchedDelFiles = new ArrayList<StoreFile>();
-      List<Path> paths = new ArrayList<Path>();
-      Iterator<Path> pathIterator = delFilePaths.iterator();
-      boolean hasNext = pathIterator.hasNext();
-      while (hasNext) {
-        // compact the del files in batches.
-        if (index < compactionBatch) {
-          StoreFile delFile = new StoreFile(fs, pathIterator.next(), conf, compactionCacheConfig,
-            BloomType.NONE);
-          batchedDelFiles.add(delFile);
-          index++;
-        } else {
-          // merge del store files in a batch.
+    if (delFilePaths.size() <= delFileMaxCount) {
+      return delFilePaths;
+    }
+    // when there are more del files than the number that is allowed, merge it firstly.
+    int index = 0;
+    List<StoreFile> batchedDelFiles = new ArrayList<StoreFile>();
+    List<Path> paths = new ArrayList<Path>();
+    Iterator<Path> pathIterator = delFilePaths.iterator();
+    boolean hasNext = pathIterator.hasNext();
+    while (hasNext) {
+      // compact the del files in batches.
+      if (index < compactionBatch) {
+        // add the store file into the batch if it is not full.
+        batchedDelFiles.add(new StoreFile(fs, pathIterator.next(), conf, compactionCacheConfig,
+          BloomType.NONE));
+        index++;
+      } else {
+        // the batch is full and merge del store files in a batch.
+        paths.add(mergeDelFiles(request, batchedDelFiles));
+        batchedDelFiles.clear();
+        index = 0;
+      }
+      hasNext = pathIterator.hasNext();
+      // If it has next, directly go to the next round.
+      // If not, then follow the steps:
+      // 1. Firstly merge the remaining del files in the current batch since the batch is
+      //    not full yet.
+      // 2. Check if the number of existing del files is still larger than the
+      //    MOB_FILE_COMPACTION_BATCH_SIZE. If no directly finish the compaction, if yes it
+      //    will start another round of compaction.
+      if (!hasNext) {
+        if (index > 0) {
+          // when the number of del files does not reach the compactionBatch and no more del
+          // files are left, directly merge them.
           paths.add(mergeDelFiles(request, batchedDelFiles));
           batchedDelFiles.clear();
-          index = 0;
         }
-        hasNext = pathIterator.hasNext();
-        if (!hasNext) {
-          if (index > 0) {
-            // when the number of del files does not reach the compactionBatch and no more del
-            // files are left, directly merge them.
-            paths.add(mergeDelFiles(request, batchedDelFiles));
-            batchedDelFiles.clear();
-          }
-          // check whether the number of the remaining del files is not larger than the max count.
-          if (paths.size() > delFileMaxCount) {
-            // continue next round of merging.
-            pathIterator = paths.iterator();
-            hasNext = true;
-            index = 0;
-            paths = new ArrayList<>();
-          }
+        // check whether the number of the remaining del files is not larger than the max count.
+        if (paths.size() > delFileMaxCount) {
+          // there're too many del files left, we need continue the next round of compaction.
+          pathIterator = paths.iterator();
+          hasNext = true;
+          index = 0;
+          paths = new ArrayList<>();
         }
       }
-      return paths;
     }
-    return delFilePaths;
+    return paths;
   }
 
   /**
@@ -429,14 +439,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
   private Path mergeDelFiles(PartitionedMobFileCompactionRequest request, List<StoreFile> delFiles)
     throws IOException {
     // create a scanner for the del files.
-    List scanners = StoreFileScanner.getScannersForStoreFiles(delFiles, false, true, false, null,
-      HConstants.LATEST_TIMESTAMP);
-    Scan scan = new Scan();
-    scan.setMaxVersions(column.getMaxVersions());
-    long ttl = HStore.determineTTLFromFamily(column);
-    ScanInfo scanInfo = new ScanInfo(column, ttl, 0, KeyValue.COMPARATOR);
-    StoreScanner scanner = new StoreScanner(scan, scanInfo, ScanType.COMPACT_RETAIN_DELETES, null,
-      scanners, 0L, HConstants.LATEST_TIMESTAMP);
+    StoreScanner scanner = createScanner(delFiles, ScanType.COMPACT_RETAIN_DELETES);
     Writer writer = null;
     Path filePath = null;
     try {
@@ -449,6 +452,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       do {
         hasMore = scanner.next(cells, compactionKVMax);
         for (Cell cell : cells) {
+          // TODO remove this after the new code are introduced.
           KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
           writer.append(kv);
         }
@@ -473,6 +477,88 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       LOG.error("Failed to archive the old del files " + delFiles, e);
     }
     return path;
+  }
+
+  /**
+   * Creates a store scanner.
+   * @param filesToCompact The files to be compacted.
+   * @param scanType The scan type.
+   * @return The store scanner.
+   * @throws IOException
+   */
+  private StoreScanner createScanner(List<StoreFile> filesToCompact, ScanType scanType)
+    throws IOException {
+    List scanners = StoreFileScanner.getScannersForStoreFiles(filesToCompact, false, true, false,
+      null, HConstants.LATEST_TIMESTAMP);
+    Scan scan = new Scan();
+    scan.setMaxVersions(column.getMaxVersions());
+    long ttl = HStore.determineTTLFromFamily(column);
+    ScanInfo scanInfo = new ScanInfo(column, ttl, 0, KeyValue.COMPARATOR);
+    StoreScanner scanner = new StoreScanner(scan, scanInfo, scanType, null, scanners, 0L,
+      HConstants.LATEST_TIMESTAMP);
+    return scanner;
+  }
+
+  /**
+   * Bulkloads the current file.
+   * @param table The current table.
+   * @param bulkloadDirectory The path of bulkload directory.
+   * @param fileName The current file name.
+   * @throws IOException
+   */
+  private void bulkloadRefFile(HTable table, Path bulkloadDirectory, String fileName)
+    throws IOException {
+    // bulkload the ref file
+    try {
+      LoadIncrementalHFiles bulkload = new LoadIncrementalHFiles(conf);
+      bulkload.doBulkLoad(bulkloadDirectory, table);
+    } catch (Exception e) {
+      // delete the committed mob file
+      deletePath(new Path(mobFamilyDir, fileName));
+      throw new IOException(e);
+    } finally {
+      // delete the bulkload files in bulkloadPath
+      deletePath(bulkloadDirectory);
+    }
+  }
+
+  /**
+   * Closes the mob file writer.
+   * @param writer The mob file writer.
+   * @param maxSeqId Maximum sequence id.
+   * @param mobCellsCount The number of mob cells.
+   * @throws IOException
+   */
+  private void closeMobFileWriter(Writer writer, long maxSeqId, long mobCellsCount)
+    throws IOException {
+    if (writer != null) {
+      writer.appendMetadata(maxSeqId, false, mobCellsCount);
+      try {
+        writer.close();
+      } catch (IOException e) {
+        LOG.error("Failed to close the writer of the file " + writer.getPath(), e);
+      }
+    }
+  }
+
+  /**
+   * Closes the ref file writer.
+   * @param writer The ref file writer.
+   * @param maxSeqId Maximum sequence id.
+   * @param bulkloadTime The timestamp at which the bulk load file is created.
+   * @throws IOException
+   */
+  private void closeRefFileWriter(Writer writer, long maxSeqId, long bulkloadTime)
+    throws IOException {
+    if (writer != null) {
+      writer.appendMetadata(maxSeqId, false);
+      writer.appendFileInfo(StoreFile.BULKLOAD_TIME_KEY, Bytes.toBytes(bulkloadTime));
+      try {
+        writer.close();
+      } catch (IOException e) {
+        LOG.error("Failed to close the writer of the ref file " + writer.getPath(), e);
+      }
+    }
   }
 
   /**

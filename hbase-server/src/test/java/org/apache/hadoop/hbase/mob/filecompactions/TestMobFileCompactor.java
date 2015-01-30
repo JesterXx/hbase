@@ -137,7 +137,7 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: mob file count", count, countFiles(true));
     assertEquals(count, countMobRows(hTable));
 
-    // now let's delete one cell
+    // now let's delete a family
     Delete delete = new Delete(Bytes.toBytes(row + 0));
     delete.deleteFamily(Bytes.toBytes(family));
     hTable.delete(delete);

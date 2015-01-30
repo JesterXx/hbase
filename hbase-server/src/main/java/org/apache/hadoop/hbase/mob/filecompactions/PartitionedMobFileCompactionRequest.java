@@ -30,6 +30,8 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 /**
  * An implementation of {@link MobFileCompactionRequest} that is used in
  * {@link PartitionedMobFileCompactor}.
+ * The mob files that have the same start key and date in their names belong to
+ * the same partition.
  */
 @InterfaceAudience.Private
 public class PartitionedMobFileCompactionRequest extends MobFileCompactionRequest {
@@ -138,7 +140,7 @@ public class PartitionedMobFileCompactionRequest extends MobFileCompactionReques
 
     @Override
     public String toString() {
-      return new StringBuilder(startKey).append("-").append(date).toString();
+      return new StringBuilder(startKey).append(date).toString();
     }
   }
 }

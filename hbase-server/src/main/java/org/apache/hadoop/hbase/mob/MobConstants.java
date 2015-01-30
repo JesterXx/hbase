@@ -77,11 +77,11 @@ public class MobConstants {
   public final static String EMPTY_STRING = "";
   /**
    * If the size of a mob file is less than this value, it's regarded as a small file and needs to
-   * be merged in mob file compaction. The default value is 128MB.
+   * be merged in mob file compaction. The default value is 192MB.
    */
   public static final String MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD =
     "hbase.mob.file.compaction.mergeable.threshold";
-  public static final long DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD = 128 * 1024 * 1024;
+  public static final long DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD = 192 * 1024 * 1024;
   /**
    * The max number of del files that is allowed in the mob file compaction. In the mob file
    * compaction, when the number of existing del files is larger than this value, they are merged
@@ -94,11 +94,11 @@ public class MobConstants {
    * The mob file compaction merges the small mob files to bigger ones. If the number of the
    * small files is very large, it could lead to a "too many opened file handlers" in the merge.
    * And the merge has to be split into batches. This value limits the number of mob files
-   * that are selected in a batch of the mob file compaction. The default value is 2147483647.
+   * that are selected in a batch of the mob file compaction. The default value is 100.
    */
   public static final String MOB_FILE_COMPACTION_BATCH_SIZE =
     "hbase.mob.file.compaction.batch.size";
-  public static final int DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE = Integer.MAX_VALUE;
+  public static final int DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE = 100;
   /**
    * The period that MobFileCompactionChore runs. The unit is millisecond.
    * The default value is one week.
@@ -107,6 +107,7 @@ public class MobConstants {
     "hbase.master.mob.file.compaction.chore.period";
   public static final int DEFAULT_MOB_FILE_COMPACTION_CHORE_PERIOD =
     24 * 60 * 60 * 1000 * 7; // a week
+  public static final String MOB_FILE_COMPACTOR_CLASS_KEY = "hbase.mob.file.compactor.class";
   private MobConstants() {
 
   }

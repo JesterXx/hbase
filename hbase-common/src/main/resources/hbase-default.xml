@@ -1519,10 +1519,10 @@ possible configurations would overwhelm and obscure the important.
   </property>
   <property>
     <name>hbase.mob.file.compaction.mergeable.threshold</name>
-    <value>134217728</value>
+    <value>201326592</value>
     <description>
       If the size of a mob file is less than this value, it's regarded as a small
-      file and needs to be merged in mob file compaction. The default value is 128MB.
+      file and needs to be merged in mob file compaction. The default value is 192MB.
     </description>
   </property>
   <property>
@@ -1537,13 +1537,13 @@ possible configurations would overwhelm and obscure the important.
   </property>
   <property>
     <name>hbase.mob.file.compaction.batch.size</name>
-    <value>2147483647</value>
+    <value>100</value>
     <description>
       The max number of the mob files that is allowed in a batch of the mob file compaction.
       The mob file compaction merges the small mob files to bigger ones. If the number of the
       small files is very large, it could lead to a "too many opened file handlers" in the merge.
       And the merge has to be split into batches. This value limits the number of mob files
-      that are selected in a batch of the mob file compaction. The default value is 2147483647.
+      that are selected in a batch of the mob file compaction. The default value is 100.
     </description>
   </property>
   <property>
