@@ -1554,4 +1554,11 @@ possible configurations would overwhelm and obscure the important.
       The default value is one week.
     </description>
   </property>
+  <property>
+    <name>hbase.mob.file.compactor.class</name>
+    <value>org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactor</value>
+    <description>
+      Implementation of mob file compactor, the default one is PartitionedMobFileCompactor.
+    </description>
+  </property>
 </configuration>
