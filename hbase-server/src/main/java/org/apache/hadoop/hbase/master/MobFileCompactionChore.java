@@ -20,6 +20,12 @@ package org.apache.hadoop.hbase.master;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -37,6 +43,7 @@ import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactor;
 import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactor;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
+import org.apache.hadoop.hbase.util.Threads;
 
 /**
  * The Class MobFileCompactChore for running compaction regularly to merge small mob files.
@@ -47,6 +54,7 @@ public class MobFileCompactionChore extends Chore{
   private static final Log LOG = LogFactory.getLog(MobFileCompactionChore.class);
   private HMaster master;
   private TableLockManager tableLockManager;
+  private ExecutorService pool;
 
   public MobFileCompactionChore(HMaster master) {
     super(master.getServerName() + "-MobFileCompactChore", master.getConfiguration().getInt(
@@ -54,6 +62,7 @@ public class MobFileCompactionChore extends Chore{
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_CHORE_PERIOD), master);
     this.master = master;
     this.tableLockManager = master.getTableLockManager();
+    this.pool = createThreadPool();
   }
 
   @Override
@@ -72,9 +81,10 @@ public class MobFileCompactionChore extends Chore{
           MobFileCompactor compactor = null;
           try {
             compactor = ReflectionUtils.instantiateWithCustomCtor(className, new Class[] {
-              Configuration.class, FileSystem.class, TableName.class, HColumnDescriptor.class },
+              Configuration.class, FileSystem.class, TableName.class, HColumnDescriptor.class,
+              ExecutorService.class },
               new Object[] { master.getConfiguration(), master.getFileSystem(), htd.getTableName(),
-                hcd });
+                hcd, pool });
           } catch (Exception e) {
             throw new IOException("Unable to load configured mob file compactor '" + className
               + "'", e);
@@ -111,5 +121,42 @@ public class MobFileCompactionChore extends Chore{
     } catch (Exception e) {
       LOG.error("Fail to clean the expired mob files", e);
     }
+  }
+
+  @Override
+  protected void cleanup() {
+    super.cleanup();
+    pool.shutdown();
+  }
+
+  /**
+   * Creates a thread pool.
+   * @return A thread pool.
+   */
+  private ExecutorService createThreadPool() {
+    Configuration conf = master.getConfiguration();
+    int maxThreads = conf.getInt(MobConstants.MOB_FILE_COMPACTION_CHORE_THREADS_MAX,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_CHORE_THREADS_MAX);
+    if (maxThreads == 0) {
+      maxThreads = 1;
+    }
+    long keepAliveTime = conf.getLong(MobConstants.MOB_FILE_COMPACTION_CHORE_THREADS_KEEPALIVETIME,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_CHORE_THREADS_KEEPALIVETIME);
+    final SynchronousQueue<Runnable> queue = new SynchronousQueue<Runnable>();
+    ThreadPoolExecutor pool = new ThreadPoolExecutor(1, maxThreads, keepAliveTime,
+      TimeUnit.SECONDS, queue, Threads.newDaemonThreadFactory("MobFileCompactionChore"),
+      new RejectedExecutionHandler() {
+        @Override
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+          try {
+            // waiting for a thread to pick up instead of throwing exceptions.
+            queue.put(r);
+          } catch (InterruptedException e) {
+            throw new RejectedExecutionException(e);
+          }
+        }
+    });
+    ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
+    return pool;
   }
 }

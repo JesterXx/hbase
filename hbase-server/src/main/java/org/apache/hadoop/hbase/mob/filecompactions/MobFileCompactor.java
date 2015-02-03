@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.mob.filecompactions;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
@@ -45,13 +46,15 @@ public abstract class MobFileCompactor {
 
   protected Path mobTableDir;
   protected Path mobFamilyDir;
+  protected ExecutorService pool;
 
   public MobFileCompactor(Configuration conf, FileSystem fs, TableName tableName,
-    HColumnDescriptor column) {
+    HColumnDescriptor column, ExecutorService pool) {
     this.conf = conf;
     this.fs = fs;
     this.tableName = tableName;
     this.column = column;
+    this.pool = pool;
     mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
     mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
   }

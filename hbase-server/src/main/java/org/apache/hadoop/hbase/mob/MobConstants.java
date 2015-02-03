@@ -108,6 +108,15 @@ public class MobConstants {
   public static final int DEFAULT_MOB_FILE_COMPACTION_CHORE_PERIOD =
     24 * 60 * 60 * 1000 * 7; // a week
   public static final String MOB_FILE_COMPACTOR_CLASS_KEY = "hbase.mob.file.compactor.class";
+  /**
+   * The max number of threads used in MobFileCompactionChore.
+   */
+  public static final String MOB_FILE_COMPACTION_CHORE_THREADS_MAX =
+    "hbase.master.mob.file.compaction.chore.threads.max";
+  public static final int DEFAULT_MOB_FILE_COMPACTION_CHORE_THREADS_MAX = 1;
+  public static final String MOB_FILE_COMPACTION_CHORE_THREADS_KEEPALIVETIME =
+    "hbase.master.mob.file.compaction.chore.threads.keepalivetime";
+  public static final long DEFAULT_MOB_FILE_COMPACTION_CHORE_THREADS_KEEPALIVETIME = 60;
   private MobConstants() {
 
   }

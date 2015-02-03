@@ -1561,4 +1561,11 @@ possible configurations would overwhelm and obscure the important.
       Implementation of mob file compactor, the default one is PartitionedMobFileCompactor.
     </description>
   </property>
+  <property>
+    <name>hbase.master.mob.file.compaction.chore.threads.max</name>
+    <value>1</value>
+    <description>
+      The max number of threads used in MobFileCompactionChore.
+    </description>
+  </property>
 </configuration>

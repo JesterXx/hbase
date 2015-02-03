@@ -28,6 +28,10 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -86,8 +90,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
   private Tag tableNameTag;
 
   public PartitionedMobFileCompactor(Configuration conf, FileSystem fs, TableName tableName,
-    HColumnDescriptor column) {
-    super(conf, fs, tableName, column);
+    HColumnDescriptor column, ExecutorService pool) {
+    super(conf, fs, tableName, column, pool);
     mergeableSize = conf.getLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
@@ -218,18 +222,40 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    * @return The paths of new mob files after compactions.
    * @throws IOException
    */
-  protected List<Path> compactMobFiles(PartitionedMobFileCompactionRequest request,
-    List<StoreFile> delFiles) throws IOException {
+  protected List<Path> compactMobFiles(final PartitionedMobFileCompactionRequest request,
+    final List<StoreFile> delFiles) throws IOException {
     Collection<CompactionPartition> partitions = request.compactionPartitions;
     if (partitions == null || partitions.isEmpty()) {
       return Collections.emptyList();
     }
     List<Path> paths = new ArrayList<Path>();
-    HTable table = new HTable(conf, tableName);
+    final HTable table = new HTable(conf, tableName);
     try {
+      Map<CompactionPartitionId, Future<List<Path>>> results =
+        new HashMap<CompactionPartitionId, Future<List<Path>>>();
       // compact the mob files by partitions.
-      for (CompactionPartition partition : partitions) {
-        paths.addAll(compactMobFilePartition(request, partition, delFiles, table));
+      for (final CompactionPartition partition : partitions) {
+        results.put(partition.getPartitionId(), pool.submit(new Callable<List<Path>>() {
+          @Override
+          public List<Path> call() throws Exception {
+            return compactMobFilePartition(request, partition, delFiles, table);
+          }
+        }));
+      }
+      // compact the partitions in parallel.
+      boolean hasFailure = false;
+      for (Entry<CompactionPartitionId, Future<List<Path>>> result : results.entrySet()) {
+        try {
+          paths.addAll(result.getValue().get());
+        } catch (Exception e) {
+          // just log the error
+          LOG.error("Failed to compact the partition " + result.getKey(), e);
+          hasFailure = true;
+        }
+      }
+      if (hasFailure) {
+        // if any partition fails in the compaction, directly throw an exception.
+        throw new IOException("Failed to compact the partitions");
       }
     } finally {
       try {
