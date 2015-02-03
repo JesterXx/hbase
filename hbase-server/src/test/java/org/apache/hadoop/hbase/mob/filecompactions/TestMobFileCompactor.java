@@ -23,6 +23,12 @@ import static org.junit.Assert.assertEquals;
 import java.io.IOException;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
@@ -48,6 +54,7 @@ import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.Threads;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -73,16 +80,19 @@ public class TestMobFileCompactor {
   private final static String qf2 = "qualifier2";
   private static byte[] KEYS = Bytes.toBytes("012");
   private static int regionNum = KEYS.length;
+  private static ExecutorService pool;
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
     TEST_UTIL.getConfiguration().setInt("hbase.master.info.port", 0);
     TEST_UTIL.getConfiguration().setBoolean("hbase.regionserver.info.port.auto", true);
     TEST_UTIL.startMiniCluster(1);
+    pool = createThreadPool(TEST_UTIL.getConfiguration());
   }
 
   @AfterClass
   public static void tearDownAfterClass() throws Exception {
+    pool.shutdown();
     TEST_UTIL.shutdownMiniCluster();
   }
 
@@ -129,8 +139,7 @@ public class TestMobFileCompactor {
     assertEquals("Before compaction: mob file count", regionNum*count, countFiles(true, family1));
     assertEquals("Before compaction: del file count", 0, countFiles(false, family1));
 
-    MobFileCompactor compactor =
-      new PartitionedMobFileCompactor(conf, fs, tableName, hcd1);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
     assertEquals("After compaction: mob rows count", regionNum*count, countMobRows(hTable));
@@ -166,8 +175,7 @@ public class TestMobFileCompactor {
         countFiles(false, family2));
 
     // do the mob file compaction
-    MobFileCompactor compactor =
-      new PartitionedMobFileCompactor(conf, fs, tableName, hcd1);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
     assertEquals("After compaction: mob rows count", regionNum*(count-1), countMobRows(hTable));
@@ -213,8 +221,7 @@ public class TestMobFileCompactor {
         countFiles(false, family2));
 
     // do the mob file compaction
-    MobFileCompactor compactor =
-      new PartitionedMobFileCompactor(conf, fs, tableName, hcd1);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
     assertEquals("After compaction: mob rows count", regionNum*(count-1), countMobRows(hTable));
@@ -264,7 +271,7 @@ public class TestMobFileCompactor {
         countFiles(false, family2));
 
     // do the mob file compaction
-    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
     assertEquals("After compaction: mob rows count", regionNum*(count-1),
@@ -309,8 +316,7 @@ public class TestMobFileCompactor {
         countFiles(false, family2));
 
     // do the mob file compaction
-    MobFileCompactor compactor =
-      new PartitionedMobFileCompactor(conf, fs, tableName, hcd1);
+    MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
     assertEquals("After first compaction: mob rows count", regionNum*(count-1),
@@ -547,5 +553,26 @@ public class TestMobFileCompactor {
       splitKeys[i] = new byte[] { KEYS[i+1] };
     }
     return splitKeys;
+  }
+
+  private static ExecutorService createThreadPool(Configuration conf) {
+    int maxThreads = 10;
+    long keepAliveTime = 60;
+    final SynchronousQueue<Runnable> queue = new SynchronousQueue<Runnable>();
+    ThreadPoolExecutor pool = new ThreadPoolExecutor(1, maxThreads, keepAliveTime,
+      TimeUnit.SECONDS, queue, Threads.newDaemonThreadFactory("MobFileCompactionChore"),
+      new RejectedExecutionHandler() {
+        @Override
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+          try {
+            // waiting for a thread to pick up instead of throwing exceptions.
+            queue.put(r);
+          } catch (InterruptedException e) {
+            throw new RejectedExecutionException(e);
+          }
+        }
+      });
+    ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
+    return pool;
   }
 }

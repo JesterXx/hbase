@@ -26,6 +26,12 @@ import java.util.Date;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
@@ -57,6 +63,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.Threads;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -78,6 +85,7 @@ public class TestPartitionedMobFileCompactor {
   private Path basePath;
   private String mobSuffix;
   private String delSuffix;
+  private static ExecutorService pool;
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
@@ -85,10 +93,12 @@ public class TestPartitionedMobFileCompactor {
     TEST_UTIL.getConfiguration().setBoolean("hbase.regionserver.info.port.auto", true);
     TEST_UTIL.getConfiguration().setInt("hfile.format.version", 3);
     TEST_UTIL.startMiniCluster(1);
+    pool = createThreadPool(TEST_UTIL.getConfiguration());
   }
 
   @AfterClass
   public static void tearDownAfterClass() throws Exception {
+    pool.shutdown();
     TEST_UTIL.shutdownMiniCluster();
   }
 
@@ -195,7 +205,7 @@ public class TestPartitionedMobFileCompactor {
   private void testSelectFiles(String tableName, final CompactionType type,
       final List<String> expected) throws IOException {
     PartitionedMobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs,
-        TableName.valueOf(tableName), hcd) {
+      TableName.valueOf(tableName), hcd, pool) {
       @Override
       public List<Path> compact(List<FileStatus> files) throws IOException {
         if (files == null || files.isEmpty()) {
@@ -223,7 +233,7 @@ public class TestPartitionedMobFileCompactor {
   private void testCompactDelFiles(String tableName, final int expectedFileCount,
       final int expectedCellCount) throws IOException {
     PartitionedMobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs,
-        TableName.valueOf(tableName), hcd) {
+      TableName.valueOf(tableName), hcd, pool) {
       @Override
       protected List<Path> performCompaction(PartitionedMobFileCompactionRequest request)
           throws IOException {
@@ -367,5 +377,26 @@ public class TestPartitionedMobFileCompactor {
     }
     scanner.close();
     return size;
+  }
+
+  private static ExecutorService createThreadPool(Configuration conf) {
+    int maxThreads = 10;
+    long keepAliveTime = 60;
+    final SynchronousQueue<Runnable> queue = new SynchronousQueue<Runnable>();
+    ThreadPoolExecutor pool = new ThreadPoolExecutor(1, maxThreads, keepAliveTime,
+      TimeUnit.SECONDS, queue, Threads.newDaemonThreadFactory("MobFileCompactionChore"),
+      new RejectedExecutionHandler() {
+        @Override
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+          try {
+            // waiting for a thread to pick up instead of throwing exceptions.
+            queue.put(r);
+          } catch (InterruptedException e) {
+            throw new RejectedExecutionException(e);
+          }
+        }
+      });
+    ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
+    return pool;
   }
 }
