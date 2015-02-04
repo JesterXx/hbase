@@ -82,7 +82,8 @@ public class TestMobFileCompactor {
   private static int regionNum = KEYS.length;
   private static int delRowNum = 1;
   private static int delCellNum = 6;
-  private static int perRowCell = 3;
+  private static int cellNumPerRow = 3;
+  private static int rowNumPerFile = 2;
   private static ExecutorService pool;
 
   @BeforeClass
@@ -136,16 +137,19 @@ public class TestMobFileCompactor {
   public void testCompactionWithoutDelFiles() throws Exception {
     int count = 10;
     // generate mob files
-    loadData(count);
+    loadData(count, rowNumPerFile);
+    int rowNumPerRegion = count*rowNumPerFile;
 
-    assertEquals("Before compaction: mob rows count", regionNum*count, countMobRows(hTable));
+    assertEquals("Before compaction: mob rows count", regionNum*rowNumPerRegion,
+        countMobRows(hTable));
     assertEquals("Before compaction: mob file count", regionNum*count, countFiles(true, family1));
     assertEquals("Before compaction: del file count", 0, countFiles(false, family1));
 
     MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
-    assertEquals("After compaction: mob rows count", regionNum*count, countMobRows(hTable));
+    assertEquals("After compaction: mob rows count", regionNum*rowNumPerRegion,
+        countMobRows(hTable));
     assertEquals("After compaction: mob file count", regionNum, countFiles(true, family1));
     assertEquals("After compaction: del file count", 0, countFiles(false, family1));
   }
@@ -154,10 +158,12 @@ public class TestMobFileCompactor {
   public void testCompactionWithDelFiles() throws Exception {
     int count = 6;
     // generate mob files
-    loadData(count);
+    loadData(count, rowNumPerFile);
+    int rowNumPerRegion = count*rowNumPerFile;
 
-    assertEquals("Before deleting: mob rows count", regionNum*count, countMobRows(hTable));
-    assertEquals("Before deleting: mob cells count", regionNum*perRowCell*count,
+    assertEquals("Before deleting: mob rows count", regionNum*rowNumPerRegion,
+        countMobRows(hTable));
+    assertEquals("Before deleting: mob cells count", regionNum*cellNumPerRow*rowNumPerRegion,
         countMobCells(hTable));
     assertEquals("Before deleting: family1 mob file count", regionNum*count,
         countFiles(true, family1));
@@ -166,10 +172,10 @@ public class TestMobFileCompactor {
 
     createDelFile();
 
-    assertEquals("Before compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("Before compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
-    assertEquals("Before compaction: mob cells count", regionNum*(perRowCell*count-delCellNum),
-        countMobCells(hTable));
+    assertEquals("Before compaction: mob cells count",
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     assertEquals("Before compaction: family1 mob file count", regionNum*count,
         countFiles(true, family1));
     assertEquals("Before compaction: family2 file count", regionNum*count,
@@ -183,10 +189,10 @@ public class TestMobFileCompactor {
     MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
-    assertEquals("After compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
-    assertEquals("After compaction: mob cells count", regionNum*(perRowCell*count-delCellNum),
-        countMobCells(hTable));
+    assertEquals("After compaction: mob cells count",
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     assertEquals("After compaction: family1 mob file count", regionNum,
         countFiles(true, family1));
     assertEquals("After compaction: family2 mob file count", regionNum*count,
@@ -198,27 +204,29 @@ public class TestMobFileCompactor {
 
   @Test
   public void testCompactionWithDelFilesAndNotMergeAllFiles() throws Exception {
-    int mergeSize = 5000;
+    int mergeSize = 10000;
     // change the mob compaction merge size
     conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
 
     int count = 8;
     // generate mob files
-    loadData(count);
+    loadData(count, rowNumPerFile);
+    int rowNumPerRegion = count*rowNumPerFile;
 
-    assertEquals("Before deleting: mob rows count", regionNum*count, countMobRows(hTable));
-    assertEquals("Before deleting: mob cells count", regionNum*perRowCell*count,
+    assertEquals("Before deleting: mob rows count", regionNum*rowNumPerRegion,
+        countMobRows(hTable));
+    assertEquals("Before deleting: mob cells count", regionNum*cellNumPerRow*rowNumPerRegion,
         countMobCells(hTable));
     assertEquals("Before deleting: mob file count", regionNum*count, countFiles(true, family1));
 
-    int largeFilesCount = countLargeFiles(mergeSize, family1);;
+    int largeFilesCount = countLargeFiles(mergeSize, family1);
 
     createDelFile();
 
-    assertEquals("Before compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("Before compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
-    assertEquals("Before compaction: mob cells count", regionNum*(perRowCell*count-delCellNum),
-        countMobCells(hTable));
+    assertEquals("Before compaction: mob cells count",
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     assertEquals("Before compaction: family1 mob file count", regionNum*count,
         countFiles(true, family1));
     assertEquals("Before compaction: family2 mob file count", regionNum*count,
@@ -232,10 +240,10 @@ public class TestMobFileCompactor {
     MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
-    assertEquals("After compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
-    assertEquals("After compaction: mob cells count", regionNum*(perRowCell*count-delCellNum),
-        countMobCells(hTable));
+    assertEquals("After compaction: mob cells count",
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     // After the compaction, the files smaller than the mob compaction merge size
     // is merge to one file
     assertEquals("After compaction: family1 mob file count", largeFilesCount + regionNum,
@@ -258,9 +266,11 @@ public class TestMobFileCompactor {
     conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, batchSize);
     int count = 8;
     // generate mob files
-    loadData(count);
+    loadData(count, rowNumPerFile);
+    int rowNumPerRegion = count*rowNumPerFile;
 
-    assertEquals("Before deleting: mob row count", regionNum*count, countMobRows(hTable));
+    assertEquals("Before deleting: mob row count", regionNum*rowNumPerRegion,
+        countMobRows(hTable));
     assertEquals("Before deleting: family1 mob file count", regionNum*count,
         countFiles(true, family1));
     assertEquals("Before deleting: family2 mob file count", regionNum*count,
@@ -268,10 +278,10 @@ public class TestMobFileCompactor {
 
     createDelFile();
 
-    assertEquals("Before compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("Before compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
-    assertEquals("Before compaction: mob cells count", regionNum*(perRowCell*count-delCellNum),
-        countMobCells(hTable));
+    assertEquals("Before compaction: mob cells count",
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     assertEquals("Before compaction: family1 mob file count", regionNum*count,
         countFiles(true, family1));
     assertEquals("Before compaction: family2 mob file count", regionNum*count,
@@ -285,10 +295,10 @@ public class TestMobFileCompactor {
     MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
-    assertEquals("After compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
-    assertEquals("After compaction: mob cells count", regionNum*(perRowCell*count-delCellNum),
-        countMobCells(hTable));
+    assertEquals("After compaction: mob cells count",
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     assertEquals("After compaction: family1 mob file count", regionNum*(count/batchSize),
         countFiles(true, family1));
     assertEquals("After compaction: family2 mob file count", regionNum*count,
@@ -305,7 +315,8 @@ public class TestMobFileCompactor {
   public void testCompactionWithHFileLink() throws IOException, InterruptedException {
     int count = 4;
     // generate mob files
-    loadData(count);
+    loadData(count, rowNumPerFile);
+    int rowNumPerRegion = count*rowNumPerFile;
 
     long tid = System.currentTimeMillis();
     byte[] snapshotName1 = Bytes.toBytes("snaptb-" + tid);
@@ -314,10 +325,10 @@ public class TestMobFileCompactor {
 
     createDelFile();
 
-    assertEquals("Before compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("Before compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
-    assertEquals("Before compaction: mob cells count", regionNum*(perRowCell*count-delCellNum),
-        countMobCells(hTable));
+    assertEquals("Before compaction: mob cells count",
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     assertEquals("Before compaction: family1 mob file count", regionNum*count,
         countFiles(true, family1));
     assertEquals("Before compaction: family2 mob file count", regionNum*count,
@@ -331,10 +342,10 @@ public class TestMobFileCompactor {
     MobFileCompactor compactor = new PartitionedMobFileCompactor(conf, fs, tableName, hcd1, pool);
     compactor.compact();
 
-    assertEquals("After first compaction: mob rows count", regionNum*(count-delRowNum),
+    assertEquals("After first compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
     assertEquals("After first compaction: mob cells count",
-        regionNum*(perRowCell*count-delCellNum), countMobCells(hTable));
+        regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(hTable));
     assertEquals("After first compaction: family1 mob file count", regionNum,
         countFiles(true, family1));
     assertEquals("After first compaction: family2 mob file count", regionNum*count,
@@ -350,10 +361,10 @@ public class TestMobFileCompactor {
     admin.restoreSnapshot(snapshotName1);
     admin.enableTable(tableName);
 
-    assertEquals("After restoring snapshot: mob rows count", regionNum*count,
+    assertEquals("After restoring snapshot: mob rows count", regionNum*rowNumPerRegion,
         countMobRows(hTable));
-    assertEquals("After restoring snapshot: mob cells count", regionNum*perRowCell*count,
-        countMobCells(hTable));
+    assertEquals("After restoring snapshot: mob cells count",
+        regionNum*cellNumPerRow*rowNumPerRegion, countMobCells(hTable));
     assertEquals("After restoring snapshot: family1 mob file count", regionNum*count,
         countFiles(true, family1));
     assertEquals("After restoring snapshot: family2 mob file count", regionNum*count,
@@ -369,9 +380,10 @@ public class TestMobFileCompactor {
 
     compactor.compact();
 
-    assertEquals("After second compaction: mob rows count", regionNum*count, countMobRows(hTable));
-    assertEquals("After second compaction: mob cells count", regionNum*perRowCell*count,
-        countMobCells(hTable));
+    assertEquals("After second compaction: mob rows count", regionNum*rowNumPerRegion,
+        countMobRows(hTable));
+    assertEquals("After second compaction: mob cells count",
+        regionNum*cellNumPerRow*rowNumPerRegion, countMobCells(hTable));
     assertEquals("After second compaction: family1 mob file count", regionNum,
         countFiles(true, family1));
     assertEquals("After second compaction: family2 mob file count", regionNum*count,
@@ -412,7 +424,7 @@ public class TestMobFileCompactor {
     ResultScanner results = table.getScanner(scan);
     int count = 0;
     for (Result res : results) {
-      for(Cell cell : res.listCells()) {
+      for (Cell cell : res.listCells()) {
         count++;
       }
     }
@@ -427,18 +439,18 @@ public class TestMobFileCompactor {
    * @return the number of the files
    */
   private int countFiles(boolean isMobFile, String familyName) throws IOException {
-    Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
-      tableName), familyName);
+    Path mobDirPath = MobUtils.getMobFamilyPath(
+        MobUtils.getMobRegionPath(conf, tableName), familyName);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
-      for(FileStatus file : files) {
-        if(isMobFile == true) {
-          if(!StoreFileInfo.isDelFile(file.getPath())) {
+      for (FileStatus file : files) {
+        if (isMobFile == true) {
+          if (!StoreFileInfo.isDelFile(file.getPath())) {
             count++;
           }
         } else {
-          if(StoreFileInfo.isDelFile(file.getPath())) {
+          if (StoreFileInfo.isDelFile(file.getPath())) {
             count++;
           }
         }
@@ -453,13 +465,13 @@ public class TestMobFileCompactor {
    * @return the number of the HFileLink
    */
   private int countHFileLinks(String familyName) throws IOException {
-    Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(conf,
-      tableName), familyName);
+    Path mobDirPath = MobUtils.getMobFamilyPath(
+        MobUtils.getMobRegionPath(conf, tableName), familyName);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
-      for(FileStatus file : files) {
-        if(HFileLink.isHFileLink(file.getPath())) {
+      for (FileStatus file : files) {
+        if (HFileLink.isHFileLink(file.getPath())) {
           count++;
         }
       }
@@ -474,14 +486,15 @@ public class TestMobFileCompactor {
    * @return the number of files large than the size
    */
   private int countLargeFiles(int size, String familyName) throws IOException {
-    Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(
-        conf, tableName), familyName);
+    Path mobDirPath = MobUtils.getMobFamilyPath(
+        MobUtils.getMobRegionPath(conf, tableName), familyName);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
-      for(FileStatus file : files) {
+      for (FileStatus file : files) {
         // ignore the del files in the mob path
-        if((!StoreFileInfo.isDelFile(file.getPath())) && (file.getLen() > size)) {
+        if ((!StoreFileInfo.isDelFile(file.getPath()))
+            && (file.getLen() > size)) {
           count++;
         }
       }
@@ -493,24 +506,26 @@ public class TestMobFileCompactor {
    * loads some data to the table.
    * @param count the mob file number
    */
-  private void loadData(int count)
-      throws IOException, InterruptedException {
-    if (count <= 0) {
+  private void loadData(int fileNum, int rowNumPerFile) throws IOException,
+      InterruptedException {
+    if (fileNum <= 0) {
       throw new IllegalArgumentException();
     }
-    for (byte k0: KEYS) {
+    for (byte k0 : KEYS) {
       byte[] k = new byte[] { k0 };
-      for (int i = 0; i < count; i++) {
+      for (int i = 0; i < fileNum * rowNumPerFile; i++) {
         byte[] key = Bytes.add(k, Bytes.toBytes(i));
-        byte[] mobVal = makeDummyData(100*(i+1));
+        byte[] mobVal = makeDummyData(100 * (i + 1));
         Put put = new Put(key);
         put.setDurability(Durability.SKIP_WAL);
         put.add(Bytes.toBytes(family1), Bytes.toBytes(qf1), mobVal);
         put.add(Bytes.toBytes(family1), Bytes.toBytes(qf2), mobVal);
         put.add(Bytes.toBytes(family2), Bytes.toBytes(qf1), mobVal);
         hTable.put(put);
-        hTable.flushCommits();
-        admin.flush(tableName);
+        if ((i + 1) % rowNumPerFile == 0) {
+          hTable.flushCommits();
+          admin.flush(tableName);
+        }
       }
     }
   }
@@ -527,11 +542,11 @@ public class TestMobFileCompactor {
       delete1.deleteFamily(Bytes.toBytes(family1));
       hTable.delete(delete1);
       // delete one row
-      byte[] key2 = Bytes.add(k, Bytes.toBytes(1));
+      byte[] key2 = Bytes.add(k, Bytes.toBytes(2));
       Delete delete2 = new Delete(key2);
       hTable.delete(delete2);
       // delete one cell
-      byte[] key3 = Bytes.add(k, Bytes.toBytes(2));
+      byte[] key3 = Bytes.add(k, Bytes.toBytes(4));
       Delete delete3 = new Delete(key3);
       delete3.deleteColumn(Bytes.toBytes(family1), Bytes.toBytes(qf1));
       hTable.delete(delete3);
@@ -560,9 +575,9 @@ public class TestMobFileCompactor {
    * Gets the split keys
    */
   public static byte[][] getSplitKeys() {
-    byte[][] splitKeys = new byte[KEYS.length-1][];
+    byte[][] splitKeys = new byte[KEYS.length - 1][];
     for (int i = 0; i < splitKeys.length; ++i) {
-      splitKeys[i] = new byte[] { KEYS[i+1] };
+      splitKeys[i] = new byte[] { KEYS[i + 1] };
     }
     return splitKeys;
   }
@@ -571,19 +586,20 @@ public class TestMobFileCompactor {
     int maxThreads = 10;
     long keepAliveTime = 60;
     final SynchronousQueue<Runnable> queue = new SynchronousQueue<Runnable>();
-    ThreadPoolExecutor pool = new ThreadPoolExecutor(1, maxThreads, keepAliveTime,
-      TimeUnit.SECONDS, queue, Threads.newDaemonThreadFactory("MobFileCompactionChore"),
-      new RejectedExecutionHandler() {
-        @Override
-        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
-          try {
-            // waiting for a thread to pick up instead of throwing exceptions.
-            queue.put(r);
-          } catch (InterruptedException e) {
-            throw new RejectedExecutionException(e);
+    ThreadPoolExecutor pool = new ThreadPoolExecutor(1, maxThreads,
+        keepAliveTime, TimeUnit.SECONDS, queue,
+        Threads.newDaemonThreadFactory("MobFileCompactionChore"),
+        new RejectedExecutionHandler() {
+          @Override
+          public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+            try {
+              // waiting for a thread to pick up instead of throwing exceptions.
+              queue.put(r);
+            } catch (InterruptedException e) {
+              throw new RejectedExecutionException(e);
+            }
           }
-        }
-      });
+        });
     ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
     return pool;
   }
