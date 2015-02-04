@@ -379,13 +379,6 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
       // bulkload the ref file
       bulkloadRefFile(table, bulkloadPathOfPartition, filePath.getName());
-      // archive the old mob files, do not archive the del files.
-      try {
-        MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(),
-          mobFilesToCompact);
-      } catch (IOException e) {
-        LOG.error("Failed to archive the files " + mobFilesToCompact, e);
-      }
       newFiles.add(new Path(mobFamilyDir, filePath.getName()));
     } else {
       // remove the new files
@@ -393,6 +386,13 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       deletePath(filePath);
       // the ref file is empty, delete it instead of committing.
       deletePath(refFilePath);
+    }
+    // archive the old mob files, do not archive the del files.
+    try {
+      MobUtils
+        .removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), mobFilesToCompact);
+    } catch (IOException e) {
+      LOG.error("Failed to archive the files " + mobFilesToCompact, e);
     }
   }
 
