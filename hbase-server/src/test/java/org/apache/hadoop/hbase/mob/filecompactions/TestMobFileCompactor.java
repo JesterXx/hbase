@@ -463,7 +463,7 @@ public class TestMobFileCompactor {
    */
   private int countLargeFiles(int size, String familyName) throws IOException {
     Path mobDirPath = MobUtils.getMobFamilyPath(MobUtils.getMobRegionPath(
-        TEST_UTIL.getConfiguration(), tableName), familyName);
+        conf, tableName), familyName);
     int count = 0;
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
