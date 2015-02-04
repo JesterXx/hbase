@@ -135,7 +135,7 @@ public class TestMobFileCompactor {
 
   @Test
   public void testCompactionWithoutDelFiles() throws Exception {
-    int count = 10;
+    int count = 4;
     // generate mob files
     loadData(count, rowNumPerFile);
     int rowNumPerRegion = count*rowNumPerFile;
@@ -156,7 +156,7 @@ public class TestMobFileCompactor {
 
   @Test
   public void testCompactionWithDelFiles() throws Exception {
-    int count = 6;
+    int count = 4;
     // generate mob files
     loadData(count, rowNumPerFile);
     int rowNumPerRegion = count*rowNumPerFile;
@@ -204,11 +204,11 @@ public class TestMobFileCompactor {
 
   @Test
   public void testCompactionWithDelFilesAndNotMergeAllFiles() throws Exception {
-    int mergeSize = 10000;
+    int mergeSize = 5000;
     // change the mob compaction merge size
     conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
 
-    int count = 8;
+    int count = 4;
     // generate mob files
     loadData(count, rowNumPerFile);
     int rowNumPerRegion = count*rowNumPerFile;
@@ -220,7 +220,6 @@ public class TestMobFileCompactor {
     assertEquals("Before deleting: mob file count", regionNum*count, countFiles(true, family1));
 
     int largeFilesCount = countLargeFiles(mergeSize, family1);
-
     createDelFile();
 
     assertEquals("Before compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
@@ -264,7 +263,7 @@ public class TestMobFileCompactor {
   public void testCompactionWithDelFilesAndWithSmallCompactionBatchSize() throws Exception {
     int batchSize = 2;
     conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, batchSize);
-    int count = 8;
+    int count = 4;
     // generate mob files
     loadData(count, rowNumPerFile);
     int rowNumPerRegion = count*rowNumPerFile;
@@ -515,7 +514,7 @@ public class TestMobFileCompactor {
       byte[] k = new byte[] { k0 };
       for (int i = 0; i < fileNum * rowNumPerFile; i++) {
         byte[] key = Bytes.add(k, Bytes.toBytes(i));
-        byte[] mobVal = makeDummyData(100 * (i + 1));
+        byte[] mobVal = makeDummyData(10 * (i + 1));
         Put put = new Put(key);
         put.setDurability(Durability.SKIP_WAL);
         put.add(Bytes.toBytes(family1), Bytes.toBytes(qf1), mobVal);
