@@ -25,7 +25,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -288,7 +287,9 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
         batch = files.size() - offset;
       }
       if (batch == 1 && delFiles.isEmpty()) {
-        // only one file left and no del files, do not compact it.
+        // only one file left and no del files, do not compact it,
+        // and directly add it to the new files.
+        newFiles.add(files.get(offset).getPath());
         offset++;
         continue;
       }
@@ -409,61 +410,42 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       return delFilePaths;
     }
     // when there are more del files than the number that is allowed, merge it firstly.
-    int index = 0;
-    List<StoreFile> batchedDelFiles = new ArrayList<StoreFile>();
+    int offset = 0;
     List<Path> paths = new ArrayList<Path>();
-    Iterator<Path> pathIterator = delFilePaths.iterator();
-    boolean hasNext = pathIterator.hasNext();
-    while (hasNext) {
-      // compact the del files in batches.
-      if (index < compactionBatch) {
-        // add the store file into the batch if it is not full.
-        batchedDelFiles.add(new StoreFile(fs, pathIterator.next(), conf, compactionCacheConfig,
+    while (offset < delFilePaths.size()) {
+      // get the batch
+      int batch = compactionBatch;
+      if (delFilePaths.size() - offset < compactionBatch) {
+        batch = delFilePaths.size() - offset;
+      }
+      List<StoreFile> batchedDelFiles = new ArrayList<StoreFile>();
+      if (batch == 1) {
+        // only one file left, do not compact it, directly add it to the new files.
+        paths.add(delFilePaths.get(offset));
+        offset++;
+        continue;
+      }
+      for (int i = offset; i < batch + offset; i++) {
+        batchedDelFiles.add(new StoreFile(fs, delFilePaths.get(i), conf, compactionCacheConfig,
           BloomType.NONE));
-        index++;
-      } else {
-        // the batch is full and merge del store files in a batch.
-        paths.add(mergeDelFiles(request, batchedDelFiles));
-        batchedDelFiles.clear();
-        index = 0;
       }
-      hasNext = pathIterator.hasNext();
-      // If it has next, directly go to the next round.
-      // If not, then follow the steps:
-      // 1. Firstly merge the remaining del files in the current batch since the batch is
-      //    not full yet.
-      // 2. Check if the number of existing del files is still larger than the
-      //    MOB_FILE_COMPACTION_BATCH_SIZE. If no directly finish the compaction, if yes it
-      //    will start another round of compaction.
-      if (!hasNext) {
-        if (index > 0) {
-          // when the number of del files does not reach the compactionBatch and no more del
-          // files are left, directly merge them.
-          paths.add(mergeDelFiles(request, batchedDelFiles));
-          batchedDelFiles.clear();
-        }
-        // check whether the number of the remaining del files is not larger than the max count.
-        if (paths.size() > delFileMaxCount) {
-          // there're too many del files left, we need continue the next round of compaction.
-          pathIterator = paths.iterator();
-          hasNext = true;
-          index = 0;
-          paths = new ArrayList<>();
-        }
-      }
+      // compact the del files in a batch.
+      paths.add(compactDelFilesInBatch(request, batchedDelFiles));
+      // move to the next batch.
+      offset += batch;
     }
-    return paths;
+    return compactDelFiles(request, paths);
   }
 
   /**
-   * Merges the del file in a batch.
+   * Compacts the del file in a batch.
    * @param request The compaction request.
    * @param delFiles The del files.
    * @return The path of new del file after merging.
    * @throws IOException
    */
-  private Path mergeDelFiles(PartitionedMobFileCompactionRequest request, List<StoreFile> delFiles)
-    throws IOException {
+  private Path compactDelFilesInBatch(PartitionedMobFileCompactionRequest request,
+    List<StoreFile> delFiles) throws IOException {
     // create a scanner for the del files.
     StoreScanner scanner = createScanner(delFiles, ScanType.COMPACT_RETAIN_DELETES);
     Writer writer = null;
