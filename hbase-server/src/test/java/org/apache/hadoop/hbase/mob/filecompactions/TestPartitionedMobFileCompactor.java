@@ -184,6 +184,26 @@ public class TestPartitionedMobFileCompactor {
     createStoreFiles(basePath, family, qf, 13, Type.Delete);
     listFiles();
 
+    // set the mob file compaction batch size
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, 4);
+
+    testCompactDelFiles(tableName, 1, 13);
+
+    conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
+        MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
+  }
+
+  @Test
+  public void testCompactDelFilesChangeMaxDelFileCount() throws Exception {
+    String tableName = "testCompactDelFilesWithSmallBatchSize";
+    init(tableName);
+    // create 20 mob files.
+    createStoreFiles(basePath, family, qf, 20, Type.Put);
+    // create 13 del files
+    createStoreFiles(basePath, family, qf, 13, Type.Delete);
+    listFiles();
+
     // set the max del file count
     conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, 5);
     // set the mob file compaction batch size
