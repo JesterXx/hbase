@@ -21,6 +21,9 @@ package org.apache.hadoop.hbase.mob.filecompactions;
 import static org.junit.Assert.assertEquals;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -35,6 +38,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -57,6 +61,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Threads;
 import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -200,7 +205,44 @@ public class TestMobFileCompactor {
     assertEquals("After compaction: family1 del file count", 0, countFiles(false, family1));
     assertEquals("After compaction: family2 del file count", regionNum,
         countFiles(false, family2));
+    assertRefFileNameEqual(family1);
   }
+
+  public void assertRefFileNameEqual(String familyName) throws IOException {
+    Scan scan = new Scan();
+    scan.addFamily(Bytes.toBytes(familyName));
+    // Do not retrieve the mob data when scanning
+    scan.setAttribute(MobConstants.MOB_SCAN_RAW, Bytes.toBytes(Boolean.TRUE));
+    ResultScanner results = hTable.getScanner(scan);
+    Path mobFamilyPath = new Path(MobUtils.getMobRegionPath(TEST_UTIL.getConfiguration(),
+        tableName), familyName);
+    List<Path> actualFilePaths = new ArrayList<>();
+    List<Path> expectFilePaths = new ArrayList<>();
+    for (Result res : results) {
+      for (Cell cell : res.listCells()) {
+        byte[] referenceValue = CellUtil.cloneValue(cell);
+        String fileName = Bytes.toString(referenceValue, Bytes.SIZEOF_INT,
+            referenceValue.length - Bytes.SIZEOF_INT);
+        Path targetPath = new Path(mobFamilyPath, fileName);
+        if(!actualFilePaths.contains(targetPath)) {
+          actualFilePaths.add(targetPath);
+        }
+      }
+    }
+    results.close();
+    if (fs.exists(mobFamilyPath)) {
+      FileStatus[] files = fs.listStatus(mobFamilyPath);
+      for (FileStatus file : files) {
+        if (!StoreFileInfo.isDelFile(file.getPath())) {
+          expectFilePaths.add(file.getPath());
+        }
+      }
+    }
+    Collections.sort(actualFilePaths);
+    Collections.sort(expectFilePaths);
+    assertEquals(expectFilePaths, actualFilePaths);
+  }
+
 
   @Test
   public void testCompactionWithDelFilesAndNotMergeAllFiles() throws Exception {

@@ -280,7 +280,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     List<Path> newFiles = new ArrayList<Path>();
     List<FileStatus> files = partition.listFiles();
     int offset = 0;
-    Path bulkloadPathOfPartition = new Path(bulkloadPath, partition.getPartitionId().toString());
+    Path bulkloadPathOfPartition = new Path(new Path(bulkloadPath,
+        partition.getPartitionId().toString()), column.getNameAsString());
     while (offset < files.size()) {
       int batch = compactionBatch;
       if (files.size() - offset < compactionBatch) {
@@ -304,6 +305,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       }
       filesToCompact.addAll(delFiles);
       // compact the mob files in a batch.
+
       compactMobFilesInBatch(request, partition, table, filesToCompact, batch,
         bulkloadPathOfPartition, newFiles);
       // move to the next batch.
@@ -378,7 +380,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       // commit mob file
       MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
       // bulkload the ref file
-      bulkloadRefFile(table, bulkloadPathOfPartition, filePath.getName());
+      bulkloadRefFile(table, bulkloadPathOfPartition.getParent(), filePath.getName());
+
       newFiles.add(new Path(mobFamilyDir, filePath.getName()));
     } else {
       // remove the new files
