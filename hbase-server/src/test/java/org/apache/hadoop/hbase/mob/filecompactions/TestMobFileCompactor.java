@@ -22,7 +22,6 @@ import static org.junit.Assert.assertEquals;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
@@ -61,7 +60,6 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Threads;
 import org.junit.After;
 import org.junit.AfterClass;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -140,6 +138,7 @@ public class TestMobFileCompactor {
 
   @Test
   public void testCompactionWithoutDelFiles() throws Exception {
+    resetConf();
     int count = 4;
     // generate mob files
     loadData(count, rowNumPerFile);
@@ -161,6 +160,7 @@ public class TestMobFileCompactor {
 
   @Test
   public void testCompactionWithDelFiles() throws Exception {
+    resetConf();
     int count = 4;
     // generate mob files
     loadData(count, rowNumPerFile);
@@ -208,7 +208,7 @@ public class TestMobFileCompactor {
     assertRefFileNameEqual(family1);
   }
 
-  public void assertRefFileNameEqual(String familyName) throws IOException {
+  private void assertRefFileNameEqual(String familyName) throws IOException {
     Scan scan = new Scan();
     scan.addFamily(Bytes.toBytes(familyName));
     // Do not retrieve the mob data when scanning
@@ -243,9 +243,9 @@ public class TestMobFileCompactor {
     assertEquals(expectFilePaths, actualFilePaths);
   }
 
-
   @Test
   public void testCompactionWithDelFilesAndNotMergeAllFiles() throws Exception {
+    resetConf();
     int mergeSize = 5000;
     // change the mob compaction merge size
     conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
@@ -295,14 +295,11 @@ public class TestMobFileCompactor {
         countFiles(false, family1));
     assertEquals("After compaction: family2 del file count", regionNum,
         countFiles(false, family2));
-
-    // reset the conf the the default
-    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
-        MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
   }
 
   @Test
   public void testCompactionWithDelFilesAndWithSmallCompactionBatchSize() throws Exception {
+    resetConf();
     int batchSize = 2;
     conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, batchSize);
     int count = 4;
@@ -347,13 +344,11 @@ public class TestMobFileCompactor {
     assertEquals("After compaction: family1 del file count", 0, countFiles(false, family1));
     assertEquals("After compaction: family2 del file count", regionNum,
         countFiles(false, family2));
-
-    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
-        MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
   }
 
   @Test
   public void testCompactionWithHFileLink() throws IOException, InterruptedException {
+    resetConf();
     int count = 4;
     // generate mob files
     loadData(count, rowNumPerFile);
@@ -643,5 +638,15 @@ public class TestMobFileCompactor {
         });
     ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
     return pool;
+  }
+
+  /**
+   * Resets the configuration.
+   */
+  private void resetConf() {
+    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
   }
 }

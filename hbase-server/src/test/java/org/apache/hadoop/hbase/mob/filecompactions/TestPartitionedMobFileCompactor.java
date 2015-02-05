@@ -102,7 +102,7 @@ public class TestPartitionedMobFileCompactor {
     TEST_UTIL.shutdownMiniCluster();
   }
 
-  public void init(String tableName) throws Exception {
+  private void init(String tableName) throws Exception {
     fs = FileSystem.get(conf);
     Path testDir = FSUtils.getRootDir(conf);
     Path mobTestDir = new Path(testDir, MobConstants.MOB_DIR_NAME);
@@ -113,6 +113,7 @@ public class TestPartitionedMobFileCompactor {
 
   @Test
   public void testCompactionSelectWithAllFiles() throws Exception {
+    resetConf();
     String tableName = "testCompactionSelectWithAllFiles";
     init(tableName);
     int count = 10;
@@ -135,6 +136,7 @@ public class TestPartitionedMobFileCompactor {
 
   @Test
   public void testCompactionSelectWithPartFiles() throws Exception {
+    resetConf();
     String tableName = "testCompactionSelectWithPartFiles";
     init(tableName);
     int count = 10;
@@ -154,15 +156,12 @@ public class TestPartitionedMobFileCompactor {
     }
     // set the mob file compaction mergeable threshold
     conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
-
     testSelectFiles(tableName, CompactionType.PART_FILES, expectedStartKeys);
-
-    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
-        MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
   }
 
   @Test
   public void testCompactDelFilesWithDefaultBatchSize() throws Exception {
+    resetConf();
     String tableName = "testCompactDelFilesWithDefaultBatchSize";
     init(tableName);
     // create 20 mob files.
@@ -170,12 +169,12 @@ public class TestPartitionedMobFileCompactor {
     // create 13 del files
     createStoreFiles(basePath, family, qf, 13, Type.Delete);
     listFiles();
-
     testCompactDelFiles(tableName, 1, 13);
   }
 
   @Test
   public void testCompactDelFilesWithSmallBatchSize() throws Exception {
+    resetConf();
     String tableName = "testCompactDelFilesWithSmallBatchSize";
     init(tableName);
     // create 20 mob files.
@@ -186,16 +185,12 @@ public class TestPartitionedMobFileCompactor {
 
     // set the mob file compaction batch size
     conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, 4);
-
     testCompactDelFiles(tableName, 1, 13);
-
-    conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
-    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
-        MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
   }
 
   @Test
   public void testCompactDelFilesChangeMaxDelFileCount() throws Exception {
+    resetConf();
     String tableName = "testCompactDelFilesWithSmallBatchSize";
     init(tableName);
     // create 20 mob files.
@@ -208,12 +203,7 @@ public class TestPartitionedMobFileCompactor {
     conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, 5);
     // set the mob file compaction batch size
     conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE, 2);
-
     testCompactDelFiles(tableName, 4, 13);
-
-    conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
-    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
-        MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
   }
 
   /**
@@ -418,5 +408,16 @@ public class TestPartitionedMobFileCompactor {
       });
     ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
     return pool;
+  }
+
+  /**
+   * Resets the configuration.
+   */
+  private void resetConf() {
+    conf.setLong(MobConstants.MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_MERGEABLE_THRESHOLD);
+    conf.setInt(MobConstants.MOB_DELFILE_MAX_COUNT, MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
+    conf.setInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
+      MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
   }
 }
