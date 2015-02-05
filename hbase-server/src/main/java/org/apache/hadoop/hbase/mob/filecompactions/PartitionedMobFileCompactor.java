@@ -100,7 +100,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
     bulkloadPath = new Path(tempPath, new Path(MobConstants.BULKLOAD_DIR_NAME,
-      column.getNameAsString()));
+      tableName.getNameAsString()));
     compactionKVMax = this.conf.getInt(HConstants.COMPACTION_KV_MAX,
       HConstants.COMPACTION_KV_MAX_DEFAULT);
     Configuration copyOfConf = new Configuration(conf);
@@ -280,8 +280,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     List<Path> newFiles = new ArrayList<Path>();
     List<FileStatus> files = partition.listFiles();
     int offset = 0;
-    Path bulkloadPathOfPartition = new Path(new Path(bulkloadPath,
-        partition.getPartitionId().toString()), column.getNameAsString());
+    Path bulkloadPathOfPartition = new Path(bulkloadPath, partition.getPartitionId().toString());
+    Path bulkloadColumnPath = new Path(bulkloadPathOfPartition, column.getNameAsString());
     while (offset < files.size()) {
       int batch = compactionBatch;
       if (files.size() - offset < compactionBatch) {
@@ -305,9 +305,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       }
       filesToCompact.addAll(delFiles);
       // compact the mob files in a batch.
-
       compactMobFilesInBatch(request, partition, table, filesToCompact, batch,
-        bulkloadPathOfPartition, newFiles);
+        bulkloadPathOfPartition, bulkloadColumnPath, newFiles);
       // move to the next batch.
       offset += batch;
     }
@@ -321,14 +320,16 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    * @param table The current table.
    * @param filesToCompact The files to be compacted.
    * @param batch The number of mob files to be compacted in a batch.
-   * @param bulkloadPathOfPartition The directory where the bulkload files of the current
-   *        partition are saved.
+   * @param bulkloadPathOfPartition The directory where the bulkload column of the current
+   *        partition is saved.
+   * @param bulkloadColumnPath The directory where the bulkload files of current partition
+   *        are saved.
    * @param newFiles The paths of new mob files after compactions.
    * @throws IOException
    */
   private void compactMobFilesInBatch(PartitionedMobFileCompactionRequest request,
     CompactionPartition partition, HTable table, List<StoreFile> filesToCompact, int batch,
-    Path bulkloadPathOfPartition, List<Path> newFiles)
+    Path bulkloadPathOfPartition, Path bulkloadColumnPath, List<Path> newFiles)
     throws IOException {
     // open scanner to the selected mob files and del files.
     StoreScanner scanner = createScanner(filesToCompact, ScanType.COMPACT_DROP_DELETES);
@@ -349,8 +350,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       filePath = writer.getPath();
       byte[] fileName = Bytes.toBytes(filePath.getName());
       // create a temp file and open a writer for it in the bulkloadPath
-      refFileWriter = MobUtils.createRefFileWriter(conf, fs, column, bulkloadPathOfPartition,
-        fileInfo.getSecond().longValue(), compactionCacheConfig);
+      refFileWriter = MobUtils.createRefFileWriter(conf, fs, column, bulkloadColumnPath, fileInfo
+        .getSecond().longValue(), compactionCacheConfig);
       refFilePath = refFileWriter.getPath();
       List<Cell> cells = new ArrayList<Cell>();
       boolean hasMore = false;
@@ -380,7 +381,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       // commit mob file
       MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
       // bulkload the ref file
-      bulkloadRefFile(table, bulkloadPathOfPartition.getParent(), filePath.getName());
+      bulkloadRefFile(table, bulkloadPathOfPartition, filePath.getName());
 
       newFiles.add(new Path(mobFamilyDir, filePath.getName()));
     } else {
