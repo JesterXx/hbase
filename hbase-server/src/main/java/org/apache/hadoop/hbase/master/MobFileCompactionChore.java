@@ -75,7 +75,7 @@ public class MobFileCompactionChore extends Chore{
       for (HTableDescriptor htd : map.values()) {
         for (HColumnDescriptor hcd : htd.getColumnFamilies()) {
           if (!hcd.isMobEnabled()) {
-            break;
+            continue;
           }
           // instantiate the mob file compactor.
           MobFileCompactor compactor = null;

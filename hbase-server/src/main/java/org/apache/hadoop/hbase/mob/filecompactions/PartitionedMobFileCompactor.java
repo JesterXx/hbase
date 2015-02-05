@@ -80,7 +80,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
   protected long mergeableSize;
   protected int delFileMaxCount;
   /** The number of files compacted in a batch */
-  protected int compactionBatch;
+  protected int compactionBatchSize;
   protected int compactionKVMax;
 
   private Path tempPath;
@@ -96,7 +96,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
       MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
     // default is 100
-    compactionBatch = conf.getInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
+    compactionBatchSize = conf.getInt(MobConstants.MOB_FILE_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_BATCH_SIZE);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
     bulkloadPath = new Path(tempPath, new Path(MobConstants.BULKLOAD_DIR_NAME,
@@ -125,7 +125,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
    * Iterates the candidates to find out all the del files and small mob files.
    * @param candidates All the candidates.
    * @return A compaction request.
-   * @throws IOException 
+   * @throws IOException
    */
   protected PartitionedMobFileCompactionRequest select(List<FileStatus> candidates)
     throws IOException {
@@ -232,7 +232,7 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     try {
       Map<CompactionPartitionId, Future<List<Path>>> results =
         new HashMap<CompactionPartitionId, Future<List<Path>>>();
-      // compact the mob files by partitions.
+      // compact the mob files by partitions in parallel.
       for (final CompactionPartition partition : partitions) {
         results.put(partition.getPartitionId(), pool.submit(new Callable<List<Path>>() {
           @Override
@@ -283,8 +283,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     Path bulkloadPathOfPartition = new Path(bulkloadPath, partition.getPartitionId().toString());
     Path bulkloadColumnPath = new Path(bulkloadPathOfPartition, column.getNameAsString());
     while (offset < files.size()) {
-      int batch = compactionBatch;
-      if (files.size() - offset < compactionBatch) {
+      int batch = compactionBatchSize;
+      if (files.size() - offset < compactionBatchSize) {
         batch = files.size() - offset;
       }
       if (batch == 1 && delFiles.isEmpty()) {
@@ -417,8 +417,8 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     List<Path> paths = new ArrayList<Path>();
     while (offset < delFilePaths.size()) {
       // get the batch
-      int batch = compactionBatch;
-      if (delFilePaths.size() - offset < compactionBatch) {
+      int batch = compactionBatchSize;
+      if (delFilePaths.size() - offset < compactionBatchSize) {
         batch = delFilePaths.size() - offset;
       }
       List<StoreFile> batchedDelFiles = new ArrayList<StoreFile>();
