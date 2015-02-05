@@ -382,7 +382,6 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
       // bulkload the ref file
       bulkloadRefFile(table, bulkloadPathOfPartition, filePath.getName());
-
       newFiles.add(new Path(mobFamilyDir, filePath.getName()));
     } else {
       // remove the new files
