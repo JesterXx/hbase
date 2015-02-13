@@ -28,6 +28,7 @@ import org.apache.hadoop.hbase.Chore;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableDescriptors;
+import org.apache.hadoop.hbase.exceptions.LockTimeoutException;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.mob.ExpiredMobFileCleaner;
 import org.apache.hadoop.hbase.mob.MobConstants;
@@ -74,6 +75,9 @@ public class ExpiredMobFileCleanerChore extends Chore {
               }
               tableLocked = true;
               cleaner.cleanExpiredMobFiles(htd.getTableName().getNameAsString(), hcd);
+            } catch (LockTimeoutException e) {
+              LOG.info("Fail to acquire the lock because of timeout, maybe a"
+                + " MobFileCompactor is running", e);
             } catch (Exception e) {
               LOG.error(
                 "Fail to clean the expired mob files for the column " + hcd.getNameAsString()
