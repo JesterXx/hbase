@@ -23,9 +23,9 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 
 import org.apache.hadoop.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.master.TableLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName;
-import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.TableLock;
+import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperListener;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
@@ -75,7 +75,7 @@ public class SweepJobNodeTracker extends ZooKeeperListener {
         for (String tail : tails) {
           String path = ZKUtil.joinZNode(parentNode, tail);
           byte[] data = ZKUtil.getDataAndWatch(watcher, path);
-          TableLock lock = TableLockManager.fromBytes(data);
+          ZooKeeperProtos.ZKLock lock = ZKLockManager.fromBytes(data);
           ServerName serverName = lock.getLockOwner();
           org.apache.hadoop.hbase.ServerName sn = org.apache.hadoop.hbase.ServerName.valueOf(
               serverName.getHostName(), serverName.getPort(), serverName.getStartCode());
