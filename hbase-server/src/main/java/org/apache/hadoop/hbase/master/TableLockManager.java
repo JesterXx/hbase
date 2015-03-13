@@ -191,7 +191,7 @@ public abstract class TableLockManager {
       public void acquire() throws IOException {
       }
       @Override
-      public void acquire(long timeout) throws IOException { 
+      public void acquire(long timeout) throws IOException {
       }
       @Override
       public void release() throws IOException {
