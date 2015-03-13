@@ -9583,6 +9583,1173 @@ public final class ZooKeeperProtos {
     // @@protoc_insertion_point(class_scope:RegionStoreSequenceIds)
   }
 
+  public interface ZKLockOrBuilder
+      extends com.google.protobuf.MessageOrBuilder {
+
+    // optional string lock_name = 1;
+    /**
+     * <code>optional string lock_name = 1;</code>
+     */
+    boolean hasLockName();
+    /**
+     * <code>optional string lock_name = 1;</code>
+     */
+    java.lang.String getLockName();
+    /**
+     * <code>optional string lock_name = 1;</code>
+     */
+    com.google.protobuf.ByteString
+        getLockNameBytes();
+
+    // optional .ServerName lock_owner = 2;
+    /**
+     * <code>optional .ServerName lock_owner = 2;</code>
+     */
+    boolean hasLockOwner();
+    /**
+     * <code>optional .ServerName lock_owner = 2;</code>
+     */
+    org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName getLockOwner();
+    /**
+     * <code>optional .ServerName lock_owner = 2;</code>
+     */
+    org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerNameOrBuilder getLockOwnerOrBuilder();
+
+    // optional int64 thread_id = 3;
+    /**
+     * <code>optional int64 thread_id = 3;</code>
+     */
+    boolean hasThreadId();
+    /**
+     * <code>optional int64 thread_id = 3;</code>
+     */
+    long getThreadId();
+
+    // optional bool is_shared = 4;
+    /**
+     * <code>optional bool is_shared = 4;</code>
+     */
+    boolean hasIsShared();
+    /**
+     * <code>optional bool is_shared = 4;</code>
+     */
+    boolean getIsShared();
+
+    // optional string purpose = 5;
+    /**
+     * <code>optional string purpose = 5;</code>
+     */
+    boolean hasPurpose();
+    /**
+     * <code>optional string purpose = 5;</code>
+     */
+    java.lang.String getPurpose();
+    /**
+     * <code>optional string purpose = 5;</code>
+     */
+    com.google.protobuf.ByteString
+        getPurposeBytes();
+
+    // optional int64 create_time = 6;
+    /**
+     * <code>optional int64 create_time = 6;</code>
+     */
+    boolean hasCreateTime();
+    /**
+     * <code>optional int64 create_time = 6;</code>
+     */
+    long getCreateTime();
+  }
+  /**
+   * Protobuf type {@code ZKLock}
+   *
+   * <pre>
+   **
+   * Metadata associated with a zk lock in zookeeper
+   * </pre>
+   */
+  public static final class ZKLock extends
+      com.google.protobuf.GeneratedMessage
+      implements ZKLockOrBuilder {
+    // Use ZKLock.newBuilder() to construct.
+    private ZKLock(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+      this.unknownFields = builder.getUnknownFields();
+    }
+    private ZKLock(boolean noInit) { this.unknownFields = com.google.protobuf.UnknownFieldSet.getDefaultInstance(); }
+
+    private static final ZKLock defaultInstance;
+    public static ZKLock getDefaultInstance() {
+      return defaultInstance;
+    }
+
+    public ZKLock getDefaultInstanceForType() {
+      return defaultInstance;
+    }
+
+    private final com.google.protobuf.UnknownFieldSet unknownFields;
+    @java.lang.Override
+    public final com.google.protobuf.UnknownFieldSet
+        getUnknownFields() {
+      return this.unknownFields;
+    }
+    private ZKLock(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      initFields();
+      int mutable_bitField0_ = 0;
+      com.google.protobuf.UnknownFieldSet.Builder unknownFields =
+          com.google.protobuf.UnknownFieldSet.newBuilder();
+      try {
+        boolean done = false;
+        while (!done) {
+          int tag = input.readTag();
+          switch (tag) {
+            case 0:
+              done = true;
+              break;
+            default: {
+              if (!parseUnknownField(input, unknownFields,
+                                     extensionRegistry, tag)) {
+                done = true;
+              }
+              break;
+            }
+            case 10: {
+              bitField0_ |= 0x00000001;
+              lockName_ = input.readBytes();
+              break;
+            }
+            case 18: {
+              org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.Builder subBuilder = null;
+              if (((bitField0_ & 0x00000002) == 0x00000002)) {
+                subBuilder = lockOwner_.toBuilder();
+              }
+              lockOwner_ = input.readMessage(org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.PARSER, extensionRegistry);
+              if (subBuilder != null) {
+                subBuilder.mergeFrom(lockOwner_);
+                lockOwner_ = subBuilder.buildPartial();
+              }
+              bitField0_ |= 0x00000002;
+              break;
+            }
+            case 24: {
+              bitField0_ |= 0x00000004;
+              threadId_ = input.readInt64();
+              break;
+            }
+            case 32: {
+              bitField0_ |= 0x00000008;
+              isShared_ = input.readBool();
+              break;
+            }
+            case 42: {
+              bitField0_ |= 0x00000010;
+              purpose_ = input.readBytes();
+              break;
+            }
+            case 48: {
+              bitField0_ |= 0x00000020;
+              createTime_ = input.readInt64();
+              break;
+            }
+          }
+        }
+      } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+        throw e.setUnfinishedMessage(this);
+      } catch (java.io.IOException e) {
+        throw new com.google.protobuf.InvalidProtocolBufferException(
+            e.getMessage()).setUnfinishedMessage(this);
+      } finally {
+        this.unknownFields = unknownFields.build();
+        makeExtensionsImmutable();
+      }
+    }
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.internal_static_ZKLock_descriptor;
+    }
+
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.internal_static_ZKLock_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock.class, org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock.Builder.class);
+    }
+
+    public static com.google.protobuf.Parser<ZKLock> PARSER =
+        new com.google.protobuf.AbstractParser<ZKLock>() {
+      public ZKLock parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        return new ZKLock(input, extensionRegistry);
+      }
+    };
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<ZKLock> getParserForType() {
+      return PARSER;
+    }
+
+    private int bitField0_;
+    // optional string lock_name = 1;
+    public static final int LOCK_NAME_FIELD_NUMBER = 1;
+    private java.lang.Object lockName_;
+    /**
+     * <code>optional string lock_name = 1;</code>
+     */
+    public boolean hasLockName() {
+      return ((bitField0_ & 0x00000001) == 0x00000001);
+    }
+    /**
+     * <code>optional string lock_name = 1;</code>
+     */
+    public java.lang.String getLockName() {
+      java.lang.Object ref = lockName_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        if (bs.isValidUtf8()) {
+          lockName_ = s;
+        }
+        return s;
+      }
+    }
+    /**
+     * <code>optional string lock_name = 1;</code>
+     */
+    public com.google.protobuf.ByteString
+        getLockNameBytes() {
+      java.lang.Object ref = lockName_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        lockName_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    // optional .ServerName lock_owner = 2;
+    public static final int LOCK_OWNER_FIELD_NUMBER = 2;
+    private org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName lockOwner_;
+    /**
+     * <code>optional .ServerName lock_owner = 2;</code>
+     */
+    public boolean hasLockOwner() {
+      return ((bitField0_ & 0x00000002) == 0x00000002);
+    }
+    /**
+     * <code>optional .ServerName lock_owner = 2;</code>
+     */
+    public org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName getLockOwner() {
+      return lockOwner_;
+    }
+    /**
+     * <code>optional .ServerName lock_owner = 2;</code>
+     */
+    public org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerNameOrBuilder getLockOwnerOrBuilder() {
+      return lockOwner_;
+    }
+
+    // optional int64 thread_id = 3;
+    public static final int THREAD_ID_FIELD_NUMBER = 3;
+    private long threadId_;
+    /**
+     * <code>optional int64 thread_id = 3;</code>
+     */
+    public boolean hasThreadId() {
+      return ((bitField0_ & 0x00000004) == 0x00000004);
+    }
+    /**
+     * <code>optional int64 thread_id = 3;</code>
+     */
+    public long getThreadId() {
+      return threadId_;
+    }
+
+    // optional bool is_shared = 4;
+    public static final int IS_SHARED_FIELD_NUMBER = 4;
+    private boolean isShared_;
+    /**
+     * <code>optional bool is_shared = 4;</code>
+     */
+    public boolean hasIsShared() {
+      return ((bitField0_ & 0x00000008) == 0x00000008);
+    }
+    /**
+     * <code>optional bool is_shared = 4;</code>
+     */
+    public boolean getIsShared() {
+      return isShared_;
+    }
+
+    // optional string purpose = 5;
+    public static final int PURPOSE_FIELD_NUMBER = 5;
+    private java.lang.Object purpose_;
+    /**
+     * <code>optional string purpose = 5;</code>
+     */
+    public boolean hasPurpose() {
+      return ((bitField0_ & 0x00000010) == 0x00000010);
+    }
+    /**
+     * <code>optional string purpose = 5;</code>
+     */
+    public java.lang.String getPurpose() {
+      java.lang.Object ref = purpose_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        if (bs.isValidUtf8()) {
+          purpose_ = s;
+        }
+        return s;
+      }
+    }
+    /**
+     * <code>optional string purpose = 5;</code>
+     */
+    public com.google.protobuf.ByteString
+        getPurposeBytes() {
+      java.lang.Object ref = purpose_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        purpose_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    // optional int64 create_time = 6;
+    public static final int CREATE_TIME_FIELD_NUMBER = 6;
+    private long createTime_;
+    /**
+     * <code>optional int64 create_time = 6;</code>
+     */
+    public boolean hasCreateTime() {
+      return ((bitField0_ & 0x00000020) == 0x00000020);
+    }
+    /**
+     * <code>optional int64 create_time = 6;</code>
+     */
+    public long getCreateTime() {
+      return createTime_;
+    }
+
+    private void initFields() {
+      lockName_ = "";
+      lockOwner_ = org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.getDefaultInstance();
+      threadId_ = 0L;
+      isShared_ = false;
+      purpose_ = "";
+      createTime_ = 0L;
+    }
+    private byte memoizedIsInitialized = -1;
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized != -1) return isInitialized == 1;
+
+      if (hasLockOwner()) {
+        if (!getLockOwner().isInitialized()) {
+          memoizedIsInitialized = 0;
+          return false;
+        }
+      }
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      getSerializedSize();
+      if (((bitField0_ & 0x00000001) == 0x00000001)) {
+        output.writeBytes(1, getLockNameBytes());
+      }
+      if (((bitField0_ & 0x00000002) == 0x00000002)) {
+        output.writeMessage(2, lockOwner_);
+      }
+      if (((bitField0_ & 0x00000004) == 0x00000004)) {
+        output.writeInt64(3, threadId_);
+      }
+      if (((bitField0_ & 0x00000008) == 0x00000008)) {
+        output.writeBool(4, isShared_);
+      }
+      if (((bitField0_ & 0x00000010) == 0x00000010)) {
+        output.writeBytes(5, getPurposeBytes());
+      }
+      if (((bitField0_ & 0x00000020) == 0x00000020)) {
+        output.writeInt64(6, createTime_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    private int memoizedSerializedSize = -1;
+    public int getSerializedSize() {
+      int size = memoizedSerializedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (((bitField0_ & 0x00000001) == 0x00000001)) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(1, getLockNameBytes());
+      }
+      if (((bitField0_ & 0x00000002) == 0x00000002)) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeMessageSize(2, lockOwner_);
+      }
+      if (((bitField0_ & 0x00000004) == 0x00000004)) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(3, threadId_);
+      }
+      if (((bitField0_ & 0x00000008) == 0x00000008)) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(4, isShared_);
+      }
+      if (((bitField0_ & 0x00000010) == 0x00000010)) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(5, getPurposeBytes());
+      }
+      if (((bitField0_ & 0x00000020) == 0x00000020)) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(6, createTime_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSerializedSize = size;
+      return size;
+    }
+
+    private static final long serialVersionUID = 0L;
+    @java.lang.Override
+    protected java.lang.Object writeReplace()
+        throws java.io.ObjectStreamException {
+      return super.writeReplace();
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock)) {
+        return super.equals(obj);
+      }
+      org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock other = (org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock) obj;
+
+      boolean result = true;
+      result = result && (hasLockName() == other.hasLockName());
+      if (hasLockName()) {
+        result = result && getLockName()
+            .equals(other.getLockName());
+      }
+      result = result && (hasLockOwner() == other.hasLockOwner());
+      if (hasLockOwner()) {
+        result = result && getLockOwner()
+            .equals(other.getLockOwner());
+      }
+      result = result && (hasThreadId() == other.hasThreadId());
+      if (hasThreadId()) {
+        result = result && (getThreadId()
+            == other.getThreadId());
+      }
+      result = result && (hasIsShared() == other.hasIsShared());
+      if (hasIsShared()) {
+        result = result && (getIsShared()
+            == other.getIsShared());
+      }
+      result = result && (hasPurpose() == other.hasPurpose());
+      if (hasPurpose()) {
+        result = result && getPurpose()
+            .equals(other.getPurpose());
+      }
+      result = result && (hasCreateTime() == other.hasCreateTime());
+      if (hasCreateTime()) {
+        result = result && (getCreateTime()
+            == other.getCreateTime());
+      }
+      result = result &&
+          getUnknownFields().equals(other.getUnknownFields());
+      return result;
+    }
+
+    private int memoizedHashCode = 0;
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptorForType().hashCode();
+      if (hasLockName()) {
+        hash = (37 * hash) + LOCK_NAME_FIELD_NUMBER;
+        hash = (53 * hash) + getLockName().hashCode();
+      }
+      if (hasLockOwner()) {
+        hash = (37 * hash) + LOCK_OWNER_FIELD_NUMBER;
+        hash = (53 * hash) + getLockOwner().hashCode();
+      }
+      if (hasThreadId()) {
+        hash = (37 * hash) + THREAD_ID_FIELD_NUMBER;
+        hash = (53 * hash) + hashLong(getThreadId());
+      }
+      if (hasIsShared()) {
+        hash = (37 * hash) + IS_SHARED_FIELD_NUMBER;
+        hash = (53 * hash) + hashBoolean(getIsShared());
+      }
+      if (hasPurpose()) {
+        hash = (37 * hash) + PURPOSE_FIELD_NUMBER;
+        hash = (53 * hash) + getPurpose().hashCode();
+      }
+      if (hasCreateTime()) {
+        hash = (37 * hash) + CREATE_TIME_FIELD_NUMBER;
+        hash = (53 * hash) + hashLong(getCreateTime());
+      }
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return PARSER.parseFrom(input);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return PARSER.parseFrom(input, extensionRegistry);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return PARSER.parseDelimitedFrom(input);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return PARSER.parseDelimitedFrom(input, extensionRegistry);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return PARSER.parseFrom(input);
+    }
+    public static org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return PARSER.parseFrom(input, extensionRegistry);
+    }
+
+    public static Builder newBuilder() { return Builder.create(); }
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder(org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock prototype) {
+      return newBuilder().mergeFrom(prototype);
+    }
+    public Builder toBuilder() { return newBuilder(this); }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code ZKLock}
+     *
+     * <pre>
+     **
+     * Metadata associated with a zk lock in zookeeper
+     * </pre>
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder>
+       implements org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLockOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.internal_static_ZKLock_descriptor;
+      }
+
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.internal_static_ZKLock_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock.class, org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock.Builder.class);
+      }
+
+      // Construct using org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock.newBuilder()
+      private Builder() {
+        maybeForceBuilderInitialization();
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+        maybeForceBuilderInitialization();
+      }
+      private void maybeForceBuilderInitialization() {
+        if (com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders) {
+          getLockOwnerFieldBuilder();
+        }
+      }
+      private static Builder create() {
+        return new Builder();
+      }
+
+      public Builder clear() {
+        super.clear();
+        lockName_ = "";
+        bitField0_ = (bitField0_ & ~0x00000001);
+        if (lockOwnerBuilder_ == null) {
+          lockOwner_ = org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.getDefaultInstance();
+        } else {
+          lockOwnerBuilder_.clear();
+        }
+        bitField0_ = (bitField0_ & ~0x00000002);
+        threadId_ = 0L;
+        bitField0_ = (bitField0_ & ~0x00000004);
+        isShared_ = false;
+        bitField0_ = (bitField0_ & ~0x00000008);
+        purpose_ = "";
+        bitField0_ = (bitField0_ & ~0x00000010);
+        createTime_ = 0L;
+        bitField0_ = (bitField0_ & ~0x00000020);
+        return this;
+      }
+
+      public Builder clone() {
+        return create().mergeFrom(buildPartial());
+      }
+
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.internal_static_ZKLock_descriptor;
+      }
+
+      public org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock getDefaultInstanceForType() {
+        return org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock.getDefaultInstance();
+      }
+
+      public org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock build() {
+        org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      public org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock buildPartial() {
+        org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock result = new org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock(this);
+        int from_bitField0_ = bitField0_;
+        int to_bitField0_ = 0;
+        if (((from_bitField0_ & 0x00000001) == 0x00000001)) {
+          to_bitField0_ |= 0x00000001;
+        }
+        result.lockName_ = lockName_;
+        if (((from_bitField0_ & 0x00000002) == 0x00000002)) {
+          to_bitField0_ |= 0x00000002;
+        }
+        if (lockOwnerBuilder_ == null) {
+          result.lockOwner_ = lockOwner_;
+        } else {
+          result.lockOwner_ = lockOwnerBuilder_.build();
+        }
+        if (((from_bitField0_ & 0x00000004) == 0x00000004)) {
+          to_bitField0_ |= 0x00000004;
+        }
+        result.threadId_ = threadId_;
+        if (((from_bitField0_ & 0x00000008) == 0x00000008)) {
+          to_bitField0_ |= 0x00000008;
+        }
+        result.isShared_ = isShared_;
+        if (((from_bitField0_ & 0x00000010) == 0x00000010)) {
+          to_bitField0_ |= 0x00000010;
+        }
+        result.purpose_ = purpose_;
+        if (((from_bitField0_ & 0x00000020) == 0x00000020)) {
+          to_bitField0_ |= 0x00000020;
+        }
+        result.createTime_ = createTime_;
+        result.bitField0_ = to_bitField0_;
+        onBuilt();
+        return result;
+      }
+
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock) {
+          return mergeFrom((org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock other) {
+        if (other == org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock.getDefaultInstance()) return this;
+        if (other.hasLockName()) {
+          bitField0_ |= 0x00000001;
+          lockName_ = other.lockName_;
+          onChanged();
+        }
+        if (other.hasLockOwner()) {
+          mergeLockOwner(other.getLockOwner());
+        }
+        if (other.hasThreadId()) {
+          setThreadId(other.getThreadId());
+        }
+        if (other.hasIsShared()) {
+          setIsShared(other.getIsShared());
+        }
+        if (other.hasPurpose()) {
+          bitField0_ |= 0x00000010;
+          purpose_ = other.purpose_;
+          onChanged();
+        }
+        if (other.hasCreateTime()) {
+          setCreateTime(other.getCreateTime());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        return this;
+      }
+
+      public final boolean isInitialized() {
+        if (hasLockOwner()) {
+          if (!getLockOwner().isInitialized()) {
+            
+            return false;
+          }
+        }
+        return true;
+      }
+
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock parsedMessage = null;
+        try {
+          parsedMessage = PARSER.parsePartialFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          parsedMessage = (org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.ZKLock) e.getUnfinishedMessage();
+          throw e;
+        } finally {
+          if (parsedMessage != null) {
+            mergeFrom(parsedMessage);
+          }
+        }
+        return this;
+      }
+      private int bitField0_;
+
+      // optional string lock_name = 1;
+      private java.lang.Object lockName_ = "";
+      /**
+       * <code>optional string lock_name = 1;</code>
+       */
+      public boolean hasLockName() {
+        return ((bitField0_ & 0x00000001) == 0x00000001);
+      }
+      /**
+       * <code>optional string lock_name = 1;</code>
+       */
+      public java.lang.String getLockName() {
+        java.lang.Object ref = lockName_;
+        if (!(ref instanceof java.lang.String)) {
+          java.lang.String s = ((com.google.protobuf.ByteString) ref)
+              .toStringUtf8();
+          lockName_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>optional string lock_name = 1;</code>
+       */
+      public com.google.protobuf.ByteString
+          getLockNameBytes() {
+        java.lang.Object ref = lockName_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          lockName_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>optional string lock_name = 1;</code>
+       */
+      public Builder setLockName(
+          java.lang.String value) {
+        if (value == null) {
+    throw new NullPointerException();
+  }
+  bitField0_ |= 0x00000001;
+        lockName_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>optional string lock_name = 1;</code>
+       */
+      public Builder clearLockName() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        lockName_ = getDefaultInstance().getLockName();
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>optional string lock_name = 1;</code>
+       */
+      public Builder setLockNameBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) {
+    throw new NullPointerException();
+  }
+  bitField0_ |= 0x00000001;
+        lockName_ = value;
+        onChanged();
+        return this;
+      }
+
+      // optional .ServerName lock_owner = 2;
+      private org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName lockOwner_ = org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.getDefaultInstance();
+      private com.google.protobuf.SingleFieldBuilder<
+          org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName, org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.Builder, org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerNameOrBuilder> lockOwnerBuilder_;
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public boolean hasLockOwner() {
+        return ((bitField0_ & 0x00000002) == 0x00000002);
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName getLockOwner() {
+        if (lockOwnerBuilder_ == null) {
+          return lockOwner_;
+        } else {
+          return lockOwnerBuilder_.getMessage();
+        }
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public Builder setLockOwner(org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName value) {
+        if (lockOwnerBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          lockOwner_ = value;
+          onChanged();
+        } else {
+          lockOwnerBuilder_.setMessage(value);
+        }
+        bitField0_ |= 0x00000002;
+        return this;
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public Builder setLockOwner(
+          org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.Builder builderForValue) {
+        if (lockOwnerBuilder_ == null) {
+          lockOwner_ = builderForValue.build();
+          onChanged();
+        } else {
+          lockOwnerBuilder_.setMessage(builderForValue.build());
+        }
+        bitField0_ |= 0x00000002;
+        return this;
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public Builder mergeLockOwner(org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName value) {
+        if (lockOwnerBuilder_ == null) {
+          if (((bitField0_ & 0x00000002) == 0x00000002) &&
+              lockOwner_ != org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.getDefaultInstance()) {
+            lockOwner_ =
+              org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.newBuilder(lockOwner_).mergeFrom(value).buildPartial();
+          } else {
+            lockOwner_ = value;
+          }
+          onChanged();
+        } else {
+          lockOwnerBuilder_.mergeFrom(value);
+        }
+        bitField0_ |= 0x00000002;
+        return this;
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public Builder clearLockOwner() {
+        if (lockOwnerBuilder_ == null) {
+          lockOwner_ = org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.getDefaultInstance();
+          onChanged();
+        } else {
+          lockOwnerBuilder_.clear();
+        }
+        bitField0_ = (bitField0_ & ~0x00000002);
+        return this;
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.Builder getLockOwnerBuilder() {
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return getLockOwnerFieldBuilder().getBuilder();
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      public org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerNameOrBuilder getLockOwnerOrBuilder() {
+        if (lockOwnerBuilder_ != null) {
+          return lockOwnerBuilder_.getMessageOrBuilder();
+        } else {
+          return lockOwner_;
+        }
+      }
+      /**
+       * <code>optional .ServerName lock_owner = 2;</code>
+       */
+      private com.google.protobuf.SingleFieldBuilder<
+          org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName, org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.Builder, org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerNameOrBuilder> 
+          getLockOwnerFieldBuilder() {
+        if (lockOwnerBuilder_ == null) {
+          lockOwnerBuilder_ = new com.google.protobuf.SingleFieldBuilder<
+              org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName, org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName.Builder, org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerNameOrBuilder>(
+                  lockOwner_,
+                  getParentForChildren(),
+                  isClean());
+          lockOwner_ = null;
+        }
+        return lockOwnerBuilder_;
+      }
+
+      // optional int64 thread_id = 3;
+      private long threadId_ ;
+      /**
+       * <code>optional int64 thread_id = 3;</code>
+       */
+      public boolean hasThreadId() {
+        return ((bitField0_ & 0x00000004) == 0x00000004);
+      }
+      /**
+       * <code>optional int64 thread_id = 3;</code>
+       */
+      public long getThreadId() {
+        return threadId_;
+      }
+      /**
+       * <code>optional int64 thread_id = 3;</code>
+       */
+      public Builder setThreadId(long value) {
+        bitField0_ |= 0x00000004;
+        threadId_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>optional int64 thread_id = 3;</code>
+       */
+      public Builder clearThreadId() {
+        bitField0_ = (bitField0_ & ~0x00000004);
+        threadId_ = 0L;
+        onChanged();
+        return this;
+      }
+
+      // optional bool is_shared = 4;
+      private boolean isShared_ ;
+      /**
+       * <code>optional bool is_shared = 4;</code>
+       */
+      public boolean hasIsShared() {
+        return ((bitField0_ & 0x00000008) == 0x00000008);
+      }
+      /**
+       * <code>optional bool is_shared = 4;</code>
+       */
+      public boolean getIsShared() {
+        return isShared_;
+      }
+      /**
+       * <code>optional bool is_shared = 4;</code>
+       */
+      public Builder setIsShared(boolean value) {
+        bitField0_ |= 0x00000008;
+        isShared_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>optional bool is_shared = 4;</code>
+       */
+      public Builder clearIsShared() {
+        bitField0_ = (bitField0_ & ~0x00000008);
+        isShared_ = false;
+        onChanged();
+        return this;
+      }
+
+      // optional string purpose = 5;
+      private java.lang.Object purpose_ = "";
+      /**
+       * <code>optional string purpose = 5;</code>
+       */
+      public boolean hasPurpose() {
+        return ((bitField0_ & 0x00000010) == 0x00000010);
+      }
+      /**
+       * <code>optional string purpose = 5;</code>
+       */
+      public java.lang.String getPurpose() {
+        java.lang.Object ref = purpose_;
+        if (!(ref instanceof java.lang.String)) {
+          java.lang.String s = ((com.google.protobuf.ByteString) ref)
+              .toStringUtf8();
+          purpose_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>optional string purpose = 5;</code>
+       */
+      public com.google.protobuf.ByteString
+          getPurposeBytes() {
+        java.lang.Object ref = purpose_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          purpose_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>optional string purpose = 5;</code>
+       */
+      public Builder setPurpose(
+          java.lang.String value) {
+        if (value == null) {
+    throw new NullPointerException();
+  }
+  bitField0_ |= 0x00000010;
+        purpose_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>optional string purpose = 5;</code>
+       */
+      public Builder clearPurpose() {
+        bitField0_ = (bitField0_ & ~0x00000010);
+        purpose_ = getDefaultInstance().getPurpose();
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>optional string purpose = 5;</code>
+       */
+      public Builder setPurposeBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) {
+    throw new NullPointerException();
+  }
+  bitField0_ |= 0x00000010;
+        purpose_ = value;
+        onChanged();
+        return this;
+      }
+
+      // optional int64 create_time = 6;
+      private long createTime_ ;
+      /**
+       * <code>optional int64 create_time = 6;</code>
+       */
+      public boolean hasCreateTime() {
+        return ((bitField0_ & 0x00000020) == 0x00000020);
+      }
+      /**
+       * <code>optional int64 create_time = 6;</code>
+       */
+      public long getCreateTime() {
+        return createTime_;
+      }
+      /**
+       * <code>optional int64 create_time = 6;</code>
+       */
+      public Builder setCreateTime(long value) {
+        bitField0_ |= 0x00000020;
+        createTime_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>optional int64 create_time = 6;</code>
+       */
+      public Builder clearCreateTime() {
+        bitField0_ = (bitField0_ & ~0x00000020);
+        createTime_ = 0L;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:ZKLock)
+    }
+
+    static {
+      defaultInstance = new ZKLock(true);
+      defaultInstance.initFields();
+    }
+
+    // @@protoc_insertion_point(class_scope:ZKLock)
+  }
+
   private static com.google.protobuf.Descriptors.Descriptor
     internal_static_MetaRegionServer_descriptor;
   private static
@@ -9643,6 +10810,11 @@ public final class ZooKeeperProtos {
   private static
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
       internal_static_RegionStoreSequenceIds_fieldAccessorTable;
+  private static com.google.protobuf.Descriptors.Descriptor
+    internal_static_ZKLock_descriptor;
+  private static
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_ZKLock_fieldAccessorTable;
 
   public static com.google.protobuf.Descriptors.FileDescriptor
       getDescriptor() {
@@ -9685,8 +10857,12 @@ public final class ZooKeeperProtos {
       "\014\022\023\n\013sequence_id\030\002 \002(\004\"g\n\026RegionStoreSeq" +
       "uenceIds\022 \n\030last_flushed_sequence_id\030\001 \002" +
       "(\004\022+\n\021store_sequence_id\030\002 \003(\0132\020.StoreSeq" +
-      "uenceIdBE\n*org.apache.hadoop.hbase.proto" +
-      "buf.generatedB\017ZooKeeperProtosH\001\210\001\001\240\001\001"
+      "uenceId\"\210\001\n\006ZKLock\022\021\n\tlock_name\030\001 \001(\t\022\037\n" +
+      "\nlock_owner\030\002 \001(\0132\013.ServerName\022\021\n\tthread" +
+      "_id\030\003 \001(\003\022\021\n\tis_shared\030\004 \001(\010\022\017\n\007purpose\030" +
+      "\005 \001(\t\022\023\n\013create_time\030\006 \001(\003BE\n*org.apache" +
+      ".hadoop.hbase.protobuf.generatedB\017ZooKee" +
+      "perProtosH\001\210\001\001\240\001\001"
     };
     com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner =
       new com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner() {
@@ -9765,6 +10941,12 @@ public final class ZooKeeperProtos {
             com.google.protobuf.GeneratedMessage.FieldAccessorTable(
               internal_static_RegionStoreSequenceIds_descriptor,
               new java.lang.String[] { "LastFlushedSequenceId", "StoreSequenceId", });
+          internal_static_ZKLock_descriptor =
+            getDescriptor().getMessageTypes().get(12);
+          internal_static_ZKLock_fieldAccessorTable = new
+            com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+              internal_static_ZKLock_descriptor,
+              new java.lang.String[] { "LockName", "LockOwner", "ThreadId", "IsShared", "Purpose", "CreateTime", });
           return null;
         }
       };

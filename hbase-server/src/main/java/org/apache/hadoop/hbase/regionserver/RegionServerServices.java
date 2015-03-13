@@ -30,6 +30,7 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.executor.ExecutorService;
 import org.apache.hadoop.hbase.ipc.RpcServerInterface;
 import org.apache.hadoop.hbase.master.TableLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager;
 import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.RegionStateTransition.TransitionCode;
 import org.apache.hadoop.hbase.quotas.RegionServerQuotaManager;
 import org.apache.hadoop.hbase.wal.WAL;
@@ -161,4 +162,9 @@ public interface RegionServerServices
    * @see org.apache.hadoop.hbase.regionserver.Store#getCompactionPressure()
    */
   double getCompactionPressure();
+
+  /**
+   * @return RegionServer's instance of {@link ZKLockManager}
+   */
+  ZKLockManager getZKLockManager();
 }

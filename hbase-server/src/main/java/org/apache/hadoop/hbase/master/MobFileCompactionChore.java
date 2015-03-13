@@ -39,7 +39,7 @@ public class MobFileCompactionChore extends ScheduledChore {
 
   private static final Log LOG = LogFactory.getLog(MobFileCompactionChore.class);
   private HMaster master;
-  private TableLockManager tableLockManager;
+  private ZKLockManager zkLockManager;
   private ExecutorService pool;
 
   public MobFileCompactionChore(HMaster master) {
@@ -47,7 +47,7 @@ public class MobFileCompactionChore extends ScheduledChore {
         master.getConfiguration().getInt(MobConstants.MOB_FILE_COMPACTION_CHORE_PERIOD,
       MobConstants.DEFAULT_MOB_FILE_COMPACTION_CHORE_PERIOD));
     this.master = master;
-    this.tableLockManager = master.getTableLockManager();
+    this.zkLockManager = master.getZKLockManager();
     this.pool = MobUtils.createMobFileCompactorThreadPool(master.getConfiguration());
   }
 
@@ -68,7 +68,7 @@ public class MobFileCompactionChore extends ScheduledChore {
               reported = true;
             }
             MobUtils.doMobFileCompaction(master.getConfiguration(), master.getFileSystem(),
-              htd.getTableName(), hcd, pool, tableLockManager, false);
+              htd.getTableName(), hcd, pool, zkLockManager, false);
           }
         } finally {
           if (reported) {

@@ -41,8 +41,8 @@ import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
-import org.apache.hadoop.hbase.master.TableLockManager;
-import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.master.ZKLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager.ZKLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.DummyMobAbortable;
@@ -165,16 +165,16 @@ public class TestMobSweepReducer {
         System.currentTimeMillis() + 24 * 3600 * 1000);
 
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(configuration, "1", new DummyMobAbortable());
-    TableName lockName = MobUtils.getTableLockName(tn);
-    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, lockName.getNameAsString());
+    String lockName = MobUtils.getLockName(tn, "cf");
+    String znode = ZKUtil.joinZNode(zkw.zkLockZNode, lockName);
     configuration.set(SweepJob.SWEEP_JOB_ID, "1");
     configuration.set(SweepJob.SWEEP_JOB_TABLE_NODE, znode);
     ServerName serverName = SweepJob.getCurrentServerName(configuration);
     configuration.set(SweepJob.SWEEP_JOB_SERVERNAME, serverName.toString());
 
-    TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
+    ZKLockManager zkLockManager = ZKLockManager.createZKLockManager(configuration, zkw,
         serverName);
-    TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
+    ZKLock lock = zkLockManager.writeLock(lockName, "Run sweep tool");
     lock.acquire();
     try {
       // use the same counter when mocking

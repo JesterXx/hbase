@@ -57,8 +57,8 @@ import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
-import org.apache.hadoop.hbase.master.TableLockManager;
-import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.master.ZKLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager.ZKLock;
 import org.apache.hadoop.hbase.mob.filecompactions.MobFileCompactor;
 import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactor;
 import org.apache.hadoop.hbase.regionserver.BloomType;
@@ -658,14 +658,14 @@ public class MobUtils {
   }
 
   /**
-   * Gets the table name used in the table lock.
-   * The table lock name is a dummy one, it's not a table name. It's tableName + ".mobLock".
+   * Gets the lock name.
+   * The lock name is tableName + "-" + familyName + ".mobLock".
    * @param tn The table name.
-   * @return The table name used in table lock.
+   * @param familyName The family name.
+   * @return The lock name.
    */
-  public static TableName getTableLockName(TableName tn) {
-    byte[] tableName = tn.getName();
-    return TableName.valueOf(Bytes.add(tableName, MobConstants.MOB_TABLE_LOCK_SUFFIX));
+  public static String getLockName(TableName tn, String familyName) {
+    return tn.getNameAsString() + "-" + familyName + MobConstants.MOB_TABLE_LOCK_SUFFIX;
   }
 
   /**
@@ -675,11 +675,11 @@ public class MobUtils {
    * @param tableName the table the compact
    * @param hcd the column descriptor
    * @param pool the thread pool
-   * @param tableLockManager the tableLock manager
+   * @param zkLockManager the zk lock manager
    * @param isForceAllFiles Whether add all mob files into the compaction.
    */
   public static void doMobFileCompaction(Configuration conf, FileSystem fs, TableName tableName,
-    HColumnDescriptor hcd, ExecutorService pool, TableLockManager tableLockManager,
+    HColumnDescriptor hcd, ExecutorService pool, ZKLockManager zkLockManager,
     boolean isForceAllFiles) throws IOException {
     String className = conf.get(MobConstants.MOB_FILE_COMPACTOR_CLASS_KEY,
       PartitionedMobFileCompactor.class.getName());
@@ -695,27 +695,28 @@ public class MobUtils {
     // compact only for mob-enabled column.
     // obtain a write table lock before performing compaction to avoid race condition
     // with major compaction in mob-enabled column.
-    boolean tableLocked = false;
-    TableLock lock = null;
+    boolean locked = false;
+    ZKLock lock = null;
+    String lockName = MobUtils.getLockName(tableName, hcd.getNameAsString());
     try {
       // the tableLockManager might be null in testing. In that case, it is lock-free.
-      if (tableLockManager != null) {
-        lock = tableLockManager.writeLock(MobUtils.getTableLockName(tableName),
-          "Run MobFileCompaction");
+      if (zkLockManager != null) {
+        lock = zkLockManager.writeLock(lockName, "Run MobFileCompaction");
         lock.acquire();
       }
-      tableLocked = true;
+      locked = true;
       compactor.compact(isForceAllFiles);
     } catch (Exception e) {
       LOG.error("Fail to compact the mob files for the column " + hcd.getNameAsString()
         + " in the table " + tableName.getNameAsString(), e);
     } finally {
-      if (lock != null && tableLocked) {
+      if (lock != null && locked) {
         try {
           lock.release();
         } catch (IOException e) {
-          LOG.error("Fail to release the write lock for the table " + tableName.getNameAsString(),
-            e);
+          LOG.error(
+            "Fail to release the write lock " + lockName + " for the table "
+              + tableName.getNameAsString(), e);
         }
       }
     }

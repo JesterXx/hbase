@@ -48,8 +48,7 @@ import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
-import org.apache.hadoop.hbase.master.TableLockManager;
-import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.master.ZKLockManager;
 import org.apache.hadoop.hbase.mob.MobCacheConfig;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFile;
@@ -94,8 +93,8 @@ public class HMobStore extends HStore {
   private volatile long mobScanCellsCount = 0;
   private volatile long mobScanCellsSize = 0;
   private HColumnDescriptor family;
-  private TableLockManager tableLockManager;
-  private TableName tableLockName;
+  private ZKLockManager zkLockManager;
+  private String lockName;
   private Map<String, List<Path>> map = new ConcurrentHashMap<String, List<Path>>();
   private final IdLock keyLock = new IdLock();
 
@@ -114,8 +113,8 @@ public class HMobStore extends HStore {
         .getEncodedName(), family.getNameAsString()));
     map.put(Bytes.toString(tn.getName()), locations);
     if (region.getRegionServerServices() != null) {
-      tableLockManager = region.getRegionServerServices().getTableLockManager();
-      tableLockName = MobUtils.getTableLockName(getTableName());
+      zkLockManager = region.getRegionServerServices().getZKLockManager();
+      lockName = MobUtils.getLockName(getTableName(), family.getNameAsString());
     }
   }
 
@@ -424,45 +423,43 @@ public class HMobStore extends HStore {
     // If yes, mark the major compaction as retainDeleteMarkers
     if (compaction.getRequest().isAllFiles()) {
       // Use the Zookeeper to coordinate.
-      // 1. Acquire a operation lock.
+      // 1. Acquire a read lock if it is a major compaction.
       //   1.1. If no, mark the major compaction as retainDeleteMarkers and continue the compaction.
-      //   1.2. If the lock is obtained, search the node of sweeping.
-      //      1.2.1. If the node is there, the sweeping is in progress, mark the major
-      //             compaction as retainDeleteMarkers and continue the compaction.
-      //      1.2.2. If the node is not there, add a child to the major compaction node, and
-      //             run the compaction directly.
-      TableLock lock = null;
-      if (tableLockManager != null) {
-        lock = tableLockManager.readLock(tableLockName, "Major compaction in HMobStore");
+      //   1.2. If the lock is obtained, continue the major compaction.
+      ZKLockManager.ZKLock lock = null;
+      if (zkLockManager != null) {
+        lock = zkLockManager.readLock(lockName, "Major compaction in HMobStore");
       }
-      boolean tableLocked = false;
+      boolean locked = false;
       String tableName = getTableName().getNameAsString();
       if (lock != null) {
         try {
-          LOG.info("Start to acquire a read lock for the table[" + tableName
-              + "], ready to perform the major compaction");
-          lock.acquire();
-          tableLocked = true;
+          LOG.info("Start to acquire a read lock [" + lockName
+            + "], ready to perform the major compaction");
+          // no wait
+          lock.acquire(0);
+          locked = true;
         } catch (Exception e) {
-          LOG.error("Fail to lock the table " + tableName, e);
+          LOG.error("Fail to get the read lock " + lockName, e);
         }
       } else {
         // If the tableLockManager is null, mark the tableLocked as true.
-        tableLocked = true;
+        locked = true;
       }
       try {
-        if (!tableLocked) {
-          LOG.warn("Cannot obtain the table lock, maybe a sweep tool is running on this table["
-              + tableName + "], forcing the delete markers to be retained");
+        if (!locked) {
+          LOG.warn("Cannot obtain the read lock " + lockName
+            + ", maybe a sweep tool is running on this table[" + tableName
+            + "], forcing the delete markers to be retained");
           compaction.getRequest().forceRetainDeleteMarkers();
         }
         return super.compact(compaction, throughputController);
       } finally {
-        if (tableLocked && lock != null) {
+        if (locked && lock != null) {
           try {
             lock.release();
           } catch (IOException e) {
-            LOG.error("Fail to release the table lock " + tableName, e);
+            LOG.error("Fail to release the read lock " + lockName, e);
           }
         }
       }

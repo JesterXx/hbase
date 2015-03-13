@@ -100,6 +100,7 @@ import org.apache.hadoop.hbase.ipc.ServerRpcController;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.RegionState.State;
 import org.apache.hadoop.hbase.master.TableLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager;
 import org.apache.hadoop.hbase.mob.MobCacheConfig;
 import org.apache.hadoop.hbase.procedure.RegionServerProcedureManagerHost;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
@@ -423,6 +424,8 @@ public class HRegionServer extends HasThread implements
 
   // Table level lock manager for locking for region operations
   protected TableLockManager tableLockManager;
+  // A zk lock manager
+  protected ZKLockManager zkLockManager;
 
   /**
    * Nonce manager. Nonces are used to make operations like increment and append idempotent
@@ -550,6 +553,7 @@ public class HRegionServer extends HasThread implements
 
       tableLockManager = TableLockManager.createTableLockManager(
         conf, zooKeeper, serverName);
+      zkLockManager = ZKLockManager.createZKLockManager(conf, zooKeeper, serverName);
 
       masterAddressTracker = new MasterAddressTracker(getZooKeeper(), this);
       masterAddressTracker.start();
@@ -3169,5 +3173,9 @@ public class HRegionServer extends HasThread implements
       }
     }
     return max;
+  }
+
+  public ZKLockManager getZKLockManager() {
+    return zkLockManager;
   }
 }

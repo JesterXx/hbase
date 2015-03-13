@@ -75,15 +75,15 @@ public class MasterMobFileCompactionThread {
    * @param fs The file system
    * @param tableName The table the compact
    * @param hcds The column descriptors
-   * @param tableLockManager The tableLock manager
+   * @param zkLockManager The zk lock manager
    * @param isForceAllFiles Whether add all mob files into the compaction.
    */
   public void requestMobFileCompaction(Configuration conf, FileSystem fs, TableName tableName,
-    List<HColumnDescriptor> hcds, TableLockManager tableLockManager, boolean isForceAllFiles)
+    List<HColumnDescriptor> hcds, ZKLockManager zkLockManager, boolean isForceAllFiles)
     throws IOException {
     master.reportMobFileCompactionStart(tableName);
     try {
-      masterMobPool.execute(new CompactionRunner(fs, tableName, hcds, tableLockManager,
+      masterMobPool.execute(new CompactionRunner(fs, tableName, hcds, zkLockManager,
         isForceAllFiles, mobFileCompactorPool));
     } catch (RejectedExecutionException e) {
       // in case the request is rejected by the pool
@@ -104,17 +104,17 @@ public class MasterMobFileCompactionThread {
     private FileSystem fs;
     private TableName tableName;
     private List<HColumnDescriptor> hcds;
-    private TableLockManager tableLockManager;
+    private ZKLockManager zkLockManager;
     private boolean isForceAllFiles;
     private ExecutorService pool;
 
     public CompactionRunner(FileSystem fs, TableName tableName, List<HColumnDescriptor> hcds,
-      TableLockManager tableLockManager, boolean isForceAllFiles, ExecutorService pool) {
+      ZKLockManager zkLockManager, boolean isForceAllFiles, ExecutorService pool) {
       super();
       this.fs = fs;
       this.tableName = tableName;
       this.hcds = hcds;
-      this.tableLockManager = tableLockManager;
+      this.zkLockManager = zkLockManager;
       this.isForceAllFiles = isForceAllFiles;
       this.pool = pool;
     }
@@ -123,7 +123,7 @@ public class MasterMobFileCompactionThread {
     public void run() {
       try {
         for (HColumnDescriptor hcd : hcds) {
-          MobUtils.doMobFileCompaction(conf, fs, tableName, hcd, pool, tableLockManager,
+          MobUtils.doMobFileCompaction(conf, fs, tableName, hcd, pool, zkLockManager,
             isForceAllFiles);
         }
       } catch (IOException e) {

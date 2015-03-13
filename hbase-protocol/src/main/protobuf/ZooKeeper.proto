@@ -169,3 +169,15 @@ message RegionStoreSequenceIds {
   required uint64 last_flushed_sequence_id = 1;
   repeated StoreSequenceId store_sequence_id = 2;
 }
+
+/**
+ * Metadata associated with a zk lock in zookeeper
+ */
+message ZKLock {
+  optional string lock_name = 1;
+  optional ServerName lock_owner = 2;
+  optional int64 thread_id = 3;
+  optional bool is_shared = 4;
+  optional string purpose = 5;
+  optional int64 create_time = 6;
+}

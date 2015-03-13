@@ -29,7 +29,7 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.ScheduledChore;
 import org.apache.hadoop.hbase.TableDescriptors;
 import org.apache.hadoop.hbase.exceptions.LockTimeoutException;
-import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.master.ZKLockManager.ZKLock;
 import org.apache.hadoop.hbase.mob.ExpiredMobFileCleaner;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
@@ -43,7 +43,7 @@ public class ExpiredMobFileCleanerChore extends ScheduledChore {
 
   private static final Log LOG = LogFactory.getLog(ExpiredMobFileCleanerChore.class);
   private final HMaster master;
-  private TableLockManager tableLockManager;
+  private ZKLockManager zkLockManager;
   private ExpiredMobFileCleaner cleaner;
 
   public ExpiredMobFileCleanerChore(HMaster master) {
@@ -51,7 +51,7 @@ public class ExpiredMobFileCleanerChore extends ScheduledChore {
         master.getConfiguration().getInt(MobConstants.MOB_CLEANER_PERIOD,
                 MobConstants.DEFAULT_MOB_CLEANER_PERIOD));
     this.master = master;
-    this.tableLockManager = master.getTableLockManager();
+    this.zkLockManager = master.getZKLockManager();
     cleaner = new ExpiredMobFileCleaner();
     cleaner.setConf(master.getConfiguration());
   }
@@ -66,16 +66,16 @@ public class ExpiredMobFileCleanerChore extends ScheduledChore {
           if (hcd.isMobEnabled() && hcd.getMinVersions() == 0) {
             // clean only for mob-enabled column.
             // obtain a read table lock before cleaning, synchronize with MobFileCompactionChore.
-            boolean tableLocked = false;
-            TableLock lock = null;
+            boolean locked = false;
+            ZKLock lock = null;
+            String lockName = MobUtils.getLockName(htd.getTableName(), hcd.getNameAsString());
             try {
               // the tableLockManager might be null in testing. In that case, it is lock-free.
-              if (tableLockManager != null) {
-                lock = tableLockManager.readLock(MobUtils.getTableLockName(htd.getTableName()),
-                  "Run ExpiredMobFileCleanerChore");
+              if (zkLockManager != null) {
+                lock = zkLockManager.readLock(lockName, "Run ExpiredMobFileCleanerChore");
                 lock.acquire();
               }
-              tableLocked = true;
+              locked = true;
               cleaner.cleanExpiredMobFiles(htd.getTableName().getNameAsString(), hcd);
             } catch (LockTimeoutException e) {
               LOG.info("Fail to acquire the lock because of timeout, maybe a"
@@ -85,12 +85,13 @@ public class ExpiredMobFileCleanerChore extends ScheduledChore {
                 "Fail to clean the expired mob files for the column " + hcd.getNameAsString()
                   + " in the table " + htd.getNameAsString(), e);
             } finally {
-              if (lock != null && tableLocked) {
+              if (lock != null && locked) {
                 try {
                   lock.release();
                 } catch (IOException e) {
                   LOG.error(
-                    "Fail to release the write lock for the table " + htd.getNameAsString(), e);
+                    "Fail to release the write lock " + lockName + " for the table "
+                      + htd.getNameAsString(), e);
                 }
               }
             }

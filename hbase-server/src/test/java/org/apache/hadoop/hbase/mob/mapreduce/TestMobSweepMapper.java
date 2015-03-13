@@ -28,13 +28,13 @@ import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.hadoop.hbase.master.TableLockManager;
-import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.master.ZKLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager.ZKLock;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.DummyMobAbortable;
+import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
@@ -82,16 +82,16 @@ public class TestMobSweepMapper {
     Configuration configuration = new Configuration(TEST_UTIL.getConfiguration());
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(configuration, "1", new DummyMobAbortable());
     TableName tn = TableName.valueOf("testSweepMapper");
-    TableName lockName = MobUtils.getTableLockName(tn);
-    String znode = ZKUtil.joinZNode(zkw.tableLockZNode, lockName.getNameAsString());
+    String lockName = MobUtils.getLockName(tn, "cf");
+    String znode = ZKUtil.joinZNode(zkw.zkLockZNode, lockName);
     configuration.set(SweepJob.SWEEP_JOB_ID, "1");
     configuration.set(SweepJob.SWEEP_JOB_TABLE_NODE, znode);
     ServerName serverName = SweepJob.getCurrentServerName(configuration);
     configuration.set(SweepJob.SWEEP_JOB_SERVERNAME, serverName.toString());
 
-    TableLockManager tableLockManager = TableLockManager.createTableLockManager(configuration, zkw,
+    ZKLockManager zkLockManager = ZKLockManager.createZKLockManager(configuration, zkw,
         serverName);
-    TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
+    ZKLock lock = zkLockManager.writeLock(lockName, "Run sweep tool");
     lock.acquire();
     try {
       Mapper<ImmutableBytesWritable, Result, Text, KeyValue>.Context ctx =

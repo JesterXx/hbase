@@ -126,6 +126,7 @@ import org.apache.hadoop.hbase.util.hbck.HFileCorruptionChecker;
 import org.apache.hadoop.hbase.util.hbck.TableIntegrityErrorHandler;
 import org.apache.hadoop.hbase.util.hbck.TableIntegrityErrorHandlerImpl;
 import org.apache.hadoop.hbase.util.hbck.TableLockChecker;
+import org.apache.hadoop.hbase.util.hbck.ZKLockCheck;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.wal.WALSplitter;
@@ -237,6 +238,7 @@ public class HBaseFsck extends Configured implements Closeable {
   private boolean fixEmptyMetaCells = false; // fix (remove) empty REGIONINFO_QUALIFIER rows
   private boolean fixTableLocks = false; // fix table locks which are expired
   private boolean fixAny = false; // Set to true if any of the fix is required.
+  private boolean fixZKLocks = false; // fix zk locks which are expired
 
   // limit checking/fixes to listed tables, if empty attempt to check/fix all
   // hbase:meta are always checked
@@ -620,6 +622,7 @@ public class HBaseFsck extends Configured implements Closeable {
     offlineReferenceFileRepair();
 
     checkAndFixTableLocks();
+    checkAndFixZKLocks();
 
     // Remove the hbck lock
     unlockHbck();
@@ -3074,6 +3077,14 @@ public class HBaseFsck extends Configured implements Closeable {
     }
   }
 
+  private void checkAndFixZKLocks() throws IOException {
+    ZKLockCheck checker = new ZKLockCheck(createZooKeeperWatcher(), errors);
+    checker.checkZKLocks();
+    if (this.fixZKLocks) {
+      checker.fixExpiredZKLocks();
+    }
+  }
+
   /**
     * Check values in regionInfo for hbase:meta
     * Check if zero or more than one regions with hbase:meta are found.
@@ -3590,7 +3601,7 @@ public class HBaseFsck extends Configured implements Closeable {
       HOLE_IN_REGION_CHAIN, OVERLAP_IN_REGION_CHAIN, REGION_CYCLE, DEGENERATE_REGION,
       ORPHAN_HDFS_REGION, LINGERING_SPLIT_PARENT, NO_TABLEINFO_FILE, LINGERING_REFERENCE_HFILE,
       WRONG_USAGE, EMPTY_META_CELL, EXPIRED_TABLE_LOCK, BOUNDARIES_ERROR, ORPHAN_TABLE_STATE,
-      NO_TABLE_STATE
+      NO_TABLE_STATE, EXPIRED_ZK_LOCK
     }
     void clear();
     void report(String message);
@@ -3958,6 +3969,15 @@ public class HBaseFsck extends Configured implements Closeable {
   }
 
   /**
+   * Set zk locks fix mode.
+   * Delete zk locks held for a long time
+   */
+  public void setFixZKLocks(boolean shouldFix) {
+    fixZKLocks = shouldFix;
+    fixAny |= shouldFix;
+  }
+
+  /**
    * Check if we should rerun fsck again. This checks if we've tried to
    * fix something and we should rerun fsck tool again.
    * Display the full report from fsck. This displays all live and dead
@@ -4207,12 +4227,16 @@ public class HBaseFsck extends Configured implements Closeable {
     out.println("");
     out.println("  Metadata Repair shortcuts");
     out.println("   -repair           Shortcut for -fixAssignments -fixMeta -fixHdfsHoles " +
-        "-fixHdfsOrphans -fixHdfsOverlaps -fixVersionFile -sidelineBigOverlaps -fixReferenceFiles -fixTableLocks");
+        "-fixHdfsOrphans -fixHdfsOverlaps -fixVersionFile -sidelineBigOverlaps -fixReferenceFiles -fixTableLocks -fixZKLocks");
     out.println("   -repairHoles      Shortcut for -fixAssignments -fixMeta -fixHdfsHoles");
 
     out.println("");
     out.println("  Table lock options");
     out.println("   -fixTableLocks    Deletes table locks held for a long time (hbase.table.lock.expire.ms, 10min by default)");
+
+    out.println("");
+    out.println("  ZK lock options");
+    out.println("   -fixZKLocks    Deletes zk locks held for a long time (hbase.zk.lock.expire.ms, 10min by default)");
 
     out.flush();
     errors.reportError(ERROR_CODE.WRONG_USAGE, sw.toString());
@@ -4395,6 +4419,8 @@ public class HBaseFsck extends Configured implements Closeable {
         setRegionBoundariesCheck();
       } else if (cmd.equals("-fixTableLocks")) {
         setFixTableLocks(true);
+      } else if (cmd.equals("-fixZKLocks")) {
+        setFixZKLocks(true);
       } else if (cmd.startsWith("-")) {
         errors.reportError(ERROR_CODE.WRONG_USAGE, "Unrecognized option:" + cmd);
         return printUsageAndExit();

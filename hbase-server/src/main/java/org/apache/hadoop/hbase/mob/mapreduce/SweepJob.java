@@ -49,8 +49,8 @@ import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
-import org.apache.hadoop.hbase.master.TableLockManager;
-import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
+import org.apache.hadoop.hbase.master.ZKLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager.ZKLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.BloomType;
@@ -101,7 +101,7 @@ public class SweepJob {
   public final static String CREDENTIALS_LOCATION = "credentials_location";
   private CacheConfig cacheConfig;
   static final int SCAN_CACHING = 10000;
-  private TableLockManager tableLockManager;
+  private ZKLockManager zkLockManager;
 
   public SweepJob(Configuration conf, FileSystem fs) {
     this.conf = conf;
@@ -173,9 +173,9 @@ public class SweepJob {
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(conf, id, new DummyMobAbortable());
     try {
       ServerName serverName = getCurrentServerName(conf);
-      tableLockManager = TableLockManager.createTableLockManager(conf, zkw, serverName);
-      TableName lockName = MobUtils.getTableLockName(tn);
-      TableLock lock = tableLockManager.writeLock(lockName, "Run sweep tool");
+      zkLockManager = ZKLockManager.createZKLockManager(conf, zkw, serverName);
+      String lockName = MobUtils.getLockName(tn, familyName);
+      ZKLock lock = zkLockManager.writeLock(lockName, "Run sweep tool");
       String tableName = tn.getNameAsString();
       // Try to obtain the lock. Use this lock to synchronize all the query
       try {
@@ -200,8 +200,8 @@ public class SweepJob {
             JavaSerialization.class.getName() + "," + WritableSerialization.class.getName());
         conf.set(SWEEP_JOB_ID, id);
         conf.set(SWEEP_JOB_SERVERNAME, serverName.toString());
-        String tableLockNode = ZKUtil.joinZNode(zkw.tableLockZNode, lockName.getNameAsString());
-        conf.set(SWEEP_JOB_TABLE_NODE, tableLockNode);
+        String lockNode = ZKUtil.joinZNode(zkw.zkLockZNode, lockName);
+        conf.set(SWEEP_JOB_TABLE_NODE, lockNode);
         job = prepareJob(tn, familyName, scan, conf);
         job.getConfiguration().set(TableInputFormat.SCAN_COLUMN_FAMILY, familyName);
         // Record the compaction start time.

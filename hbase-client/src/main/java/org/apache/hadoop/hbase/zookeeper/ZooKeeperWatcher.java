@@ -108,6 +108,8 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
   public String balancerZNode;
   // znode containing the lock for the tables
   public String tableLockZNode;
+  // znode containing the zk lock
+  public String zkLockZNode;
   // znode containing the state of recovering regions
   public String recoveringRegionsZNode;
   // znode containing namespace descriptors
@@ -177,6 +179,7 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
       ZKUtil.createAndFailSilent(this, backupMasterAddressesZNode);
       ZKUtil.createAndFailSilent(this, tableLockZNode);
       ZKUtil.createAndFailSilent(this, recoveringRegionsZNode);
+      ZKUtil.createAndFailSilent(this, zkLockZNode);
     } catch (KeeperException e) {
       throw new ZooKeeperConnectionException(
           prefix("Unexpected KeeperException creating base node"), e);
@@ -237,6 +240,8 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
         conf.get("zookeeper.znode.recovering.regions", "recovering-regions"));
     namespaceZNode = ZKUtil.joinZNode(baseZNode,
         conf.get("zookeeper.znode.namespace", "namespace"));
+    zkLockZNode = ZKUtil.joinZNode(baseZNode,
+      conf.get("zookeeper.znode.zkLock", "zk-lock"));
   }
 
   /**

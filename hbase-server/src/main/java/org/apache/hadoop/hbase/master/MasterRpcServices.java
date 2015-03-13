@@ -1409,7 +1409,7 @@ public class MasterRpcServices extends RSRpcServices
     }
     master.mobFileCompactThread.requestMobFileCompaction(master.getConfiguration(),
       master.getFileSystem(), tableName, compactedColumns,
-      master.getTableLockManager(), isForceAllFiles);
+      master.getZKLockManager(), isForceAllFiles);
     return CompactRegionResponse.newBuilder().build();
   }
 }
