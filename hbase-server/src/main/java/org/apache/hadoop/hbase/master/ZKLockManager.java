@@ -274,13 +274,13 @@ public class ZKLockManager {
 
       lock = createZKLock();
       try {
-        if (lockTimeoutMs == -1) {
+        if (timeout == -1) {
           // Wait indefinitely
           lock.acquire();
         } else {
-          if (!lock.tryAcquire(lockTimeoutMs)) {
+          if (!lock.tryAcquire(timeout)) {
             throw new LockTimeoutException("Timed out acquiring " + (isShared ? "read" : "write")
-              + "lock:" + lockName + "for:" + purpose + " after " + lockTimeoutMs + " ms.");
+              + "lock:" + lockName + "for:" + purpose + " after " + timeout + " ms.");
           }
         }
       } catch (InterruptedException e) {
