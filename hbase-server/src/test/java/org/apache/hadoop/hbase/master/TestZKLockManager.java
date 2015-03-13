@@ -60,7 +60,7 @@ public class TestZKLockManager {
   }
 
   @After
-  public static void tearDownAfterClass() throws Exception {
+  public void tearDownAfterClass() throws Exception {
     TEST_UTIL.shutdownMiniCluster();
   }
 
