@@ -92,6 +92,15 @@ public abstract class TableLockManager {
     void acquire() throws IOException;
 
     /**
+     * Acquire the lock, with the current lock timeout.
+     * @param timeout The current timeout.
+     * @throws LockTimeoutException If unable to acquire a lock within a specified
+     * time period (if any)
+     * @throws IOException If unrecoverable error occurs
+     */
+    void acquire(long timeout) throws IOException;
+
+    /**
      * Release the lock already held.
      * @throws IOException If there is an unrecoverable error releasing the lock
      */
@@ -182,6 +191,9 @@ public abstract class TableLockManager {
       public void acquire() throws IOException {
       }
       @Override
+      public void acquire(long timeout) throws IOException { 
+      }
+      @Override
       public void release() throws IOException {
       }
     }
@@ -268,6 +280,11 @@ public abstract class TableLockManager {
 
       @Override
       public void acquire() throws IOException {
+        acquire(lockTimeoutMs);
+      }
+
+      @Override
+      public void acquire(long timeout) throws IOException {
         if (LOG.isTraceEnabled()) {
           LOG.trace("Attempt to acquire table " + (isShared ? "read" : "write") +
             " lock on: " + tableName + " for:" + purpose);
@@ -275,14 +292,14 @@ public abstract class TableLockManager {
 
         lock = createTableLock();
         try {
-          if (lockTimeoutMs == -1) {
+          if (timeout == -1) {
             // Wait indefinitely
             lock.acquire();
           } else {
-            if (!lock.tryAcquire(lockTimeoutMs)) {
+            if (!lock.tryAcquire(timeout)) {
               throw new LockTimeoutException("Timed out acquiring " +
                 (isShared ? "read" : "write") + "lock for table:" + tableName +
-                "for:" + purpose + " after " + lockTimeoutMs + " ms.");
+                "for:" + purpose + " after " + timeout + " ms.");
             }
           }
         } catch (InterruptedException e) {

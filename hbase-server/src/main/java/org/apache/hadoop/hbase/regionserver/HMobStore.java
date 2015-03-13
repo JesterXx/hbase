@@ -424,13 +424,9 @@ public class HMobStore extends HStore {
     // If yes, mark the major compaction as retainDeleteMarkers
     if (compaction.getRequest().isAllFiles()) {
       // Use the Zookeeper to coordinate.
-      // 1. Acquire a operation lock.
+      // 1. Acquire a read lock if it is a major compaction.
       //   1.1. If no, mark the major compaction as retainDeleteMarkers and continue the compaction.
-      //   1.2. If the lock is obtained, search the node of sweeping.
-      //      1.2.1. If the node is there, the sweeping is in progress, mark the major
-      //             compaction as retainDeleteMarkers and continue the compaction.
-      //      1.2.2. If the node is not there, add a child to the major compaction node, and
-      //             run the compaction directly.
+      //   1.2. If the lock is obtained, continue the major compaction.
       TableLock lock = null;
       if (tableLockManager != null) {
         lock = tableLockManager.readLock(tableLockName, "Major compaction in HMobStore");
@@ -441,7 +437,8 @@ public class HMobStore extends HStore {
         try {
           LOG.info("Start to acquire a read lock for the table[" + tableName
               + "], ready to perform the major compaction");
-          lock.acquire();
+          // do not wait
+          lock.acquire(0);
           tableLocked = true;
         } catch (Exception e) {
           LOG.error("Fail to lock the table " + tableName, e);
