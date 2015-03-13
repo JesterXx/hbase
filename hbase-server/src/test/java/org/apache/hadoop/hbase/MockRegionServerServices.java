@@ -35,6 +35,7 @@ import org.apache.hadoop.hbase.executor.ExecutorService;
 import org.apache.hadoop.hbase.fs.HFileSystem;
 import org.apache.hadoop.hbase.ipc.RpcServerInterface;
 import org.apache.hadoop.hbase.master.TableLockManager;
+import org.apache.hadoop.hbase.master.ZKLockManager;
 import org.apache.hadoop.hbase.master.TableLockManager.NullTableLockManager;
 import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.RegionStateTransition.TransitionCode;
 import org.apache.hadoop.hbase.quotas.RegionServerQuotaManager;
@@ -295,5 +296,10 @@ public class MockRegionServerServices implements RegionServerServices {
   @Override
   public double getCompactionPressure() {
     return 0;
+  }
+
+  @Override
+  public ZKLockManager getZKLockManager() {
+    return null;
   }
 }

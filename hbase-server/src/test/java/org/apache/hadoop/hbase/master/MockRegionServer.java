@@ -631,4 +631,9 @@ ClientProtos.ClientService.BlockingInterface, RegionServerServices {
   public double getCompactionPressure() {
     return 0;
   }
+
+  @Override
+  public ZKLockManager getZKLockManager() {
+    return null;
+  }
 }
