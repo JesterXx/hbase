@@ -73,7 +73,7 @@ public class MobConstants {
 
   public final static String TEMP_DIR_NAME = ".tmp";
   public final static String BULKLOAD_DIR_NAME = ".bulkload";
-  public final static byte[] MOB_TABLE_LOCK_SUFFIX = Bytes.toBytes(".mobLock");
+  public final static byte[] MOB_LOCK_SUFFIX = Bytes.toBytes(".mobLock");
   public final static String EMPTY_STRING = "";
   /**
    * If the size of a mob file is less than this value, it's regarded as a small file and needs to

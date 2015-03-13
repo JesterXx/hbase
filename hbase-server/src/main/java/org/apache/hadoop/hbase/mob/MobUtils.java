@@ -665,7 +665,7 @@ public class MobUtils {
    * @return The lock name.
    */
   public static String getLockName(TableName tn, String familyName) {
-    return tn.getNameAsString() + "-" + familyName + MobConstants.MOB_TABLE_LOCK_SUFFIX;
+    return tn.getNameAsString() + "-" + familyName + MobConstants.MOB_LOCK_SUFFIX;
   }
 
   /**
