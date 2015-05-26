@@ -192,7 +192,14 @@ public class DeleteTableHandler extends TableEventHandler {
       }
 
       // Archive the mob data if there is a mob-enabled column
-      boolean hasMob = MobUtils.hasMobColumns(hTableDescriptor);
+      HColumnDescriptor[] hcds = hTableDescriptor.getColumnFamilies();
+      boolean hasMob = false;
+      for (HColumnDescriptor hcd : hcds) {
+        if (hcd.isMobEnabled()) {
+          hasMob = true;
+          break;
+        }
+      }
       Path mobTableDir = null;
       if (hasMob) {
         // Archive mob data
