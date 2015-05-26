@@ -249,7 +249,7 @@ public class MobFileCache {
 
   public void shutdown() {
     this.scheduleThreadPool.shutdown();
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 100; i++) {
       if (!this.scheduleThreadPool.isShutdown()) {
         try {
           Thread.sleep(10);

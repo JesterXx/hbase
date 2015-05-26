@@ -39,6 +39,7 @@ import org.apache.hadoop.hbase.io.crypto.Encryption;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.SweepCounter;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepReducer.SweepPartitionId;
 import org.apache.hadoop.hbase.regionserver.KeyValueScanner;
@@ -68,7 +69,7 @@ public class MemStoreWrapper {
 
   private MemStore memstore;
   private long flushSize;
-  private SweepPartitionId partitionId;
+  private PartitionedMobFileCompactionRequest.CompactionPartitionId partitionId;
   private Context context;
   private Configuration conf;
   private BufferedMutator table;
@@ -78,8 +79,8 @@ public class MemStoreWrapper {
   private CacheConfig cacheConfig;
   private Encryption.Context cryptoContext = Encryption.Context.NONE;
 
-  public MemStoreWrapper(Context context, FileSystem fs, BufferedMutator table, HColumnDescriptor hcd,
-      MemStore memstore, CacheConfig cacheConfig) throws IOException {
+  public MemStoreWrapper(Context context, FileSystem fs, BufferedMutator table,
+    HColumnDescriptor hcd, MemStore memstore, CacheConfig cacheConfig) throws IOException {
     this.memstore = memstore;
     this.context = context;
     this.fs = fs;
@@ -93,7 +94,8 @@ public class MemStoreWrapper {
     cryptoContext = MobUtils.createEncryptionContext(conf, hcd);
   }
 
-  public void setPartitionId(SweepPartitionId partitionId) {
+  public void setPartitionId(PartitionedMobFileCompactionRequest.CompactionPartitionId
+    partitionId) {
     this.partitionId = partitionId;
   }
 
@@ -155,16 +157,19 @@ public class MemStoreWrapper {
     scanner = snapshot.getScanner();
     scanner.seek(KeyValueUtil.createFirstOnRow(HConstants.EMPTY_START_ROW));
     cell = null;
-    Tag tableNameTag = new Tag(TagType.MOB_TABLE_NAME_TAG_TYPE, Bytes.toBytes(this.table.getName().toString()));
+    Tag tableNameTag = new Tag(TagType.MOB_TABLE_NAME_TAG_TYPE, Bytes.toBytes(this.table.getName()
+      .toString()));
+    long updatedCount = 0;
     while (null != (cell = scanner.next())) {
       KeyValue reference = MobUtils.createMobRefKeyValue(cell, referenceValue, tableNameTag);
       Put put =
           new Put(reference.getRowArray(), reference.getRowOffset(), reference.getRowLength());
       put.add(reference);
       table.mutate(put);
-      context.getCounter(SweepCounter.RECORDS_UPDATED).increment(1);
+      updatedCount++;
     }
     table.flush();
+    context.getCounter(SweepCounter.RECORDS_UPDATED).increment(updatedCount);
     scanner.close();
   }
 

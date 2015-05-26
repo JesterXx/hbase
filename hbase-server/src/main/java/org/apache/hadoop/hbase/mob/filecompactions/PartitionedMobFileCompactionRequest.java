@@ -91,7 +91,7 @@ public class PartitionedMobFileCompactionRequest extends MobFileCompactionReques
   /**
    * The partition id that consists of start key and date of the mob file name.
    */
-  protected static class CompactionPartitionId {
+  public static class CompactionPartitionId {
 
     private String startKey;
     private String date;
