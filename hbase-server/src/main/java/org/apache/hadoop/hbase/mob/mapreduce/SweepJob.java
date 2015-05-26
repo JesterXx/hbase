@@ -85,12 +85,12 @@ public class SweepJob {
   private final FileSystem fs;
   private final Configuration conf;
   private static final Log LOG = LogFactory.getLog(SweepJob.class);
-  static final String SWEEP_JOB_ID = "mob.sweep.job.id";
-  static final String SWEEP_JOB_SERVERNAME = "mob.sweep.job.servername";
-  static final String SWEEP_JOB_TABLE_NODE = "mob.sweep.job.table.node";
-  static final String WORKING_DIR_KEY = "mob.sweep.job.dir";
-  static final String WORKING_ALLNAMES_FILE_KEY = "mob.sweep.job.all.file";
-  static final String WORKING_VISITED_DIR_KEY = "mob.sweep.job.visited.dir";
+  static final String SWEEP_JOB_ID = "hbase.mob.sweep.job.id";
+  static final String SWEEP_JOB_SERVERNAME = "hbase.mob.sweep.job.servername";
+  static final String SWEEP_JOB_TABLE_NODE = "hbase.mob.sweep.job.table.node";
+  static final String WORKING_DIR_KEY = "hbase.mob.sweep.job.dir";
+  static final String WORKING_ALLNAMES_FILE_KEY = "hbase.mob.sweep.job.all.file";
+  static final String WORKING_VISITED_DIR_KEY = "hbase.mob.sweep.job.visited.dir";
   static final String WORKING_ALLNAMES_DIR = "all";
   static final String WORKING_VISITED_DIR = "visited";
   public static final String WORKING_FILES_DIR_KEY = "mob.sweep.job.files.dir";
@@ -480,10 +480,12 @@ public class SweepJob {
 
     @Override
     public int compareTo(IndexedResult o) {
-      if (this.value == null) {
+      if (this.value == null && o.getValue() == null) {
         return 0;
       } else if (o.value == null) {
         return 1;
+      } else if (this.value == null) {
+        return -1;
       } else {
         return this.value.compareTo(o.value);
       }

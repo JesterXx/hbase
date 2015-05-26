@@ -28,6 +28,7 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.util.Tool;
@@ -43,6 +44,7 @@ import com.google.protobuf.ServiceException;
  * same column family are mutually exclusive too.
  */
 @InterfaceAudience.Public
+@InterfaceStability.Stable
 public class Sweeper extends Configured implements Tool {
 
   /**

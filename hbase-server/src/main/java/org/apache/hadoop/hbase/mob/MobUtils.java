@@ -48,6 +48,7 @@ import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
@@ -555,7 +556,7 @@ public class MobUtils {
   }
 
   /**
-   * Creates a writer for the del file in temp directory.
+   * Creates a writer for the mob file in temp directory.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -838,5 +839,20 @@ public class MobUtils {
       cryptoContext.setKey(key);
     }
     return cryptoContext;
+  }
+
+  /**
+   * Checks whether this table has mob-enabled columns.
+   * @param htd The current table descriptor.
+   * @return Whether this table has mob-enabled columns.
+   */
+  public static boolean hasMobColumns(HTableDescriptor htd) {
+    HColumnDescriptor[] hcds = htd.getColumnFamilies();
+    for (HColumnDescriptor hcd : hcds) {
+      if (hcd.isMobEnabled()) {
+        return true;
+      }
+    }
+    return false;
   }
 }

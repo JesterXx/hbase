@@ -51,6 +51,7 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobFile;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.mob.filecompactions.PartitionedMobFileCompactionRequest;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.DummyMobAbortable;
 import org.apache.hadoop.hbase.mob.mapreduce.SweepJob.SweepCounter;
 import org.apache.hadoop.hbase.regionserver.BloomType;
@@ -138,7 +139,9 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
     mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tn);
   }
 
-  private SweepPartition createPartition(SweepPartitionId id, Context context) throws IOException {
+  private SweepPartition createPartition(
+    PartitionedMobFileCompactionRequest.CompactionPartitionId id, Context context)
+    throws IOException {
     return new SweepPartition(id, context);
   }
 
@@ -161,13 +164,13 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
       fout = fs.create(nameFilePath, true);
       writer = SequenceFile.createWriter(context.getConfiguration(), fout, String.class,
           String.class, CompressionType.NONE, null);
-      SweepPartitionId id;
+      PartitionedMobFileCompactionRequest.CompactionPartitionId id;
       SweepPartition partition = null;
       // the mob files which have the same start key and date are in the same partition.
       while (context.nextKey()) {
         Text key = context.getCurrentKey();
         String keyString = key.toString();
-        id = SweepPartitionId.create(keyString);
+        id = createPartitionId(keyString);
         if (null == partition || !id.equals(partition.getId())) {
           // It's the first mob file in the current partition.
           if (null != partition) {
@@ -215,21 +218,22 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
    */
   public class SweepPartition {
 
-    private final SweepPartitionId id;
+    private final PartitionedMobFileCompactionRequest.CompactionPartitionId id;
     private final Context context;
     private boolean memstoreUpdated = false;
     private boolean mergeSmall = false;
     private final Map<String, MobFileStatus> fileStatusMap = new HashMap<String, MobFileStatus>();
     private final List<Path> toBeDeleted = new ArrayList<Path>();
 
-    public SweepPartition(SweepPartitionId id, Context context) throws IOException {
+    public SweepPartition(PartitionedMobFileCompactionRequest.CompactionPartitionId id,
+      Context context) throws IOException {
       this.id = id;
       this.context = context;
       memstore.setPartitionId(id);
       init();
     }
 
-    public SweepPartitionId getId() {
+    public PartitionedMobFileCompactionRequest.CompactionPartitionId getId() {
       return this.id;
     }
 
@@ -390,58 +394,15 @@ public class SweepReducer extends Reducer<Text, KeyValue, Writable, Writable> {
   }
 
   /**
-   * The sweep partition id.
-   * It consists of the start key and date.
-   * The start key is a hex string of the checksum of a region start key.
-   * The date is the latest timestamp of cells in a mob file.
+   * Creates the partition id.
+   * @param fileNameAsString The current file name, in string.
+   * @return The partition id.
    */
-  public static class SweepPartitionId {
-    private String date;
-    private String startKey;
-
-    public SweepPartitionId(MobFileName fileName) {
-      this.date = fileName.getDate();
-      this.startKey = fileName.getStartKey();
-    }
-
-    public SweepPartitionId(String date, String startKey) {
-      this.date = date;
-      this.startKey = startKey;
-    }
-
-    public static SweepPartitionId create(String key) {
-      return new SweepPartitionId(MobFileName.create(key));
-    }
-
-    @Override
-    public boolean equals(Object anObject) {
-      if (this == anObject) {
-        return true;
-      }
-      if (anObject instanceof SweepPartitionId) {
-        SweepPartitionId another = (SweepPartitionId) anObject;
-        if (this.date.equals(another.getDate()) && this.startKey.equals(another.getStartKey())) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    public String getDate() {
-      return this.date;
-    }
-
-    public String getStartKey() {
-      return this.startKey;
-    }
-
-    public void setDate(String date) {
-      this.date = date;
-    }
-
-    public void setStartKey(String startKey) {
-      this.startKey = startKey;
-    }
+  private PartitionedMobFileCompactionRequest.CompactionPartitionId createPartitionId(
+    String fileNameAsString) {
+    MobFileName fileName = MobFileName.create(fileNameAsString);
+    return new PartitionedMobFileCompactionRequest.CompactionPartitionId(fileName.getStartKey(),
+      fileName.getDate());
   }
 
   /**
