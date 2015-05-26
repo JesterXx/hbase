@@ -203,11 +203,11 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
     // archive the del files if all the mob files are selected.
     if (request.type == CompactionType.ALL_FILES && !newDelPaths.isEmpty()) {
       LOG.info("After a mob file compaction with all files selected, archiving the del files "
-        + newDelPaths);
+        + newDelFiles);
       try {
         MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), newDelFiles);
       } catch (IOException e) {
-        LOG.error("Failed to archive the del files " + newDelPaths, e);
+        LOG.error("Failed to archive the del files " + newDelFiles, e);
       }
     }
     return paths;
@@ -245,20 +245,18 @@ public class PartitionedMobFileCompactor extends MobFileCompactor {
       }
       // compact the partitions in parallel.
       boolean hasFailure = false;
-      List<CompactionPartitionId> failedPartitions = new ArrayList<CompactionPartitionId>();
       for (Entry<CompactionPartitionId, Future<List<Path>>> result : results.entrySet()) {
         try {
           paths.addAll(result.getValue().get());
         } catch (Exception e) {
           // just log the error
           LOG.error("Failed to compact the partition " + result.getKey(), e);
-          failedPartitions.add(result.getKey());
           hasFailure = true;
         }
       }
       if (hasFailure) {
         // if any partition fails in the compaction, directly throw an exception.
-        throw new IOException("Failed to compact the partitions " + failedPartitions);
+        throw new IOException("Failed to compact the partitions");
       }
     } finally {
       try {
