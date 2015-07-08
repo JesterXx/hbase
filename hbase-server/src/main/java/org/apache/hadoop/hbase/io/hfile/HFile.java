@@ -48,6 +48,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
+import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HConstants;
@@ -63,6 +64,7 @@ import org.apache.hadoop.hbase.protobuf.generated.HFileProtos;
 import org.apache.hadoop.hbase.util.BloomFilterWriter;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.io.Writable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -252,6 +254,7 @@ public class HFile {
         CellComparator.COMPARATOR;
     protected InetSocketAddress[] favoredNodes;
     private HFileContext fileContext;
+    private StorageType storageType;
 
     WriterFactory(Configuration conf, CacheConfig cacheConf) {
       this.conf = conf;
@@ -289,6 +292,11 @@ public class HFile {
       return this;
     }
 
+    public WriterFactory withStorageType(StorageType storageType) {
+      this.storageType = storageType;
+      return this;
+    }
+
     public Writer create() throws IOException {
       if ((path != null ? 1 : 0) + (ostream != null ? 1 : 0) != 1) {
         throw new AssertionError("Please specify exactly one of " +
@@ -296,6 +304,7 @@ public class HFile {
       }
       if (path != null) {
         ostream = HFileWriterImpl.createOutputStream(conf, fs, path, favoredNodes);
+        ((DistributedFileSystem) fs).setStoragePolicy(path, this.storageType.name());
       }
       return createWriter(fs, path, ostream,
                    comparator, fileContext);

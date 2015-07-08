@@ -47,6 +47,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
@@ -967,6 +968,14 @@ public class HStore implements Store {
     return sf;
   }
 
+  @Override
+  public StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
+      boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag)
+  throws IOException {
+    return createWriterInTmp(maxKeyCount, compression, isCompaction, includeMVCCReadpoint,
+      includesTag, StorageType.DEFAULT);
+  }
+
   /*
    * @param maxKeyCount
    * @param compression Compression algorithm to use
@@ -977,7 +986,7 @@ public class HStore implements Store {
    */
   @Override
   public StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
-      boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag)
+      boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag, StorageType storageType)
   throws IOException {
     final CacheConfig writerCacheConf;
     if (isCompaction) {
@@ -1002,6 +1011,7 @@ public class HStore implements Store {
             .withMaxKeyCount(maxKeyCount)
             .withFavoredNodes(favoredNodes)
             .withFileContext(hFileContext)
+            .withStorageType(storageType)
             .build();
     return w;
   }
@@ -1227,6 +1237,15 @@ public class HStore implements Store {
       // At this point the store will use new files for all new scanners.
       completeCompaction(filesToCompact, true); // Archive old files & update store size.
 
+      if (region.getRegionServerServices().getLogMovePool() != null) {
+        LOG.info("Now start to archive " + filesToCompact.size() + " store files to disk");
+        Collection<Path> pathsToCompact = new ArrayList<Path>();
+        for (StoreFile fileToCompact : filesToCompact) {
+          pathsToCompact.add(fileToCompact.getPath());
+        }
+        region.getRegionServerServices().getLogMovePool()
+          .submit(new LogMoveTask(fs.getFileSystem(), pathsToCompact, StorageType.DISK));
+      }
       logCompactionEndMessage(cr, sfs, compactionStartTime);
       return sfs;
     } finally {

@@ -78,6 +78,8 @@ public interface RegionServerServices extends OnlineRegions, FavoredNodesForRegi
    * @return RegionServer's instance of {@link RegionServerQuotaManager}
    */
   RegionServerQuotaManager getRegionServerQuotaManager();
+  
+  java.util.concurrent.ExecutorService getLogMovePool();
 
   /**
    * Context for postOpenDeployTasks().

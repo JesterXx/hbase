@@ -44,6 +44,10 @@ import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -355,6 +359,8 @@ public class HRegionServer extends HasThread implements
   ScheduledChore periodicFlusher;
 
   protected volatile WALFactory walFactory;
+  
+  private java.util.concurrent.ExecutorService logMovePool;
 
   // WAL roller. log is protected rather than private to avoid
   // eclipse warning when accessed by inner classes
@@ -531,6 +537,20 @@ public class HRegionServer extends HasThread implements
 
     this.abortRequested = false;
     this.stopped = false;
+
+    logMovePool = new ThreadPoolExecutor(15, 15, 60, TimeUnit.SECONDS,
+      new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
+
+        @Override
+        public Thread newThread(Runnable r) {
+          Thread t = new Thread(r);
+          t.setDaemon(true);
+          t.setName(Thread.currentThread().getName() + "-HRegionServerHFileMove-"
+            + EnvironmentEdgeManager.currentTime());
+          return t;
+        }
+      });
+    ((ThreadPoolExecutor) this.logMovePool).allowCoreThreadTimeOut(true);
 
     rpcServices = createRpcServices();
     this.startcode = System.currentTimeMillis();
@@ -3321,5 +3341,10 @@ public class HRegionServer extends HasThread implements
       }
     }
     return max;
+  }
+
+  @Override
+  public java.util.concurrent.ExecutorService getLogMovePool() {
+    return logMovePool;
   }
 }

@@ -306,4 +306,10 @@ public class MockRegionServerServices implements RegionServerServices {
   public double getCompactionPressure() {
     return 0;
   }
+
+  @Override
+  public java.util.concurrent.ExecutorService getLogMovePool() {
+    // TODO Auto-generated method stub
+    return null;
+  }
 }

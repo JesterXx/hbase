@@ -26,6 +26,7 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
@@ -172,6 +173,14 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
     boolean isCompaction,
     boolean includeMVCCReadpoint,
     boolean includesTags
+  ) throws IOException;
+  
+  StoreFile.Writer createWriterInTmp(
+    long maxKeyCount,
+    Compression.Algorithm compression,
+    boolean isCompaction,
+    boolean includeMVCCReadpoint,
+    boolean includesTags, StorageType storageType
   ) throws IOException;
 
   // Compaction oriented methods

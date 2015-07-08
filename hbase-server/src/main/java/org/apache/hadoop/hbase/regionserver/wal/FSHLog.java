@@ -43,6 +43,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,6 +59,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
+import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
@@ -65,6 +68,7 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.regionserver.LogMoveTask;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.DrainBarrier;
@@ -79,6 +83,7 @@ import org.apache.hadoop.hbase.wal.WALKey;
 import org.apache.hadoop.hbase.wal.WALPrettyPrinter;
 import org.apache.hadoop.hbase.wal.WALProvider.Writer;
 import org.apache.hadoop.hbase.wal.WALSplitter;
+import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.htrace.NullScope;
@@ -339,6 +344,8 @@ public class FSHLog implements WAL {
 
   private final AtomicInteger closeErrorCount = new AtomicInteger();
 
+  private ExecutorService logMovePool;
+  private LinkedBlockingQueue<Runnable> logMoveEvents;
 
   /**
    * WAL Comparator; it compares the timestamp (log filenum), present in the log file name.
@@ -432,11 +439,26 @@ public class FSHLog implements WAL {
     this.fullPathLogDir = new Path(rootDir, logDir);
     this.fullPathArchiveDir = new Path(rootDir, archiveDir);
     this.conf = conf;
+    logMoveEvents = new LinkedBlockingQueue<Runnable>();
+    logMovePool = new ThreadPoolExecutor(5, 5, 60, TimeUnit.SECONDS,
+      logMoveEvents, new ThreadFactory() {
+
+        @Override
+        public Thread newThread(Runnable r) {
+          Thread t = new Thread(r);
+          t.setDaemon(true);
+          t.setName(Thread.currentThread().getName() + "-FSHLogMoveHLog-"
+            + EnvironmentEdgeManager.currentTime());
+          return t;
+        }
+      });
+    ((ThreadPoolExecutor) this.logMovePool).allowCoreThreadTimeOut(true);
 
     if (!fs.exists(fullPathLogDir) && !fs.mkdirs(fullPathLogDir)) {
       throw new IOException("Unable to mkdir " + fullPathLogDir);
     }
 
+    ((DistributedFileSystem) fs).setStoragePolicy(fullPathLogDir, StorageType.CR.name());
     if (!fs.exists(this.fullPathArchiveDir)) {
       if (!fs.mkdirs(this.fullPathArchiveDir)) {
         throw new IOException("Unable to mkdir " + this.fullPathArchiveDir);
@@ -727,6 +749,11 @@ public class FSHLog implements WAL {
         archiveLogFile(p);
         this.byWalRegionSequenceIds.remove(p);
       }
+      // move the files.
+      LOG.info("Now there are " + logMoveEvents.size()
+        + " events in log moving queue. One more which has " + logsToArchive.size()
+        + " files is going to be submitted");
+      logMovePool.submit(new LogMoveTask(fs, logsToArchive, StorageType.DISK));
     }
   }
 

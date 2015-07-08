@@ -36,6 +36,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
@@ -545,6 +546,7 @@ public class StoreFile {
     private Path filePath;
     private InetSocketAddress[] favoredNodes;
     private HFileContext fileContext;
+    private StorageType storageType;
     public WriterBuilder(Configuration conf, CacheConfig cacheConf,
         FileSystem fs) {
       this.conf = conf;
@@ -597,6 +599,12 @@ public class StoreFile {
       return this;
     }
 
+    public WriterBuilder withStorageType(StorageType storageType) {
+      Preconditions.checkNotNull(storageType);
+      this.storageType = storageType;
+      return this;
+    }
+
     /**
      * @param maxKeyCount estimated maximum number of keys we expect to add
      * @return this (for chained invocation)
@@ -639,8 +647,8 @@ public class StoreFile {
       if (comparator == null) {
         comparator = CellComparator.COMPARATOR;
       }
-      return new Writer(fs, filePath,
-          conf, cacheConf, comparator, bloomType, maxKeyCount, favoredNodes, fileContext);
+      return new Writer(fs, filePath, conf, cacheConf, comparator, bloomType, maxKeyCount,
+        favoredNodes, fileContext, storageType);
     }
   }
 
@@ -743,13 +751,14 @@ public class StoreFile {
         final Configuration conf,
         CacheConfig cacheConf,
         final CellComparator comparator, BloomType bloomType, long maxKeys,
-        InetSocketAddress[] favoredNodes, HFileContext fileContext)
+        InetSocketAddress[] favoredNodes, HFileContext fileContext, StorageType storageType)
             throws IOException {
       writer = HFile.getWriterFactory(conf, cacheConf)
           .withPath(fs, path)
           .withComparator(comparator)
           .withFavoredNodes(favoredNodes)
           .withFileContext(fileContext)
+          .withStorageType(storageType)
           .create();
 
       generalBloomFilterWriter = BloomFilterFactory.createGeneralBloomAtWrite(
