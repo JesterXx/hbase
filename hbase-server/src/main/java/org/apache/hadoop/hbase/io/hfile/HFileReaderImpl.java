@@ -35,11 +35,10 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
+import org.apache.hadoop.hbase.SizeCachedKeyValue;
+import org.apache.hadoop.hbase.SizeCachedNoTagsKeyValue;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
-import org.apache.hadoop.hbase.KeyValueUtil;
-import org.apache.hadoop.hbase.NoTagsKeyValue;
-import org.apache.hadoop.hbase.KeyValue.KVComparator;
 import org.apache.hadoop.hbase.fs.HFileSystem;
 import org.apache.hadoop.hbase.io.FSDataInputStreamWrapper;
 import org.apache.hadoop.hbase.io.compress.Compression;
@@ -73,10 +72,10 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
   private static final Log LOG = LogFactory.getLog(HFileReaderImpl.class);
 
   /** Data block index reader keeping the root data index in memory */
-  private HFileBlockIndex.BlockIndexReader dataBlockIndexReader;
+  private HFileBlockIndex.CellBasedKeyBlockIndexReader dataBlockIndexReader;
 
   /** Meta block index reader -- always single level */
-  private HFileBlockIndex.BlockIndexReader metaBlockIndexReader;
+  private HFileBlockIndex.ByteArrayKeyBlockIndexReader metaBlockIndexReader;
 
   private final FixedFileTrailer trailer;
 
@@ -90,7 +89,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
   private HFileDataBlockEncoder dataBlockEncoder = NoOpDataBlockEncoder.INSTANCE;
 
   /** Last key in the file. Filled in when we read in the file info */
-  private byte [] lastKey = null;
+  private Cell lastKeyCell = null;
 
   /** Average key length read from file info */
   private int avgKeyLen = -1;
@@ -189,10 +188,9 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
 
     // Comparator class name is stored in the trailer in version 2.
     comparator = trailer.createComparator();
-    dataBlockIndexReader = new HFileBlockIndex.BlockIndexReader(comparator,
+    dataBlockIndexReader = new HFileBlockIndex.CellBasedKeyBlockIndexReader(comparator,
         trailer.getNumDataIndexLevels(), this);
-    metaBlockIndexReader = new HFileBlockIndex.BlockIndexReader(
-        null, 1);
+    metaBlockIndexReader = new HFileBlockIndex.ByteArrayKeyBlockIndexReader(1);
 
     // Parse load-on-open data.
 
@@ -217,7 +215,9 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     byte[] creationTimeBytes = fileInfo.get(FileInfo.CREATE_TIME_TS);
     this.hfileContext.setFileCreateTime(creationTimeBytes == null?  0:
         Bytes.toLong(creationTimeBytes));
-    lastKey = fileInfo.get(FileInfo.LASTKEY);
+    if (fileInfo.get(FileInfo.LASTKEY) != null) {
+      lastKeyCell = new KeyValue.KeyOnlyKeyValue(fileInfo.get(FileInfo.LASTKEY));
+    }
     avgKeyLen = Bytes.toInt(fileInfo.get(FileInfo.AVG_KEY_LEN));
     avgValueLen = Bytes.toInt(fileInfo.get(FileInfo.AVG_VALUE_LEN));
     byte [] keyValueFormatVersion = fileInfo.get(HFileWriterImpl.KEY_VALUE_VERSION);
@@ -309,11 +309,13 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
   }
 
   private String toStringFirstKey() {
-    return KeyValue.keyToString(getFirstKey());
+    if(getFirstKey() == null)
+      return null;
+    return CellUtil.getCellKeyAsString(getFirstKey());
   }
 
   private String toStringLastKey() {
-    return KeyValue.keyToString(getLastKey());
+    return CellUtil.toString(getLastKey(), false);
   }
 
   @Override
@@ -341,7 +343,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
    *         first KeyValue.
    */
   @Override
-  public byte [] getFirstKey() {
+  public Cell getFirstKey() {
     if (dataBlockIndexReader == null) {
       throw new BlockIndexNotLoadedException();
     }
@@ -357,8 +359,9 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
    */
   @Override
   public byte[] getFirstRowKey() {
-    byte[] firstKey = getFirstKey();
-    return firstKey == null? null: KeyValueUtil.createKeyValueFromKey(firstKey).getRow();
+    Cell firstKey = getFirstKey();
+    // We have to copy the row part to form the row key alone
+    return firstKey == null? null: CellUtil.cloneRow(firstKey);
   }
 
   /**
@@ -369,8 +372,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
    */
   @Override
   public byte[] getLastRowKey() {
-    byte[] lastKey = getLastKey();
-    return lastKey == null? null: KeyValueUtil.createKeyValueFromKey(lastKey).getRow();
+    Cell lastKey = getLastKey();
+    return lastKey == null? null: CellUtil.cloneRow(lastKey);
   }
 
   /** @return number of KV entries in this HFile */
@@ -445,7 +448,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     protected volatile int blockFetches;
     protected final HFile.Reader reader;
     private int currTagsLen;
-
+    private KeyValue.KeyOnlyKeyValue keyOnlyKv = new KeyValue.KeyOnlyKeyValue();
     protected HFileBlock block;
 
     /**
@@ -598,7 +601,6 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       long memstoreTS = 0;
       int memstoreTSLen = 0;
       int lastKeyValueSize = -1;
-      KeyValue.KeyOnlyKeyValue keyOnlyKv = new KeyValue.KeyOnlyKeyValue();
       do {
         blockBuffer.mark();
         klen = blockBuffer.getInt();
@@ -757,12 +759,9 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       if (seekToBlock == null) {
         return false;
       }
-      ByteBuffer firstKey = getFirstKeyInBlock(seekToBlock);
-
+      Cell firstKey = getFirstKeyCellInBlock(seekToBlock);
       if (reader.getComparator()
-          .compareKeyIgnoresMvcc(
-              new KeyValue.KeyOnlyKeyValue(firstKey.array(), firstKey.arrayOffset(),
-                  firstKey.limit()), key) >= 0) {
+           .compareKeyIgnoresMvcc(firstKey, key) >= 0) {
         long previousBlockOffset = seekToBlock.getPrevBlockOffset();
         // The key we are interested in
         if (previousBlockOffset == -1) {
@@ -779,8 +778,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         // TODO shortcut: seek forward in this block to the last key of the
         // block.
       }
-      Cell firstKeyInCurrentBlock = new KeyValue.KeyOnlyKeyValue(Bytes.getBytes(firstKey));
-      loadBlockAndSeekToKey(seekToBlock, firstKeyInCurrentBlock, true, key, true);
+      loadBlockAndSeekToKey(seekToBlock, firstKey, true, key, true);
       return true;
     }
 
@@ -822,44 +820,30 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     }
 
     @Override
-    public Cell getKeyValue() {
+    public Cell getCell() {
       if (!isSeeked())
         return null;
 
-      if(currTagsLen > 0) {
-        KeyValue ret = new KeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
+      KeyValue ret;
+      if (currTagsLen > 0) {
+        ret = new SizeCachedKeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
             + blockBuffer.position(), getCellBufSize());
-        if (this.reader.shouldIncludeMemstoreTS()) {
-          ret.setSequenceId(currMemstoreTS);
-        }
-        return ret;
       } else {
-        NoTagsKeyValue ret = new NoTagsKeyValue(blockBuffer.array(),
-            blockBuffer.arrayOffset() + blockBuffer.position(), getCellBufSize());
-        if (this.reader.shouldIncludeMemstoreTS()) {
-          ret.setSequenceId(currMemstoreTS);
-        }
-        return ret;
+        ret = new SizeCachedNoTagsKeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
+            + blockBuffer.position(), getCellBufSize());
       }
+      if (this.reader.shouldIncludeMemstoreTS()) {
+        ret.setSequenceId(currMemstoreTS);
+      }
+      return ret;
     }
 
     @Override
-    public ByteBuffer getKey() {
+    public Cell getKey() {
       assertSeeked();
-      return ByteBuffer.wrap(
-          blockBuffer.array(),
+      return new KeyValue.KeyOnlyKeyValue(blockBuffer.array(),
           blockBuffer.arrayOffset() + blockBuffer.position()
-              + KEY_VALUE_LEN_SIZE, currKeyLen).slice();
-    }
-
-    public int compareKey(CellComparator comparator, byte[] key, int offset, int length) {
-      // TODO HFileScannerImpl, instance will be used by single thread alone. So we can
-      // have one KeyValue.KeyOnlyKeyValue instance as instance variable and reuse here and in
-      // compareKey(CellComparator comparator, Cell key), seekBefore(Cell key) and
-      // blockSeek(Cell key, boolean seekBefore)
-      KeyValue.KeyOnlyKeyValue keyOnlyKv = new KeyValue.KeyOnlyKeyValue(key, offset, length);
-      return comparator.compare(keyOnlyKv, blockBuffer.array(), blockBuffer.arrayOffset()
-          + blockBuffer.position() + KEY_VALUE_LEN_SIZE, currKeyLen);
+              + KEY_VALUE_LEN_SIZE, currKeyLen);
     }
 
     @Override
@@ -1001,7 +985,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
 
     /**
      * @param v
-     * @return True if v < 0 or v > current block buffer limit.
+     * @return True if v &lt; 0 or v &gt; current block buffer limit.
      */
     protected final boolean checkLen(final int v) {
       return v < 0 || v > this.blockBuffer.limit();
@@ -1045,7 +1029,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       this.nextIndexedKey = null;
     }
 
-    protected ByteBuffer getFirstKeyInBlock(HFileBlock curBlock) {
+    protected Cell getFirstKeyCellInBlock(HFileBlock curBlock) {
       ByteBuffer buffer = curBlock.getBufferWithoutHeader();
       // It is safe to manipulate this buffer because we own the buffer object.
       buffer.rewind();
@@ -1054,7 +1038,10 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       ByteBuffer keyBuff = buffer.slice();
       keyBuff.limit(klen);
       keyBuff.rewind();
-      return keyBuff;
+      // Create a KeyOnlyKv now. 
+      // TODO : Will change when Buffer backed cells come
+      return new KeyValue.KeyOnlyKeyValue(keyBuff.array(), keyBuff.arrayOffset()
+          + keyBuff.position(), klen);
     }
 
     @Override
@@ -1072,10 +1059,20 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     }
 
     public int compareKey(CellComparator comparator, Cell key) {
+      this.keyOnlyKv.setKey(blockBuffer.array(), blockBuffer.arrayOffset()
+              + blockBuffer.position() + KEY_VALUE_LEN_SIZE, currKeyLen);
       return comparator.compareKeyIgnoresMvcc(
-          key,
-          new KeyValue.KeyOnlyKeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
-              + blockBuffer.position() + KEY_VALUE_LEN_SIZE, currKeyLen));
+          key, this.keyOnlyKv);
+    }
+
+    @Override
+    public void close() {
+      // HBASE-12295 will add code here.
+    }
+
+    @Override
+    public void shipped() throws IOException {
+      // HBASE-12295 will add code here.
     }
   }
 
@@ -1210,7 +1207,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     // Per meta key from any given file, synchronize reads for said block. This
     // is OK to do for meta blocks because the meta block index is always
     // single-level.
-    synchronized (metaBlockIndexReader.getRootBlockKey(block)) {
+    synchronized (metaBlockIndexReader
+        .getRootBlockKey(block)) {
       // Check cache for block. If found return.
       long metaBlockOffset = metaBlockIndexReader.getRootBlockOffset(block);
       BlockCacheKey cacheKey = new BlockCacheKey(name, metaBlockOffset);
@@ -1367,13 +1365,13 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
   }
 
   /**
-   * @return Last key in the file. May be null if file has no entries. Note that
-   *         this is not the last row key, but rather the byte form of the last
-   *         KeyValue.
+   * @return Last key as cell in the file. May be null if file has no entries. Note that
+   *         this is not the last row key, but it is the Cell representation of the last
+   *         key
    */
   @Override
-  public byte[] getLastKey() {
-    return dataBlockIndexReader.isEmpty() ? null : lastKey;
+  public Cell getLastKey() {
+    return dataBlockIndexReader.isEmpty() ? null : lastKeyCell;
   }
 
   /**
@@ -1382,7 +1380,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
    * @throws IOException
    */
   @Override
-  public byte[] midkey() throws IOException {
+  public Cell midkey() throws IOException {
     return dataBlockIndexReader.midkey();
   }
 
@@ -1518,9 +1516,9 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     }
 
     @Override
-    public ByteBuffer getKey() {
+    public Cell getKey() {
       assertValidSeek();
-      return seeker.getKeyDeepCopy();
+      return seeker.getKey();
     }
 
     @Override
@@ -1530,7 +1528,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     }
 
     @Override
-    public Cell getKeyValue() {
+    public Cell getCell() {
       if (block == null) {
         return null;
       }
@@ -1539,9 +1537,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
 
     @Override
     public String getKeyString() {
-      ByteBuffer keyBuffer = getKey();
-      return Bytes.toStringBinary(keyBuffer.array(),
-          keyBuffer.arrayOffset(), keyBuffer.limit());
+      return CellUtil.toString(getKey(), true);
     }
 
     @Override
@@ -1557,8 +1553,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       }
     }
 
-    protected ByteBuffer getFirstKeyInBlock(HFileBlock curBlock) {
-      return dataBlockEncoder.getFirstKeyInBlock(getEncodedBuffer(curBlock));
+    protected Cell getFirstKeyCellInBlock(HFileBlock curBlock) {
+      return dataBlockEncoder.getFirstKeyCellInBlock(getEncodedBuffer(curBlock));
     }
 
     protected int loadBlockAndSeekToKey(HFileBlock seekToBlock, Cell nextIndexedKey,

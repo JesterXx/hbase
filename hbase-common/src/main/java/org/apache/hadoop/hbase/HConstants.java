@@ -123,6 +123,14 @@ public final class HConstants {
   /** Config for pluggable load balancers */
   public static final String HBASE_MASTER_LOADBALANCER_CLASS = "hbase.master.loadbalancer.class";
 
+  /** Config for pluggable region normalizer */
+  public static final String HBASE_MASTER_NORMALIZER_CLASS =
+    "hbase.master.normalizer.class";
+
+  /** Config for enabling/disabling pluggable region normalizer */
+  public static final String HBASE_NORMALIZER_ENABLED =
+    "hbase.normalizer.enabled";
+
   /** Cluster is standalone or pseudo-distributed */
   public static final boolean CLUSTER_IS_LOCAL = false;
 
@@ -157,9 +165,6 @@ public final class HConstants {
 
   /** Name of ZooKeeper quorum configuration parameter. */
   public static final String ZOOKEEPER_QUORUM = "hbase.zookeeper.quorum";
-
-  /** Name of ZooKeeper config file in conf/ directory. */
-  public static final String ZOOKEEPER_CONFIG_NAME = "zoo.cfg";
 
   /** Common prefix of ZooKeeper configuration properties */
   public static final String ZK_CFG_PROPERTY_PREFIX =
@@ -284,7 +289,7 @@ public final class HConstants {
     "hbase.client.meta.operation.timeout";
 
   /** Default HBase client operation timeout, which is tantamount to a blocking call */
-  public static final int DEFAULT_HBASE_CLIENT_OPERATION_TIMEOUT = 60000;
+  public static final int DEFAULT_HBASE_CLIENT_OPERATION_TIMEOUT = 1200000;
 
   /** Used to construct the name of the log directory for a region server */
   public static final String HREGION_LOGDIR_NAME = "WALs";
@@ -887,10 +892,7 @@ public final class HConstants {
 
   /** Conf key that enables unflushed WAL edits directly being replayed to region servers */
   public static final String DISTRIBUTED_LOG_REPLAY_KEY = "hbase.master.distributed.log.replay";
-  /**
-   * Default 'distributed log replay' as true since hbase 0.99.0
-   */
-  public static final boolean DEFAULT_DISTRIBUTED_LOG_REPLAY_CONFIG = true;
+  public static final boolean DEFAULT_DISTRIBUTED_LOG_REPLAY_CONFIG = false;
   public static final String DISALLOW_WRITES_IN_RECOVERING =
       "hbase.regionserver.disallow.writes.when.recovering";
   public static final boolean DEFAULT_DISALLOW_WRITES_IN_RECOVERING_CONFIG = false;
@@ -977,10 +979,6 @@ public final class HConstants {
   public static final Cell NO_NEXT_INDEXED_KEY = new KeyValue();
   /** delimiter used between portions of a region name */
   public static final int DELIMITER = ',';
-  public static final String HBASE_CONFIG_READ_ZOOKEEPER_CONFIG =
-      "hbase.config.read.zookeeper.config";
-  public static final boolean DEFAULT_HBASE_CONFIG_READ_ZOOKEEPER_CONFIG =
-      false;
 
   /**
    * QOS attributes: these attributes are used to demarcate RPC call processing
@@ -1140,7 +1138,8 @@ public final class HConstants {
 
   /**
    * When using bucket cache, this is a float that EITHER represents a percentage of total heap
-   * memory size to give to the cache (if < 1.0) OR, it is the capacity in megabytes of the cache.
+   * memory size to give to the cache (if &lt; 1.0) OR, it is the capacity in
+   * megabytes of the cache.
    */
   public static final String BUCKET_CACHE_SIZE_KEY = "hbase.bucketcache.size";
 
@@ -1182,6 +1181,13 @@ public final class HConstants {
   public static final String HEAP_OCCUPANCY_HIGH_WATERMARK_KEY =
       "hbase.heap.occupancy.high_water_mark";
   public static final float DEFAULT_HEAP_OCCUPANCY_HIGH_WATERMARK = 0.98f;
+
+  /**
+   * The max number of threads used for splitting storefiles in parallel during
+   * the region split process.
+   */
+  public static final String REGION_SPLIT_THREADS_MAX =
+    "hbase.regionserver.region.split.threads.max";
 
   private HConstants() {
     // Can't be instantiated with this ctor.

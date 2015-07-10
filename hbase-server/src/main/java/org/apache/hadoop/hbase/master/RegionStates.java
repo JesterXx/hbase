@@ -388,8 +388,7 @@ public class RegionStates {
     return updateRegionState(hri, state, serverName, HConstants.NO_SEQNUM);
   }
 
-  public void regionOnline(
-      final HRegionInfo hri, final ServerName serverName) {
+  public void regionOnline(final HRegionInfo hri, final ServerName serverName) {
     regionOnline(hri, serverName, HConstants.NO_SEQNUM);
   }
 
@@ -398,16 +397,14 @@ public class RegionStates {
    * We can't confirm it is really online on specified region server
    * because it hasn't been put in region server's online region list yet.
    */
-  public void regionOnline(final HRegionInfo hri,
-      final ServerName serverName, long openSeqNum) {
+  public void regionOnline(final HRegionInfo hri, final ServerName serverName, long openSeqNum) {
     String encodedName = hri.getEncodedName();
     if (!serverManager.isServerOnline(serverName)) {
       // This is possible if the region server dies before master gets a
       // chance to handle ZK event in time. At this time, if the dead server
       // is already processed by SSH, we should ignore this event.
       // If not processed yet, ignore and let SSH deal with it.
-      LOG.warn("Ignored, " + encodedName
-        + " was opened on a dead server: " + serverName);
+      LOG.warn("Ignored, " + encodedName + " was opened on a dead server: " + serverName);
       return;
     }
     updateRegionState(hri, State.OPEN, serverName, openSeqNum);
@@ -417,7 +414,7 @@ public class RegionStates {
       ServerName oldServerName = regionAssignments.put(hri, serverName);
       if (!serverName.equals(oldServerName)) {
         if (LOG.isDebugEnabled()) {
-          LOG.debug("Onlined " + hri.getShortNameToLog() + " on " + serverName + " " + hri);
+          LOG.debug("Onlined " + hri.getShortNameToLog() + " on " + serverName);
         } else {
           LOG.debug("Onlined " + hri.getShortNameToLog() + " on " + serverName);
         }
@@ -489,7 +486,7 @@ public class RegionStates {
     }
     long now = System.currentTimeMillis();
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Adding to processed servers " + serverName);
+      LOG.debug("Adding to log splitting servers " + serverName);
     }
     processedServers.put(serverName, Long.valueOf(now));
     Configuration conf = server.getConfiguration();
@@ -503,7 +500,7 @@ public class RegionStates {
         Map.Entry<ServerName, Long> e = it.next();
         if (e.getValue().longValue() < cutoff) {
           if (LOG.isDebugEnabled()) {
-            LOG.debug("Removed from processed servers " + e.getKey());
+            LOG.debug("Removed from log splitting servers " + e.getKey());
           }
           it.remove();
         }
@@ -602,7 +599,7 @@ public class RegionStates {
           // Region is open on this region server, but in transition.
           // This region must be moving away from this server, or splitting/merging.
           // SSH will handle it, either skip assigning, or re-assign.
-          LOG.info("Transitioning " + state + " will be handled by SSH for " + sn);
+          LOG.info("Transitioning " + state + " will be handled by ServerCrashProcedure for " + sn);
         } else if (sn.equals(state.getServerName())) {
           // Region is in transition on this region server, and this
           // region is not open on this server. So the region must be
@@ -613,7 +610,8 @@ public class RegionStates {
           // tried several times to open it while this region server is not reachable)
           if (isOneOfStates(state, State.OPENING, State.PENDING_OPEN,
               State.FAILED_OPEN, State.FAILED_CLOSE, State.OFFLINE)) {
-            LOG.info("Found region in " + state + " to be reassigned by SSH for " + sn);
+            LOG.info("Found region in " + state +
+              " to be reassigned by ServerCrashProcedure for " + sn);
             rits.add(hri);
           } else if (isOneOfStates(state, State.SPLITTING_NEW)) {
             regionsToCleanIfNoMetaEntry.add(state.getRegion());

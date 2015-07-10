@@ -429,10 +429,18 @@ public abstract class BaseRegionObserver implements RegionObserver {
   }
 
   @Override
+  @Deprecated
   public boolean postScannerFilterRow(final ObserverContext<RegionCoprocessorEnvironment> e,
       final InternalScanner s, final byte[] currentRow, final int offset, final short length,
       final boolean hasMore) throws IOException {
     return hasMore;
+  }
+
+  @Override
+  public boolean postScannerFilterRow(final ObserverContext<RegionCoprocessorEnvironment> e,
+      final InternalScanner s, final Cell curRowCell, final boolean hasMore) throws IOException {
+    return postScannerFilterRow(e, s, curRowCell.getRowArray(), curRowCell.getRowOffset(),
+        curRowCell.getRowLength(), hasMore);
   }
 
   @Override

@@ -31,6 +31,7 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellScanner;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HRegionLocation;
@@ -53,9 +54,9 @@ import com.google.protobuf.ServiceException;
 
 /**
  * This class is responsible for replaying the edits coming from a failed region server.
- * <p/>
+ * <p>
  * This class uses the native HBase client in order to replay WAL entries.
- * <p/>
+ * </p>
  */
 @InterfaceAudience.Private
 public class WALEditsReplaySink {
@@ -234,7 +235,7 @@ public class WALEditsReplaySink {
         List<Cell> cells = edit.getCells();
         for (Cell cell : cells) {
           // filtering WAL meta entries
-          setLocation(conn.locateRegion(tableName, cell.getRow()));
+          setLocation(conn.locateRegion(tableName, CellUtil.cloneRow(cell)));
           skip = true;
           break;
         }

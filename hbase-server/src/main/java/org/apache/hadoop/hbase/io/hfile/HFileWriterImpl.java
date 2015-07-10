@@ -431,7 +431,7 @@ public class HFileWriterImpl implements HFile.Writer {
       final int leftLength, final byte[] rightArray, final int rightOffset, final int rightLength) {
     // rows are different
     int minLength = leftLength < rightLength ? leftLength : rightLength;
-    short diffIdx = 0;
+    int diffIdx = 0;
     while (diffIdx < minLength
         && leftArray[leftOffset + diffIdx] == rightArray[rightOffset + diffIdx]) {
       diffIdx++;
@@ -664,12 +664,8 @@ public class HFileWriterImpl implements HFile.Writer {
    */
   @Override
   public void append(final Cell cell) throws IOException {
-    byte[] value = cell.getValueArray();
-    int voffset = cell.getValueOffset();
-    int vlength = cell.getValueLength();
     // checkKey uses comparator to check we are writing in order.
     boolean dupKey = checkKey(cell);
-    checkValue(value, voffset, vlength);
     if (!dupKey) {
       checkBlockBoundary();
     }
@@ -681,7 +677,7 @@ public class HFileWriterImpl implements HFile.Writer {
     fsBlockWriter.write(cell);
 
     totalKeyLength += CellUtil.estimatedSerializedSizeOfKey(cell);
-    totalValueLength += vlength;
+    totalValueLength += cell.getValueLength();
 
     // Are we the first key in this block?
     if (firstCellInBlock == null) {

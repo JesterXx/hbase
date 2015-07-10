@@ -47,9 +47,10 @@ import org.apache.hadoop.hbase.util.ByteBufferUtils;
 import org.apache.hadoop.io.WritableUtils;
 
 /**
+ * <p>
  * This class is created via reflection in DataBlockEncoding enum. Update the enum if class name or
  * package changes.
- * <p/>
+ * </p>
  * PrefixTreeDataBlockEncoder implementation of DataBlockEncoder. This is the primary entry point
  * for PrefixTree encoding and decoding. Encoding is delegated to instances of
  * {@link PrefixTreeEncoder}, and decoding is delegated to instances of
@@ -113,7 +114,7 @@ public class PrefixTreeCodec implements DataBlockEncoder {
 
 
   @Override
-  public ByteBuffer getFirstKeyInBlock(ByteBuffer block) {
+  public Cell getFirstKeyCellInBlock(ByteBuffer block) {
     block.rewind();
     PrefixTreeArraySearcher searcher = null;
     try {
@@ -122,7 +123,7 @@ public class PrefixTreeCodec implements DataBlockEncoder {
       if (!searcher.positionAtFirstCell()) {
         return null;
       }
-      return KeyValueUtil.copyKeyToNewByteBuffer(searcher.current());
+      return searcher.current();
     } finally {
       DecoderFactory.checkIn(searcher);
     }

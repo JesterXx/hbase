@@ -21,8 +21,10 @@ package org.apache.hadoop.hbase.regionserver;
 
 import java.io.IOException;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
@@ -59,7 +61,9 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
   protected KeyValueScanner current = null;
 
   protected KVScannerComparator comparator;
-  
+
+  protected Set<KeyValueScanner> scannersForDelayedClose = new HashSet<KeyValueScanner>();
+
   /**
    * Constructor.  This KeyValueHeap will handle closing of passed in
    * KeyValueScanners.
@@ -87,7 +91,7 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
         if (scanner.peek() != null) {
           this.heap.add(scanner);
         } else {
-          scanner.close();
+          this.scannersForDelayedClose.add(scanner);
         }
       }
       this.current = pollRealKV();
@@ -108,13 +112,15 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
     Cell kvReturn = this.current.next();
     Cell kvNext = this.current.peek();
     if (kvNext == null) {
-      this.current.close();
+      this.scannersForDelayedClose.add(this.current);
+      this.current = null;
       this.current = pollRealKV();
     } else {
       KeyValueScanner topScanner = this.heap.peek();
       // no need to add current back to the heap if it is the only scanner left
       if (topScanner != null && this.comparator.compare(kvNext, topScanner.peek()) >= 0) {
         this.heap.add(this.current);
+        this.current = null;
         this.current = pollRealKV();
       }
     }
@@ -154,10 +160,11 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
      */
 
     if (pee == null || !moreCells) {
-      this.current.close();
+      this.scannersForDelayedClose.add(this.current);
     } else {
       this.heap.add(this.current);
     }
+    this.current = null;
     this.current = pollRealKV();
     if (this.current == null) {
       moreCells = scannerContext.setScannerState(NextState.NO_MORE_VALUES).hasMoreValues();
@@ -210,6 +217,10 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
   }
 
   public void close() {
+    for (KeyValueScanner scanner : this.scannersForDelayedClose) {
+      scanner.close();
+    }
+    this.scannersForDelayedClose.clear();
     if (this.current != null) {
       this.current.close();
     }
@@ -311,7 +322,7 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
       }
 
       if (!seekResult) {
-        scanner.close();
+        this.scannersForDelayedClose.add(scanner);
       } else {
         heap.add(scanner);
       }
@@ -340,7 +351,13 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
 
     while (kvScanner != null && !kvScanner.realSeekDone()) {
       if (kvScanner.peek() != null) {
-        kvScanner.enforceSeek();
+        try {
+          kvScanner.enforceSeek();
+        } catch (IOException ioe) {
+          // Add the item to delayed close set in case it is leak from close
+          this.scannersForDelayedClose.add(kvScanner);
+          throw ioe;
+        }
         Cell curKV = kvScanner.peek();
         if (curKV != null) {
           KeyValueScanner nextEarliestScanner = heap.peek();
@@ -364,12 +381,12 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
         } else {
           // Close the scanner because we did a real seek and found out there
           // are no more KVs.
-          kvScanner.close();
+          this.scannersForDelayedClose.add(kvScanner);
         }
       } else {
         // Close the scanner because it has already run out of KVs even before
         // we had to do a real seek on it.
-        kvScanner.close();
+        this.scannersForDelayedClose.add(kvScanner);
       }
       kvScanner = heap.poll();
     }
@@ -397,5 +414,21 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
   public Cell getNextIndexedKey() {
     // here we return the next index key from the top scanner
     return current == null ? null : current.getNextIndexedKey();
+  }
+
+  @Override
+  public void shipped() throws IOException {
+    for (KeyValueScanner scanner : this.scannersForDelayedClose) {
+      scanner.close(); // There wont be further fetch of Cells from these scanners. Just close.
+    }
+    this.scannersForDelayedClose.clear();
+    if (this.current != null) {
+      this.current.shipped();
+    }
+    if (this.heap != null) {
+      for (KeyValueScanner scanner : this.heap) {
+        scanner.shipped();
+      }
+    }
   }
 }

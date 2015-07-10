@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.procedure2.util.StringUtils;
@@ -35,6 +36,7 @@ import org.apache.hadoop.hbase.protobuf.generated.ProcedureProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ProcedureProtos.ProcedureState;
 import org.apache.hadoop.hbase.util.ByteStringer;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
+import org.apache.hadoop.hbase.util.NonceKey;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -50,9 +52,9 @@ import com.google.protobuf.ByteString;
  * the return is a set of sub-procedures or null in case the procedure doesn't
  * have sub-procedures. Once the sub-procedures are successfully completed
  * the execute() method is called again, you should think at it as a stack:
- *  -> step 1
- *  ---> step 2
- *  -> step 1
+ *  -&gt; step 1
+ *  ---&gt; step 2
+ *  -&gt; step 1
  *
  * rollback() is called when the procedure or one of the sub-procedures is failed.
  * the rollback step is supposed to cleanup the resources created during the
@@ -78,14 +80,19 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
   private RemoteProcedureException exception = null;
   private byte[] result = null;
 
+  private NonceKey nonceKey = null;
+
   /**
    * The main code of the procedure. It must be idempotent since execute()
    * may be called multiple time in case of machine failure in the middle
    * of the execution.
+   * @param env the environment passed to the ProcedureExecutor
    * @return a set of sub-procedures or null if there is nothing else to execute.
+   * @throws ProcedureYieldException the procedure will be added back to the queue and retried later
+   * @throws InterruptedException the procedure will be added back to the queue and retried later
    */
   protected abstract Procedure[] execute(TEnvironment env)
-    throws ProcedureYieldException;
+    throws ProcedureYieldException, InterruptedException;
 
   /**
    * The code to undo what done by the execute() code.
@@ -94,10 +101,12 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
    * the execute() call. The implementation must be idempotent since rollback()
    * may be called multiple time in case of machine failure in the middle
    * of the execution.
+   * @param env the environment passed to the ProcedureExecutor
    * @throws IOException temporary failure, the rollback will retry later
+   * @throws InterruptedException the procedure will be added back to the queue and retried later
    */
   protected abstract void rollback(TEnvironment env)
-    throws IOException;
+    throws IOException, InterruptedException;
 
   /**
    * The abort() call is asynchronous and each procedure must decide how to deal
@@ -168,6 +177,18 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
     // no-op
   }
 
+  /**
+   * By default, the executor will try ro run procedures start to finish.
+   * Return true to make the executor yield between each execution step to
+   * give other procedures time to run their steps.
+   * @param env the environment passed to the ProcedureExecutor
+   * @return Return true if the executor should yield on completion of an execution step.
+   *         Defaults to return false.
+   */
+  protected boolean isYieldAfterExecutionStep(final TEnvironment env) {
+    return false;
+  }
+
   @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
@@ -189,8 +210,16 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
     }
 
     sb.append(" state=");
-    sb.append(getState());
+    toStringState(sb);
     return sb.toString();
+  }
+
+  /**
+   * Called from {@link #toString()} when interpolating {@link Procedure} state
+   * @param builder Append current {@link ProcedureState}
+   */
+  protected void toStringState(StringBuilder builder) {
+    builder.append(getState());
   }
 
   /**
@@ -235,6 +264,10 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
 
   public long getParentProcId() {
     return parentProcId;
+  }
+
+  public NonceKey getNonceKey() {
+    return nonceKey;
   }
 
   /**
@@ -389,12 +422,21 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
   }
 
   /**
+   * Called by the ProcedureExecutor to set the value to the newly created procedure.
+   */
+  @VisibleForTesting
+  @InterfaceAudience.Private
+  protected void setNonceKey(final NonceKey nonceKey) {
+    this.nonceKey = nonceKey;
+  }
+
+  /**
    * Internal method called by the ProcedureExecutor that starts the
    * user-level code execute().
    */
   @InterfaceAudience.Private
   protected Procedure[] doExecute(final TEnvironment env)
-      throws ProcedureYieldException {
+      throws ProcedureYieldException, InterruptedException {
     try {
       updateTimestamp();
       return execute(env);
@@ -408,7 +450,8 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
    * user-level code rollback().
    */
   @InterfaceAudience.Private
-  protected void doRollback(final TEnvironment env) throws IOException {
+  protected void doRollback(final TEnvironment env)
+      throws IOException, InterruptedException {
     try {
       updateTimestamp();
       rollback(env);
@@ -519,6 +562,20 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
     return (diff < 0) ? -1 : (diff > 0) ? 1 : 0;
   }
 
+  /**
+   * Get an hashcode for the specified Procedure ID
+   * @return the hashcode for the specified procId
+   */
+  public static long getProcIdHashCode(final long procId) {
+    long h = procId;
+    h ^= h >> 16;
+    h *= 0x85ebca6b;
+    h ^= h >> 13;
+    h *= 0xc2b2ae35;
+    h ^= h >> 16;
+    return h;
+  }
+
   /*
    * Helper to lookup the root Procedure ID given a specified procedure.
    */
@@ -621,6 +678,11 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
       builder.setStateData(stateStream.toByteString());
     }
 
+    if (proc.getNonceKey() != null) {
+      builder.setNonceGroup(proc.getNonceKey().getNonceGroup());
+      builder.setNonce(proc.getNonceKey().getNonce());
+    }
+
     return builder.build();
   }
 
@@ -670,6 +732,11 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
 
     if (proto.hasResult()) {
       proc.setResult(proto.getResult().toByteArray());
+    }
+
+    if (proto.getNonce() != HConstants.NO_NONCE) {
+      NonceKey nonceKey = new NonceKey(proto.getNonceGroup(), proto.getNonce());
+      proc.setNonceKey(nonceKey);
     }
 
     // we want to call deserialize even when the stream is empty, mainly for testing.

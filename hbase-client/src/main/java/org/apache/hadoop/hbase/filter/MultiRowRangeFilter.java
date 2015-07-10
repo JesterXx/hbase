@@ -44,7 +44,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
  * phoenix etc. However, both solutions are inefficient. Both of them can't utilize the range info
  * to perform fast forwarding during scan which is quite time consuming. If the number of ranges
  * are quite big (e.g. millions), join is a proper solution though it is slow. However, there are
- * cases that user wants to specify a small number of ranges to scan (e.g. <1000 ranges). Both
+ * cases that user wants to specify a small number of ranges to scan (e.g. &lt;1000 ranges). Both
  * solutions can't provide satisfactory performance in such case. MultiRowRangeFilter is to support
  * such usec ase (scan multiple row key ranges), which can construct the row key ranges from user
  * specified list and perform fast-forwarding during scan. Thus, the scan will be quite efficient.
@@ -83,14 +83,17 @@ public class MultiRowRangeFilter extends FilterBase {
   }
 
   @Override
-  public boolean filterRowKey(byte[] buffer, int offset, int length) {
+  public boolean filterRowKey(Cell firstRowCell) {
     // If it is the first time of running, calculate the current range index for
     // the row key. If index is out of bound which happens when the start row
     // user sets is after the largest stop row of the ranges, stop the scan.
     // If row key is after the current range, find the next range and update index.
-    if (!initialized || !range.contains(buffer, offset, length)) {
+    int length = firstRowCell.getRowLength();
+    int offset = firstRowCell.getRowOffset();
+    if (!initialized
+        || !range.contains(firstRowCell.getRowArray(), offset, length)) {
       byte[] rowkey = new byte[length];
-      System.arraycopy(buffer, offset, rowkey, 0, length);
+      System.arraycopy(firstRowCell.getRowArray(), firstRowCell.getRowOffset(), rowkey, 0, length);
       index = getNextRangeIndex(rowkey);
       if (index >= rangeList.size()) {
         done = true;
@@ -102,7 +105,7 @@ public class MultiRowRangeFilter extends FilterBase {
       } else {
         range = rangeList.get(0);
       }
-      if(EXCLUSIVE) {
+      if (EXCLUSIVE) {
         EXCLUSIVE = false;
         currentReturnCode = ReturnCode.NEXT_ROW;
         return false;
@@ -115,7 +118,9 @@ public class MultiRowRangeFilter extends FilterBase {
         }
         initialized = true;
       } else {
-        currentReturnCode = ReturnCode.SEEK_NEXT_USING_HINT;
+        if (range.contains(firstRowCell.getRowArray(), offset, length)) {
+          currentReturnCode = ReturnCode.INCLUDE;
+        } else currentReturnCode = ReturnCode.SEEK_NEXT_USING_HINT;
       }
     } else {
       currentReturnCode = ReturnCode.INCLUDE;

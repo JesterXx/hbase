@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -234,6 +235,25 @@ public abstract class Compactor {
     return store.getCoprocessorHost().preCompact(store, scanner, scanType, request);
   }
 
+  /**
+   * Used to prevent compaction name conflict when multiple compactions running parallel on the
+   * same store.
+   */
+  private static final AtomicInteger NAME_COUNTER = new AtomicInteger(0);
+
+  private String generateCompactionName() {
+    int counter;
+    for (;;) {
+      counter = NAME_COUNTER.get();
+      int next = counter == Integer.MAX_VALUE ? 0 : counter + 1;
+      if (NAME_COUNTER.compareAndSet(counter, next)) {
+        break;
+      }
+    }
+    return store.getRegionInfo().getRegionNameAsString() + "#"
+        + store.getFamily().getNameAsString() + "#" + counter;
+  }
+
   // TODO mob introduced the fd parameter; can we make this cleaner and easier to extend in future?
   /**
    * Performs the compaction.
@@ -241,7 +261,7 @@ public abstract class Compactor {
    * @param scanner Where to read from.
    * @param writer Where to write to.
    * @param smallestReadPoint Smallest read point.
-   * @param cleanSeqId When true, remove seqId(used to be mvcc) value which is <= smallestReadPoint
+   * @param cleanSeqId When true, remove seqId(used to be mvcc) value which is &lt;= smallestReadPoint
    * @param major Is a major compaction.
    * @return Whether compaction ended; false if it was interrupted for some reason.
    */
@@ -258,8 +278,7 @@ public abstract class Compactor {
     if (LOG.isDebugEnabled()) {
       lastMillis = EnvironmentEdgeManager.currentTime();
     }
-    String compactionName =
-        store.getRegionInfo().getRegionNameAsString() + "#" + store.getFamily().getNameAsString();
+    String compactionName = generateCompactionName();
     long now = 0;
     boolean hasMore;
     ScannerContext scannerContext =

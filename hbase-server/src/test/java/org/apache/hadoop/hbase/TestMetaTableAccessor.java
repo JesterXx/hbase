@@ -48,6 +48,7 @@ import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.MiscTests;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
 import org.junit.AfterClass;
@@ -97,9 +98,9 @@ public class TestMetaTableAccessor {
     final TableName name =
         TableName.valueOf("testRetrying");
     LOG.info("Started " + name);
-    HTable t = UTIL.createMultiRegionTable(name, HConstants.CATALOG_FAMILY);
+    Table t = UTIL.createMultiRegionTable(name, HConstants.CATALOG_FAMILY);
     int regionCount = -1;
-    try (RegionLocator r = t.getRegionLocator()) {
+    try (RegionLocator r = UTIL.getConnection().getRegionLocator(name)) {
       regionCount = r.getStartKeys().length;
     }
     // Test it works getting a region from just made user table.
@@ -354,20 +355,20 @@ public class TestMetaTableAccessor {
 
     Table meta = MetaTableAccessor.getMetaHTable(connection);
     try {
-      MetaTableAccessor.updateRegionLocation(connection, primary, serverName0, seqNum0);
+      MetaTableAccessor.updateRegionLocation(connection, primary, serverName0, seqNum0, -1);
 
       // assert that the server, startcode and seqNum columns are there for the primary region
       assertMetaLocation(meta, primary.getRegionName(), serverName0, seqNum0, 0, true);
 
       // add replica = 1
-      MetaTableAccessor.updateRegionLocation(connection, replica1, serverName1, seqNum1);
+      MetaTableAccessor.updateRegionLocation(connection, replica1, serverName1, seqNum1, -1);
       // check whether the primary is still there
       assertMetaLocation(meta, primary.getRegionName(), serverName0, seqNum0, 0, true);
       // now check for replica 1
       assertMetaLocation(meta, primary.getRegionName(), serverName1, seqNum1, 1, true);
 
       // add replica = 1
-      MetaTableAccessor.updateRegionLocation(connection, replica100, serverName100, seqNum100);
+      MetaTableAccessor.updateRegionLocation(connection, replica100, serverName100, seqNum100, -1);
       // check whether the primary is still there
       assertMetaLocation(meta, primary.getRegionName(), serverName0, seqNum0, 0, true);
       // check whether the replica 1 is still there
@@ -473,7 +474,8 @@ public class TestMetaTableAccessor {
       List<HRegionInfo> regionInfos = Lists.newArrayList(parentA, parentB);
       MetaTableAccessor.addRegionsToMeta(connection, regionInfos, 3);
 
-      MetaTableAccessor.mergeRegions(connection, merged, parentA, parentB, serverName0, 3);
+      MetaTableAccessor.mergeRegions(connection, merged, parentA, parentB, serverName0, 3,
+          HConstants.LATEST_TIMESTAMP);
 
       assertEmptyMetaLocation(meta, merged.getRegionName(), 1);
       assertEmptyMetaLocation(meta, merged.getRegionName(), 2);
@@ -492,7 +494,7 @@ public class TestMetaTableAccessor {
         new byte[][] { Bytes.toBytes("region_a"), Bytes.toBytes("region_b") };
 
     UTIL.createTable(TABLENAME, FAMILY, SPLIT_KEYS);
-    HTable table = (HTable) connection.getTable(TABLENAME);
+    Table table = connection.getTable(TABLENAME);
     // Make sure all the regions are deployed
     UTIL.countRows(table);
 
@@ -524,6 +526,98 @@ public class TestMetaTableAccessor {
     MetaTableAccessor.scanMeta(connection, visitor, TABLENAME, Bytes.toBytes("region_ac"), 1);
     verify(visitor, times(1)).visit((Result) anyObject());
     table.close();
+  }
+
+  /**
+   * Tests whether maximum of masters system time versus RSs local system time is used
+   */
+  @Test
+  public void testMastersSystemTimeIsUsedInUpdateLocations() throws IOException {
+    long regionId = System.currentTimeMillis();
+    HRegionInfo regionInfo = new HRegionInfo(TableName.valueOf("table_foo"),
+      HConstants.EMPTY_START_ROW, HConstants.EMPTY_END_ROW, false, regionId, 0);
+
+    ServerName sn = ServerName.valueOf("bar", 0, 0);
+    Table meta = MetaTableAccessor.getMetaHTable(connection);
+    try {
+      List<HRegionInfo> regionInfos = Lists.newArrayList(regionInfo);
+      MetaTableAccessor.addRegionsToMeta(connection, regionInfos, 1);
+
+      long masterSystemTime = EnvironmentEdgeManager.currentTime() + 123456789;
+      MetaTableAccessor.updateRegionLocation(connection, regionInfo, sn, 1, masterSystemTime);
+
+      Get get = new Get(regionInfo.getRegionName());
+      Result result = meta.get(get);
+      Cell serverCell = result.getColumnLatestCell(HConstants.CATALOG_FAMILY,
+          MetaTableAccessor.getServerColumn(0));
+      Cell startCodeCell = result.getColumnLatestCell(HConstants.CATALOG_FAMILY,
+        MetaTableAccessor.getStartCodeColumn(0));
+      Cell seqNumCell = result.getColumnLatestCell(HConstants.CATALOG_FAMILY,
+        MetaTableAccessor.getSeqNumColumn(0));
+      assertNotNull(serverCell);
+      assertNotNull(startCodeCell);
+      assertNotNull(seqNumCell);
+      assertTrue(serverCell.getValueLength() > 0);
+      assertTrue(startCodeCell.getValueLength() > 0);
+      assertTrue(seqNumCell.getValueLength() > 0);
+      assertEquals(masterSystemTime, serverCell.getTimestamp());
+      assertEquals(masterSystemTime, startCodeCell.getTimestamp());
+      assertEquals(masterSystemTime, seqNumCell.getTimestamp());
+    } finally {
+      meta.close();
+    }
+  }
+
+  @Test
+  public void testMastersSystemTimeIsUsedInMergeRegions() throws IOException {
+    long regionId = System.currentTimeMillis();
+    HRegionInfo regionInfoA = new HRegionInfo(TableName.valueOf("table_foo"),
+      HConstants.EMPTY_START_ROW, new byte[] {'a'}, false, regionId, 0);
+    HRegionInfo regionInfoB = new HRegionInfo(TableName.valueOf("table_foo"),
+      new byte[] {'a'}, HConstants.EMPTY_END_ROW, false, regionId, 0);
+    HRegionInfo mergedRegionInfo = new HRegionInfo(TableName.valueOf("table_foo"),
+      HConstants.EMPTY_START_ROW, HConstants.EMPTY_END_ROW, false, regionId, 0);
+
+    ServerName sn = ServerName.valueOf("bar", 0, 0);
+    Table meta = MetaTableAccessor.getMetaHTable(connection);
+    try {
+      List<HRegionInfo> regionInfos = Lists.newArrayList(regionInfoA, regionInfoB);
+      MetaTableAccessor.addRegionsToMeta(connection, regionInfos, 1);
+
+      // write the serverName column with a big current time, but set the masters time as even
+      // bigger. When region merge deletes the rows for regionA and regionB, the serverName columns
+      // should not be seen by the following get
+      long serverNameTime = EnvironmentEdgeManager.currentTime()   + 100000000;
+      long masterSystemTime = EnvironmentEdgeManager.currentTime() + 123456789;
+
+      // write the serverName columns
+      MetaTableAccessor.updateRegionLocation(connection, regionInfoA, sn, 1, serverNameTime);
+
+      // assert that we have the serverName column with expected ts
+      Get get = new Get(mergedRegionInfo.getRegionName());
+      Result result = meta.get(get);
+      Cell serverCell = result.getColumnLatestCell(HConstants.CATALOG_FAMILY,
+          MetaTableAccessor.getServerColumn(0));
+      assertNotNull(serverCell);
+      assertEquals(serverNameTime, serverCell.getTimestamp());
+
+      // now merge the regions, effectively deleting the rows for region a and b.
+      MetaTableAccessor.mergeRegions(connection, mergedRegionInfo,
+        regionInfoA, regionInfoB, sn, 1, masterSystemTime);
+
+      result = meta.get(get);
+      serverCell = result.getColumnLatestCell(HConstants.CATALOG_FAMILY,
+          MetaTableAccessor.getServerColumn(0));
+      Cell startCodeCell = result.getColumnLatestCell(HConstants.CATALOG_FAMILY,
+        MetaTableAccessor.getStartCodeColumn(0));
+      Cell seqNumCell = result.getColumnLatestCell(HConstants.CATALOG_FAMILY,
+        MetaTableAccessor.getSeqNumColumn(0));
+      assertNull(serverCell);
+      assertNull(startCodeCell);
+      assertNull(seqNumCell);
+    } finally {
+      meta.close();
+    }
   }
 }
 

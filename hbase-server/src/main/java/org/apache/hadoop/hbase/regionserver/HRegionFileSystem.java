@@ -39,6 +39,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
@@ -586,23 +587,23 @@ public class HRegionFileSystem {
         if (top) {
           //check if larger than last key.
           KeyValue splitKey = KeyValueUtil.createFirstOnRow(splitRow);
-          byte[] lastKey = f.createReader().getLastKey();
+          Cell lastKey = f.createReader().getLastKey();
           // If lastKey is null means storefile is empty.
           if (lastKey == null) {
             return null;
           }
-          if (f.getReader().getComparator().compare(splitKey, lastKey, 0, lastKey.length) > 0) {
+          if (f.getReader().getComparator().compare(splitKey, lastKey) > 0) {
             return null;
           }
         } else {
           //check if smaller than first key
           KeyValue splitKey = KeyValueUtil.createLastOnRow(splitRow);
-          byte[] firstKey = f.createReader().getFirstKey();
+          Cell firstKey = f.createReader().getFirstKey();
           // If firstKey is null means storefile is empty.
           if (firstKey == null) {
             return null;
           }
-          if (f.getReader().getComparator().compare(splitKey, firstKey, 0, firstKey.length) < 0) {
+          if (f.getReader().getComparator().compare(splitKey, firstKey) < 0) {
             return null;
           }
         }

@@ -63,6 +63,7 @@ import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
  * <li>SnapshotDescription is readable</li>
  * <li>Table info is readable</li>
  * <li>Regions</li>
+ * </ol>
  * <ul>
  * <li>Matching regions in the snapshot as currently in the table</li>
  * <li>{@link HRegionInfo} matches the current and stored regions</li>
@@ -70,7 +71,6 @@ import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
  * <li>All the hfiles are present (either in .archive directory in the region)</li>
  * <li>All recovered.edits files are present (by name) and have the correct file size</li>
  * </ul>
- * </ol>
  */
 @InterfaceAudience.Private
 @InterfaceStability.Unstable

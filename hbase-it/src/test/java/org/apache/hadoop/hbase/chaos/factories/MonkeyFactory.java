@@ -69,6 +69,7 @@ public abstract class MonkeyFactory {
   public static final String SERVER_KILLING = "serverKilling";
   public static final String STRESS_AM = "stressAM";
   public static final String NO_KILL = "noKill";
+  public static final String MASTER_KILLING = "masterKilling";
   public static final String MOB_NO_KILL = "mobNoKill";
   public static final String MOB_SLOW_DETERMINISTIC = "mobSlowDeterministic";
 
@@ -79,6 +80,7 @@ public abstract class MonkeyFactory {
     .put(SERVER_KILLING, new ServerKillingMonkeyFactory())
     .put(STRESS_AM, new StressAssignmentManagerMonkeyFactory())
     .put(NO_KILL, new NoKillMonkeyFactory())
+    .put(MASTER_KILLING, new MasterKillingMonkeyFactory())
     .put(MOB_NO_KILL, new MobNoKillMonkeyFactory())
     .put(MOB_SLOW_DETERMINISTIC, new MobNoKillMonkeyFactory())
     .build();

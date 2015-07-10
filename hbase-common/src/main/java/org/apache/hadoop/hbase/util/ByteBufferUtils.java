@@ -21,12 +21,16 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.WritableUtils;
+
+import sun.nio.ch.DirectBuffer;
 
 /**
  * Utility functions for working with byte buffers, such as reading/writing
@@ -354,6 +358,23 @@ public final class ByteBufferUtils {
   }
 
   /**
+   * Copy one buffer's whole data to another. Write starts at the current position of 'out' buffer.
+   * Note : This will advance the position marker of {@code out} but not change the position maker
+   * for {@code in}. The position and limit of the {@code in} buffer to be set properly by caller.
+   * @param in source buffer
+   * @param out destination buffer
+   */
+  public static void copyFromBufferToBuffer(ByteBuffer in, ByteBuffer out) {
+    if (UnsafeAccess.isAvailable()) {
+      int length = in.remaining();
+      UnsafeAccess.copy(in, in.position(), out, out.position(), length);
+      out.position(out.position() + length);
+    } else {
+      out.put(in);
+    }
+  }
+
+  /**
    * Copy from one buffer to another from given offset. This will be absolute positional copying and
    * won't affect the position of any of the buffers.
    * @param out
@@ -492,13 +513,26 @@ public final class ByteBufferUtils {
     return output;
   }
 
-  public static int compareTo(ByteBuffer buf1, int o1, int len1, ByteBuffer buf2, int o2, int len2) {
-    if (buf1.hasArray() && buf2.hasArray()) {
-      return Bytes.compareTo(buf1.array(), buf1.arrayOffset() + o1, len1, buf2.array(),
-          buf2.arrayOffset() + o2, len2);
+  public static int compareTo(ByteBuffer buf1, int o1, int l1, ByteBuffer buf2, int o2, int l2) {
+    if (UnsafeAccess.isAvailable()) {
+      long offset1Adj, offset2Adj;
+      Object refObj1 = null, refObj2 = null;
+      if (buf1.hasArray()) {
+        offset1Adj = o1 + buf1.arrayOffset() + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET;
+        refObj1 = buf1.array();
+      } else {
+        offset1Adj = o1 + ((DirectBuffer) buf1).address();
+      }
+      if (buf2.hasArray()) {
+        offset2Adj = o2 + buf2.arrayOffset() + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET;
+        refObj2 = buf2.array();
+      } else {
+        offset2Adj = o2 + ((DirectBuffer) buf2).address();
+      }
+      return compareToUnsafe(refObj1, offset1Adj, l1, refObj2, offset2Adj, l2);
     }
-    int end1 = o1 + len1;
-    int end2 = o2 + len2;
+    int end1 = o1 + l1;
+    int end2 = o2 + l2;
     for (int i = o1, j = o2; i < end1 && j < end2; i++, j++) {
       int a = buf1.get(i) & 0xFF;
       int b = buf2.get(j) & 0xFF;
@@ -506,6 +540,241 @@ public final class ByteBufferUtils {
         return a - b;
       }
     }
-    return len1 - len2;
+    return l1 - l2;
+  }
+
+  public static int compareTo(ByteBuffer buf1, int o1, int l1, byte[] buf2, int o2, int l2) {
+    if (UnsafeAccess.isAvailable()) {
+      long offset1Adj;
+      Object refObj1 = null;
+      if (buf1.hasArray()) {
+        offset1Adj = o1 + buf1.arrayOffset() + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET;
+        refObj1 = buf1.array();
+      } else {
+        offset1Adj = o1 + ((DirectBuffer) buf1).address();
+      }
+      return compareToUnsafe(refObj1, offset1Adj, l1, buf2, o2
+          + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET, l2);
+    }
+    int end1 = o1 + l1;
+    int end2 = o2 + l2;
+    for (int i = o1, j = o2; i < end1 && j < end2; i++, j++) {
+      int a = buf1.get(i) & 0xFF;
+      int b = buf2[j] & 0xFF;
+      if (a != b) {
+        return a - b;
+      }
+    }
+    return l1 - l2;
+  }
+
+  static int compareToUnsafe(Object obj1, long o1, int l1, Object obj2, long o2, int l2) {
+    final int minLength = Math.min(l1, l2);
+    final int minWords = minLength / Bytes.SIZEOF_LONG;
+
+    /*
+     * Compare 8 bytes at a time. Benchmarking shows comparing 8 bytes at a time is no slower than
+     * comparing 4 bytes at a time even on 32-bit. On the other hand, it is substantially faster on
+     * 64-bit.
+     */
+    int j = minWords << 3; // Same as minWords * SIZEOF_LONG
+    for (int i = 0; i < j; i += Bytes.SIZEOF_LONG) {
+      long lw = UnsafeAccess.theUnsafe.getLong(obj1, o1 + i);
+      long rw = UnsafeAccess.theUnsafe.getLong(obj2, o2 + i);
+      long diff = lw ^ rw;
+      if (diff != 0) {
+        return lessThanUnsignedLong(lw, rw) ? -1 : 1;
+      }
+    }
+    int offset = j;
+
+    if (minLength - offset >= Bytes.SIZEOF_INT) {
+      int il = UnsafeAccess.theUnsafe.getInt(obj1, o1 + offset);
+      int ir = UnsafeAccess.theUnsafe.getInt(obj2, o2 + offset);
+      if (il != ir) {
+        return lessThanUnsignedInt(il, ir) ? -1 : 1;
+      }
+      offset += Bytes.SIZEOF_INT;
+    }
+    if (minLength - offset >= Bytes.SIZEOF_SHORT) {
+      short sl = UnsafeAccess.theUnsafe.getShort(obj1, o1 + offset);
+      short sr = UnsafeAccess.theUnsafe.getShort(obj2, o2 + offset);
+      if (sl != sr) {
+        return lessThanUnsignedShort(sl, sr) ? -1 : 1;
+      }
+      offset += Bytes.SIZEOF_SHORT;
+    }
+    if (minLength - offset == 1) {
+      int a = (UnsafeAccess.theUnsafe.getByte(obj1, o1 + offset) & 0xff);
+      int b = (UnsafeAccess.theUnsafe.getByte(obj2, o2 + offset) & 0xff);
+      if (a != b) {
+        return a - b;
+      }
+    }
+    return l1 - l2;
+  }
+
+  /*
+   * Both values are passed as is read by Unsafe. When platform is Little Endian, have to convert
+   * to corresponding Big Endian value and then do compare. We do all writes in Big Endian format.
+   */
+  private static boolean lessThanUnsignedLong(long x1, long x2) {
+    if (UnsafeAccess.littleEndian) {
+      x1 = Long.reverseBytes(x1);
+      x2 = Long.reverseBytes(x2);
+    }
+    return (x1 + Long.MIN_VALUE) < (x2 + Long.MIN_VALUE);
+  }
+
+  /*
+   * Both values are passed as is read by Unsafe. When platform is Little Endian, have to convert
+   * to corresponding Big Endian value and then do compare. We do all writes in Big Endian format.
+   */
+  private static boolean lessThanUnsignedInt(int x1, int x2) {
+    if (UnsafeAccess.littleEndian) {
+      x1 = Integer.reverseBytes(x1);
+      x2 = Integer.reverseBytes(x2);
+    }
+    return (x1 & 0xffffffffL) < (x2 & 0xffffffffL);
+  }
+
+  /*
+   * Both values are passed as is read by Unsafe. When platform is Little Endian, have to convert
+   * to corresponding Big Endian value and then do compare. We do all writes in Big Endian format.
+   */
+  private static boolean lessThanUnsignedShort(short x1, short x2) {
+    if (UnsafeAccess.littleEndian) {
+      x1 = Short.reverseBytes(x1);
+      x2 = Short.reverseBytes(x2);
+    }
+    return (x1 & 0xffff) < (x2 & 0xffff);
+  }
+
+  /**
+   * Reads a short value at the given buffer's offset.
+   * @param buffer
+   * @param offset
+   * @return short value at offset
+   */
+  public static short toShort(ByteBuffer buffer, int offset) {
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.toShort(buffer, offset);
+    } else {
+      return buffer.getShort(offset);
+    }
+  }
+
+  /**
+   * Reads an int value at the given buffer's offset.
+   * @param buffer
+   * @param offset
+   * @return int value at offset
+   */
+  public static int toInt(ByteBuffer buffer, int offset) {
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.toInt(buffer, offset);
+    } else {
+      return buffer.getInt(offset);
+    }
+  }
+
+  /**
+   * Reads a long value at the given buffer's offset.
+   * @param buffer
+   * @param offset
+   * @return long value at offset
+   */
+  public static long toLong(ByteBuffer buffer, int offset) {
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.toLong(buffer, offset);
+    } else {
+      return buffer.getLong(offset);
+    }
+  }
+
+  /**
+   * Put an int value out to the given ByteBuffer's current position in big-endian format.
+   * This also advances the position in buffer by int size.
+   * @param buffer the ByteBuffer to write to
+   * @param val int to write out
+   */
+  public static void putInt(ByteBuffer buffer, int val) {
+    if (UnsafeAccess.isAvailable()) {
+      int newPos = UnsafeAccess.putInt(buffer, buffer.position(), val);
+      buffer.position(newPos);
+    } else {
+      buffer.putInt(val);
+    }
+  }
+
+  /**
+   * Reads a double value at the given buffer's offset.
+   * @param buffer
+   * @param offset offset where double is
+   * @return double value at offset
+   */
+  public static double toDouble(ByteBuffer buffer, int offset) {
+    return Double.longBitsToDouble(toLong(buffer, offset));
+  }
+
+  /**
+   * Reads a BigDecimal value at the given buffer's offset.
+   * @param buffer
+   * @param offset
+   * @return BigDecimal value at offset
+   */
+  public static BigDecimal toBigDecimal(ByteBuffer buffer, int offset, int length) {
+    if (buffer == null || length < Bytes.SIZEOF_INT + 1 ||
+      (offset + length > buffer.limit())) {
+      return null;
+    }
+
+    int scale = toInt(buffer, offset);
+    byte[] tcBytes = new byte[length - Bytes.SIZEOF_INT];
+    copyFromBufferToArray(tcBytes, buffer, offset + Bytes.SIZEOF_INT, 0, length - Bytes.SIZEOF_INT);
+    return new BigDecimal(new BigInteger(tcBytes), scale);
+  }
+
+  /**
+   * Copies the bytes from given array's offset to length part into the given buffer. Puts the bytes
+   * to buffer's current position. This also advances the position in the 'out' buffer by 'length'
+   * @param out
+   * @param in
+   * @param inOffset
+   * @param length
+   */
+  public static void copyFromArrayToBuffer(ByteBuffer out, byte[] in, int inOffset, int length) {
+    if (out.hasArray()) {
+      System.arraycopy(in, inOffset, out.array(), out.arrayOffset() + out.position(), length);
+      // Move the position in out by length
+      out.position(out.position() + length);
+    } else if (UnsafeAccess.isAvailable()) {
+      UnsafeAccess.copy(in, inOffset, out, out.position(), length);
+      // Move the position in out by length
+      out.position(out.position() + length);
+    } else {
+      out.put(in, inOffset, length);
+    }
+  }
+
+  /**
+   * Copies specified number of bytes from given offset of 'in' ByteBuffer to the array.
+   * @param out
+   * @param in
+   * @param sourceOffset
+   * @param destinationOffset
+   * @param length
+   */
+  public static void copyFromBufferToArray(byte[] out, ByteBuffer in,
+      int sourceOffset, int destinationOffset, int length) {
+    if (in.hasArray()) {
+      System.arraycopy(in.array(), sourceOffset + in.arrayOffset(), out, destinationOffset, length);
+    } else if (UnsafeAccess.isAvailable()) {
+      UnsafeAccess.copy(in, sourceOffset, out, destinationOffset, length);
+    } else {
+      for (int i = 0; i < length; i++) {
+        out[destinationOffset + i] = in.get(sourceOffset + i);
+      }
+    }
   }
 }

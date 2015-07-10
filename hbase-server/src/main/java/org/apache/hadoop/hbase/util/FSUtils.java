@@ -180,8 +180,9 @@ public abstract class FSUtils {
   }
 
   /**
-   * Compare of path component. Does not consider schema; i.e. if schemas different but <code>path
-   * <code> starts with <code>rootPath<code>, then the function returns true
+   * Compare of path component. Does not consider schema; i.e. if schemas
+   * different but <code>path</code> starts with <code>rootPath</code>,
+   * then the function returns true
    * @param rootPath
    * @param path
    * @return True if <code>path</code> starts with <code>rootPath</code>
@@ -507,7 +508,7 @@ public abstract class FSUtils {
 
   /**
    * We use reflection because {@link DistributedFileSystem#setSafeMode(
-   * FSConstants.SafeModeAction action, boolean isChecked)} is not in hadoop 1.1
+   * HdfsConstants.SafeModeAction action, boolean isChecked)} is not in hadoop 1.1
    *
    * @param dfs
    * @return whether we're in safe mode
@@ -517,15 +518,15 @@ public abstract class FSUtils {
     boolean inSafeMode = false;
     try {
       Method m = DistributedFileSystem.class.getMethod("setSafeMode", new Class<?> []{
-          org.apache.hadoop.hdfs.protocol.FSConstants.SafeModeAction.class, boolean.class});
+          org.apache.hadoop.hdfs.protocol.HdfsConstants.SafeModeAction.class, boolean.class});
       inSafeMode = (Boolean) m.invoke(dfs,
-        org.apache.hadoop.hdfs.protocol.FSConstants.SafeModeAction.SAFEMODE_GET, true);
+        org.apache.hadoop.hdfs.protocol.HdfsConstants.SafeModeAction.SAFEMODE_GET, true);
     } catch (Exception e) {
       if (e instanceof IOException) throw (IOException) e;
 
       // Check whether dfs is on safemode.
       inSafeMode = dfs.setSafeMode(
-        org.apache.hadoop.hdfs.protocol.FSConstants.SafeModeAction.SAFEMODE_GET);
+        org.apache.hadoop.hdfs.protocol.HdfsConstants.SafeModeAction.SAFEMODE_GET);
     }
     return inSafeMode;
   }
@@ -1435,7 +1436,7 @@ public abstract class FSUtils {
    * Given a particular table dir, return all the regiondirs inside it, excluding files such as
    * .tableinfo
    * @param fs A file system for the Path
-   * @param tableDir Path to a specific table directory <hbase.rootdir>/<tabledir>
+   * @param tableDir Path to a specific table directory &lt;hbase.rootdir&gt;/&lt;tabledir&gt;
    * @return List of paths to valid region directories in table dir.
    * @throws IOException
    */
@@ -1452,7 +1453,7 @@ public abstract class FSUtils {
 
   /**
    * Filter for all dirs that are legal column family names.  This is generally used for colfam
-   * dirs <hbase.rootdir>/<tabledir>/<regiondir>/<colfamdir>.
+   * dirs &lt;hbase.rootdir&gt;/&lt;tabledir&gt;/&lt;regiondir&gt;/&lt;colfamdir&gt;.
    */
   public static class FamilyDirFilter implements PathFilter {
     final FileSystem fs;

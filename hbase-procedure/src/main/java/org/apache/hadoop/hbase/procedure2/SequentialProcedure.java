@@ -28,7 +28,7 @@ import org.apache.hadoop.hbase.protobuf.generated.ProcedureProtos.SequentialProc
 
 /**
  * A SequentialProcedure describes one step in a procedure chain.
- *   -> Step 1 -> Step 2 -> Step 3
+ *   -&gt; Step 1 -&gt; Step 2 -&gt; Step 3
  *
  * The main difference from a base Procedure is that the execute() of a
  * SequentialProcedure will be called only once, there will be no second
@@ -42,7 +42,7 @@ public abstract class SequentialProcedure<TEnvironment> extends Procedure<TEnvir
 
   @Override
   protected Procedure[] doExecute(final TEnvironment env)
-      throws ProcedureYieldException {
+      throws ProcedureYieldException, InterruptedException {
     updateTimestamp();
     try {
       Procedure[] children = !executed ? execute(env) : null;
@@ -54,7 +54,8 @@ public abstract class SequentialProcedure<TEnvironment> extends Procedure<TEnvir
   }
 
   @Override
-  protected void doRollback(final TEnvironment env) throws IOException {
+  protected void doRollback(final TEnvironment env)
+      throws IOException, InterruptedException {
     updateTimestamp();
     if (executed) {
       try {

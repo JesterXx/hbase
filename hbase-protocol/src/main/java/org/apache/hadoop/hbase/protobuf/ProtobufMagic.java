@@ -22,8 +22,6 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 /**
  * Protobufs utility.
  */
-@edu.umd.cs.findbugs.annotations.SuppressWarnings(value="DP_CREATE_CLASSLOADER_INSIDE_DO_PRIVILEGED",
-  justification="None. Address sometime.")
 @InterfaceAudience.Private
 public class ProtobufMagic {
 
@@ -74,6 +72,8 @@ public class ProtobufMagic {
 
   /**
    * @param bytes Bytes to check.
+   * @param offset offset to start at
+   * @param len length to use
    * @return True if passed <code>bytes</code> has {@link #PB_MAGIC} for a prefix.
    */
   public static boolean isPBMagicPrefix(final byte [] bytes, int offset, int len) {

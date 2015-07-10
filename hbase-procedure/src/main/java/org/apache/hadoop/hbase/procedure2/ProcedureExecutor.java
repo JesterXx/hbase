@@ -28,7 +28,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.HashSet;
-import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,14 +39,17 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.procedure2.store.ProcedureStore;
+import org.apache.hadoop.hbase.procedure2.store.ProcedureStore.ProcedureIterator;
 import org.apache.hadoop.hbase.procedure2.util.StringUtils;
 import org.apache.hadoop.hbase.procedure2.util.TimeoutBlockingQueue;
 import org.apache.hadoop.hbase.procedure2.util.TimeoutBlockingQueue.TimeoutRetriever;
 import org.apache.hadoop.hbase.protobuf.generated.ProcedureProtos.ProcedureState;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
+import org.apache.hadoop.hbase.util.NonceKey;
 import org.apache.hadoop.hbase.util.Pair;
 
 import com.google.common.base.Preconditions;
@@ -134,22 +136,25 @@ public class ProcedureExecutor<TEnvironment> {
     private static final int DEFAULT_ACKED_EVICT_TTL = 5 * 60000; // 5min
 
     private final Map<Long, ProcedureResult> completed;
+    private final Map<NonceKey, Long> nonceKeysToProcIdsMap;
     private final ProcedureStore store;
     private final Configuration conf;
 
     public CompletedProcedureCleaner(final Configuration conf, final ProcedureStore store,
-        final Map<Long, ProcedureResult> completedMap) {
+        final Map<Long, ProcedureResult> completedMap,
+        final Map<NonceKey, Long> nonceKeysToProcIdsMap) {
       // set the timeout interval that triggers the periodic-procedure
       setTimeout(conf.getInt(CLEANER_INTERVAL_CONF_KEY, DEFAULT_CLEANER_INTERVAL));
       this.completed = completedMap;
+      this.nonceKeysToProcIdsMap = nonceKeysToProcIdsMap;
       this.store = store;
       this.conf = conf;
     }
 
     public void periodicExecute(final TEnvironment env) {
       if (completed.isEmpty()) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("No completed procedures to cleanup.");
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("No completed procedures to cleanup.");
         }
         return;
       }
@@ -171,6 +176,11 @@ public class ProcedureExecutor<TEnvironment> {
           }
           store.delete(entry.getKey());
           it.remove();
+
+          NonceKey nonceKey = result.getNonceKey();
+          if (nonceKey != null) {
+            nonceKeysToProcIdsMap.remove(nonceKey);
+          }
         }
       }
     }
@@ -225,6 +235,13 @@ public class ProcedureExecutor<TEnvironment> {
     new ConcurrentHashMap<Long, Procedure>();
 
   /**
+   * Helper map to lookup whether the procedure already issued from the same client.
+   * This map contains every root procedure.
+   */
+  private ConcurrentHashMap<NonceKey, Long> nonceKeysToProcIdsMap =
+      new ConcurrentHashMap<NonceKey, Long>();
+
+  /**
    * Timeout Queue that contains Procedures in a WAITING_TIMEOUT state
    * or periodic procedures.
    */
@@ -264,45 +281,75 @@ public class ProcedureExecutor<TEnvironment> {
     this.conf = conf;
   }
 
-  private List<Map.Entry<Long, RootProcedureState>> load() throws IOException {
+  private void load(final boolean abortOnCorruption) throws IOException {
     Preconditions.checkArgument(completed.isEmpty());
     Preconditions.checkArgument(rollbackStack.isEmpty());
     Preconditions.checkArgument(procedures.isEmpty());
     Preconditions.checkArgument(waitingTimeout.isEmpty());
     Preconditions.checkArgument(runnables.size() == 0);
 
-    // 1. Load the procedures
-    Iterator<Procedure> loader = store.load();
-    if (loader == null) {
-      lastProcId.set(0);
-      return null;
-    }
-
-    long logMaxProcId = 0;
-    int runnablesCount = 0;
-    while (loader.hasNext()) {
-      Procedure proc = loader.next();
-      proc.beforeReplay(getEnvironment());
-      procedures.put(proc.getProcId(), proc);
-      logMaxProcId = Math.max(logMaxProcId, proc.getProcId());
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Loading procedure state=" + proc.getState() +
-            " isFailed=" + proc.hasException() + ": " + proc);
+    store.load(new ProcedureStore.ProcedureLoader() {
+      @Override
+      public void setMaxProcId(long maxProcId) {
+        assert lastProcId.get() < 0 : "expected only one call to setMaxProcId()";
+        LOG.debug("load procedures maxProcId=" + maxProcId);
+        lastProcId.set(maxProcId);
       }
+
+      @Override
+      public void load(ProcedureIterator procIter) throws IOException {
+        loadProcedures(procIter, abortOnCorruption);
+      }
+
+      @Override
+      public void handleCorrupted(ProcedureIterator procIter) throws IOException {
+        int corruptedCount = 0;
+        while (procIter.hasNext()) {
+          Procedure proc = procIter.next();
+          LOG.error("corrupted procedure: " + proc);
+          corruptedCount++;
+        }
+        if (abortOnCorruption && corruptedCount > 0) {
+          throw new IOException("found " + corruptedCount + " procedures on replay");
+        }
+      }
+    });
+  }
+
+  private void loadProcedures(final ProcedureIterator procIter,
+      final boolean abortOnCorruption) throws IOException {
+    // 1. Build the rollback stack
+    int runnablesCount = 0;
+    while (procIter.hasNext()) {
+      Procedure proc = procIter.next();
       if (!proc.hasParent() && !proc.isFinished()) {
         rollbackStack.put(proc.getProcId(), new RootProcedureState());
       }
+      // add the procedure to the map
+      proc.beforeReplay(getEnvironment());
+      procedures.put(proc.getProcId(), proc);
+
+      // add the nonce to the map
+      if (proc.getNonceKey() != null) {
+        nonceKeysToProcIdsMap.put(proc.getNonceKey(), proc.getProcId());
+      }
+
       if (proc.getState() == ProcedureState.RUNNABLE) {
         runnablesCount++;
       }
     }
-    assert lastProcId.get() < 0;
-    lastProcId.set(logMaxProcId);
 
     // 2. Initialize the stacks
-    TreeSet<Procedure> runnableSet = null;
+    ArrayList<Procedure> runnableList = new ArrayList(runnablesCount);
     HashSet<Procedure> waitingSet = null;
-    for (final Procedure proc: procedures.values()) {
+    procIter.reset();
+    while (procIter.hasNext()) {
+      Procedure proc = procIter.next();
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(String.format("Loading procedure state=%s isFailed=%s: %s",
+                    proc.getState(), proc.hasException(), proc));
+      }
+
       Long rootProcId = getRootProcedureId(proc);
       if (rootProcId == null) {
         // The 'proc' was ready to run but the root procedure was rolledback?
@@ -312,11 +359,13 @@ public class ProcedureExecutor<TEnvironment> {
 
       if (!proc.hasParent() && proc.isFinished()) {
         if (LOG.isDebugEnabled()) {
-          LOG.debug("The procedure is completed state=" + proc.getState() +
-              " isFailed=" + proc.hasException() + ": " + proc);
+          LOG.debug(String.format("The procedure is completed state=%s isFailed=%s",
+                    proc.getState(), proc.hasException()));
         }
         assert !rollbackStack.containsKey(proc.getProcId());
+        procedures.remove(proc.getProcId());
         completed.put(proc.getProcId(), newResultFromProcedure(proc));
+
         continue;
       }
 
@@ -333,10 +382,7 @@ public class ProcedureExecutor<TEnvironment> {
 
       switch (proc.getState()) {
         case RUNNABLE:
-          if (runnableSet == null) {
-            runnableSet = new TreeSet<Procedure>();
-          }
-          runnableSet.add(proc);
+          runnableList.add(proc);
           break;
         case WAITING_TIMEOUT:
           if (waitingSet == null) {
@@ -361,7 +407,7 @@ public class ProcedureExecutor<TEnvironment> {
     }
 
     // 3. Validate the stacks
-    List<Map.Entry<Long, RootProcedureState>> corrupted = null;
+    int corruptedCount = 0;
     Iterator<Map.Entry<Long, RootProcedureState>> itStack = rollbackStack.entrySet().iterator();
     while (itStack.hasNext()) {
       Map.Entry<Long, RootProcedureState> entry = itStack.next();
@@ -369,32 +415,49 @@ public class ProcedureExecutor<TEnvironment> {
       if (procStack.isValid()) continue;
 
       for (Procedure proc: procStack.getSubprocedures()) {
+        LOG.error("corrupted procedure: " + proc);
         procedures.remove(proc.getProcId());
-        if (runnableSet != null) runnableSet.remove(proc);
+        runnableList.remove(proc);
         if (waitingSet != null) waitingSet.remove(proc);
+        corruptedCount++;
       }
       itStack.remove();
-      if (corrupted == null) {
-        corrupted = new ArrayList<Map.Entry<Long, RootProcedureState>>();
-      }
-      corrupted.add(entry);
+    }
+
+    if (abortOnCorruption && corruptedCount > 0) {
+      throw new IOException("found " + corruptedCount + " procedures on replay");
     }
 
     // 4. Push the runnables
-    if (runnableSet != null) {
-      // TODO: See ProcedureWALFormatReader.readInitEntry() some procedure
-      // may be started way before this stuff.
-      for (Procedure proc: runnableSet) {
+    if (!runnableList.isEmpty()) {
+      // TODO: See ProcedureWALFormatReader#hasFastStartSupport
+      // some procedure may be started way before this stuff.
+      for (int i = runnableList.size() - 1; i >= 0; --i) {
+        Procedure proc = runnableList.get(i);
         if (!proc.hasParent()) {
           sendProcedureLoadedNotification(proc.getProcId());
         }
-        runnables.addBack(proc);
+        if (proc.wasExecuted()) {
+          runnables.addFront(proc);
+        } else {
+          // if it was not in execution, it can wait.
+          runnables.addBack(proc);
+        }
       }
     }
-    return corrupted;
   }
 
-  public void start(int numThreads) throws IOException {
+  /**
+   * Start the procedure executor.
+   * It calls ProcedureStore.recoverLease() and ProcedureStore.load() to
+   * recover the lease, and ensure a single executor, and start the procedure
+   * replay to resume and recover the previous pending and in-progress perocedures.
+   *
+   * @param numThreads number of threads available for procedure execution.
+   * @param abortOnCorruption true if you want to abort your service in case
+   *          a corrupted procedure is found on replay. otherwise false.
+   */
+  public void start(int numThreads, boolean abortOnCorruption) throws IOException {
     if (running.getAndSet(true)) {
       LOG.warn("Already running");
       return;
@@ -407,7 +470,7 @@ public class ProcedureExecutor<TEnvironment> {
 
     // Initialize procedures executor
     for (int i = 0; i < numThreads; ++i) {
-      threads[i] = new Thread("ProcedureExecutorThread-" + i) {
+      threads[i] = new Thread("ProcedureExecutor-" + i) {
         @Override
         public void run() {
           execLoop();
@@ -427,11 +490,11 @@ public class ProcedureExecutor<TEnvironment> {
     store.recoverLease();
 
     // TODO: Split in two steps.
-    // TODO: Handle corrupted procedure returned (probably just a WARN)
+    // TODO: Handle corrupted procedures (currently just a warn)
     // The first one will make sure that we have the latest id,
     // so we can start the threads and accept new procedures.
     // The second step will do the actual load of old procedures.
-    load();
+    load(abortOnCorruption);
 
     // Start the executors. Here we must have the lastProcId set.
     for (int i = 0; i < threads.length; ++i) {
@@ -439,7 +502,8 @@ public class ProcedureExecutor<TEnvironment> {
     }
 
     // Add completed cleaner
-    waitingTimeout.add(new CompletedProcedureCleaner(conf, store, completed));
+    waitingTimeout.add(
+      new CompletedProcedureCleaner(conf, store, completed, nonceKeysToProcIdsMap));
   }
 
   public void stop() {
@@ -470,6 +534,7 @@ public class ProcedureExecutor<TEnvironment> {
     completed.clear();
     rollbackStack.clear();
     procedures.clear();
+    nonceKeysToProcIdsMap.clear();
     waitingTimeout.clear();
     runnables.clear();
     lastProcId.set(-1);
@@ -512,13 +577,53 @@ public class ProcedureExecutor<TEnvironment> {
    * @return the procedure id, that can be used to monitor the operation
    */
   public long submitProcedure(final Procedure proc) {
+    return submitProcedure(proc, HConstants.NO_NONCE, HConstants.NO_NONCE);
+  }
+
+  /**
+   * Add a new root-procedure to the executor.
+   * @param proc the new procedure to execute.
+   * @param nonceGroup
+   * @param nonce
+   * @return the procedure id, that can be used to monitor the operation
+   */
+  public long submitProcedure(
+      final Procedure proc,
+      final long nonceGroup,
+      final long nonce) {
     Preconditions.checkArgument(proc.getState() == ProcedureState.INITIALIZING);
     Preconditions.checkArgument(isRunning());
     Preconditions.checkArgument(lastProcId.get() >= 0);
     Preconditions.checkArgument(!proc.hasParent());
 
-    // Initialize the Procedure ID
-    proc.setProcId(nextProcId());
+    Long currentProcId;
+
+    // The following part of the code has to be synchronized to prevent multiple request
+    // with the same nonce to execute at the same time.
+    synchronized (this) {
+      // Check whether the proc exists.  If exist, just return the proc id.
+      // This is to prevent the same proc to submit multiple times (it could happen
+      // when client could not talk to server and resubmit the same request).
+      NonceKey noncekey = null;
+      if (nonce != HConstants.NO_NONCE) {
+        noncekey = new NonceKey(nonceGroup, nonce);
+        currentProcId = nonceKeysToProcIdsMap.get(noncekey);
+        if (currentProcId != null) {
+          // Found the proc
+          return currentProcId;
+        }
+      }
+
+      // Initialize the Procedure ID
+      currentProcId = nextProcId();
+      proc.setProcId(currentProcId);
+
+      // This is new procedure. Set the noncekey and insert into the map.
+      if (noncekey != null) {
+        proc.setNonceKey(noncekey);
+        nonceKeysToProcIdsMap.put(noncekey, currentProcId);
+      }
+    } // end of synchronized (this)
 
     // Commit the transaction
     store.insert(proc, null);
@@ -528,14 +633,14 @@ public class ProcedureExecutor<TEnvironment> {
 
     // Create the rollback stack for the procedure
     RootProcedureState stack = new RootProcedureState();
-    rollbackStack.put(proc.getProcId(), stack);
+    rollbackStack.put(currentProcId, stack);
 
     // Submit the new subprocedures
-    assert !procedures.containsKey(proc.getProcId());
-    procedures.put(proc.getProcId(), proc);
-    sendProcedureAddedNotification(proc.getProcId());
+    assert !procedures.containsKey(currentProcId);
+    procedures.put(currentProcId, proc);
+    sendProcedureAddedNotification(currentProcId);
     runnables.addBack(proc);
-    return proc.getProcId();
+    return currentProcId;
   }
 
   public ProcedureResult getResult(final long procId) {
@@ -692,6 +797,12 @@ public class ProcedureExecutor<TEnvironment> {
         procedureFinished(proc);
         break;
       }
+
+      // if the procedure is kind enough to pass the slot to someone else, yield
+      if (proc.isYieldAfterExecutionStep(getEnvironment())) {
+        runnables.yield(proc);
+        break;
+      }
     } while (procStack.isFailed());
   }
 
@@ -788,6 +899,11 @@ public class ProcedureExecutor<TEnvironment> {
       }
 
       subprocStack.remove(stackTail);
+
+      // if the procedure is kind enough to pass the slot to someone else, yield
+      if (proc.isYieldAfterExecutionStep(getEnvironment())) {
+        return false;
+      }
     }
 
     // Finalize the procedure state
@@ -811,6 +927,9 @@ public class ProcedureExecutor<TEnvironment> {
         LOG.debug("rollback attempt failed for " + proc, e);
       }
       return false;
+    } catch (InterruptedException e) {
+      handleInterruptedException(proc, e);
+      return false;
     } catch (Throwable e) {
       // Catch NullPointerExceptions or similar errors...
       LOG.fatal("CODE-BUG: Uncatched runtime exception for procedure: " + proc, e);
@@ -819,9 +938,7 @@ public class ProcedureExecutor<TEnvironment> {
     // allows to kill the executor before something is stored to the wal.
     // useful to test the procedure recovery.
     if (testing != null && testing.shouldKillBeforeStoreUpdate()) {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("TESTING: Kill before store update");
-      }
+      LOG.debug("TESTING: Kill before store update");
       stop();
       return false;
     }
@@ -837,6 +954,7 @@ public class ProcedureExecutor<TEnvironment> {
     } else {
       store.update(proc);
     }
+
     return true;
   }
 
@@ -872,8 +990,12 @@ public class ProcedureExecutor<TEnvironment> {
         }
       } catch (ProcedureYieldException e) {
         if (LOG.isTraceEnabled()) {
-          LOG.trace("Yield procedure: " + procedure);
+          LOG.trace("Yield procedure: " + procedure + ": " + e.getMessage());
         }
+        runnables.yield(procedure);
+        return;
+      } catch (InterruptedException e) {
+        handleInterruptedException(procedure, e);
         runnables.yield(procedure);
         return;
       } catch (Throwable e) {
@@ -934,9 +1056,7 @@ public class ProcedureExecutor<TEnvironment> {
       // allows to kill the executor before something is stored to the wal.
       // useful to test the procedure recovery.
       if (testing != null && testing.shouldKillBeforeStoreUpdate()) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("TESTING: Kill before store update");
-        }
+        LOG.debug("TESTING: Kill before store update");
         stop();
         return;
       }
@@ -956,6 +1076,11 @@ public class ProcedureExecutor<TEnvironment> {
 
       // if the store is not running we are aborting
       if (!store.isRunning()) {
+        return;
+      }
+
+      // if the procedure is kind enough to pass the slot to someone else, yield
+      if (reExecute && procedure.isYieldAfterExecutionStep(getEnvironment())) {
         return;
       }
 
@@ -993,6 +1118,18 @@ public class ProcedureExecutor<TEnvironment> {
         return;
       }
     }
+  }
+
+  private void handleInterruptedException(final Procedure proc, final InterruptedException e) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("got an interrupt during " + proc + ". suspend and retry it later.", e);
+    }
+
+    // NOTE: We don't call Thread.currentThread().interrupt()
+    // because otherwise all the subsequent calls e.g. Thread.sleep() will throw
+    // the InterruptedException. If the master is going down, we will be notified
+    // and the executor/store will be stopped.
+    // (The interrupted procedure will be retried on the next run)
   }
 
   private void sendProcedureLoadedNotification(final long procId) {
@@ -1090,8 +1227,10 @@ public class ProcedureExecutor<TEnvironment> {
 
   private static ProcedureResult newResultFromProcedure(final Procedure proc) {
     if (proc.isFailed()) {
-      return new ProcedureResult(proc.getStartTime(), proc.getLastUpdate(), proc.getException());
+      return new ProcedureResult(
+        proc.getNonceKey(), proc.getStartTime(), proc.getLastUpdate(), proc.getException());
     }
-    return new ProcedureResult(proc.getStartTime(), proc.getLastUpdate(), proc.getResult());
+    return new ProcedureResult(
+      proc.getNonceKey(), proc.getStartTime(), proc.getLastUpdate(), proc.getResult());
   }
 }

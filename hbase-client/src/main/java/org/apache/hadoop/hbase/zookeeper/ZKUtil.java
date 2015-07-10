@@ -377,8 +377,8 @@ public class ZKUtil {
    * @return ensemble key with a name (if any)
    */
   public static String getZooKeeperClusterKey(Configuration conf, String name) {
-    String ensemble = conf.get(HConstants.ZOOKEEPER_QUORUM.replaceAll(
-        "[\\t\\n\\x0B\\f\\r]", ""));
+    String ensemble = conf.get(HConstants.ZOOKEEPER_QUORUM).replaceAll(
+        "[\\t\\n\\x0B\\f\\r]", "");
     StringBuilder builder = new StringBuilder(ensemble);
     builder.append(":");
     builder.append(conf.get(HConstants.ZOOKEEPER_CLIENT_PORT));
@@ -660,7 +660,7 @@ public class ZKUtil {
       return node;
     }
     public boolean isEmpty() {
-      return (data.length == 0);
+      return (data == null || data.length == 0);
     }
   }
 
@@ -999,7 +999,11 @@ public class ZKUtil {
     try {
       javax.security.auth.login.Configuration testConfig =
           javax.security.auth.login.Configuration.getConfiguration();
-      if(testConfig.getAppConfigurationEntry("Client") == null) {
+      if (testConfig.getAppConfigurationEntry("Client") == null
+          && testConfig.getAppConfigurationEntry(
+            JaasConfiguration.CLIENT_KEYTAB_KERBEROS_CONFIG_NAME) == null
+          && testConfig.getAppConfigurationEntry(
+              JaasConfiguration.SERVER_KEYTAB_KERBEROS_CONFIG_NAME) == null) {
         return false;
       }
     } catch(Exception e) {
@@ -1008,15 +1012,19 @@ public class ZKUtil {
     }
 
     // Master & RSs uses hbase.zookeeper.client.*
-    return("kerberos".equalsIgnoreCase(conf.get("hbase.security.authentication")) &&
-         conf.get("hbase.zookeeper.client.keytab.file") != null);
+    return "kerberos".equalsIgnoreCase(conf.get("hbase.security.authentication"));
   }
 
   private static ArrayList<ACL> createACL(ZooKeeperWatcher zkw, String node) {
+    return createACL(zkw, node, isSecureZooKeeper(zkw.getConfiguration()));
+  }
+
+  public static ArrayList<ACL> createACL(ZooKeeperWatcher zkw, String node,
+    boolean isSecureZooKeeper) {
     if (!node.startsWith(zkw.baseZNode)) {
       return Ids.OPEN_ACL_UNSAFE;
     }
-    if (isSecureZooKeeper(zkw.getConfiguration())) {
+    if (isSecureZooKeeper) {
       String superUser = zkw.getConfiguration().get("hbase.superuser");
       ArrayList<ACL> acls = new ArrayList<ACL>();
       // add permission to hbase supper user
@@ -1025,13 +1033,7 @@ public class ZKUtil {
       }
       // Certain znodes are accessed directly by the client,
       // so they must be readable by non-authenticated clients
-      if ((node.equals(zkw.baseZNode) == true) ||
-          (zkw.isAnyMetaReplicaZnode(node)) ||
-          (node.equals(zkw.getMasterAddressZNode()) == true) ||
-          (node.equals(zkw.clusterIdZNode) == true) ||
-          (node.equals(zkw.rsZNode) == true) ||
-          (node.equals(zkw.backupMasterAddressesZNode) == true) ||
-          (node.startsWith(zkw.tableZNode) == true)) {
+      if (zkw.isClientReadable(node)) {
         acls.addAll(Ids.CREATOR_ALL_ACL);
         acls.addAll(Ids.READ_ACL_UNSAFE);
       } else {
@@ -1204,8 +1206,6 @@ public class ZKUtil {
    * @param data data of node to create
    * @param cb
    * @param ctx
-   * @throws KeeperException if unexpected zookeeper exception
-   * @throws KeeperException.NodeExistsException if node already exists
    */
   public static void asyncCreate(ZooKeeperWatcher zkw,
       String znode, byte [] data, final AsyncCallback.StringCallback cb,
@@ -1382,24 +1382,7 @@ public class ZKUtil {
    */
   public static void deleteNodeRecursively(ZooKeeperWatcher zkw, String node)
   throws KeeperException {
-    try {
-      List<String> children = ZKUtil.listChildrenNoWatch(zkw, node);
-      // the node is already deleted, so we just finish
-      if (children == null) return;
-
-      if(!children.isEmpty()) {
-        for(String child : children) {
-          deleteNodeRecursively(zkw, joinZNode(node, child));
-        }
-      }
-      //Zookeeper Watches are one time triggers; When children of parent nodes are deleted
-      //recursively, must set another watch, get notified of delete node
-      if (zkw.getRecoverableZooKeeper().exists(node, zkw) != null){
-        zkw.getRecoverableZooKeeper().delete(node, -1);
-      }
-    } catch(InterruptedException ie) {
-      zkw.interruptedException(ie);
-    }
+    deleteNodeRecursivelyMultiOrSequential(zkw, true, node);
   }
 
   /**
@@ -1474,6 +1457,69 @@ public class ZKUtil {
   }
 
   /**
+   * Delete the specified node and its children. This traverse the
+   * znode tree for listing the children and then delete
+   * these znodes including the parent using multi-update api or
+   * sequential based on the specified configurations.
+   * <p>
+   * Sets no watches. Throws all exceptions besides dealing with deletion of
+   * children.
+   * <p>
+   * If hbase.zookeeper.useMulti is true, use ZooKeeper's multi-update
+   * functionality. Otherwise, run the list of operations sequentially.
+   * <p>
+   * If all of the following are true:
+   * <ul>
+   * <li>runSequentialOnMultiFailure is true
+   * <li>hbase.zookeeper.useMulti is true
+   * </ul>
+   * on calling multi, we get a ZooKeeper exception that can be handled by a
+   * sequential call(*), we retry the operations one-by-one (sequentially).
+   *
+   * @param zkw
+   *          - zk reference
+   * @param runSequentialOnMultiFailure
+   *          - if true when we get a ZooKeeper exception that could retry the
+   *          operations one-by-one (sequentially)
+   * @param pathRoots
+   *          - path of the parent node(s)
+   * @throws KeeperException.NotEmptyException
+   *           if node has children while deleting
+   * @throws KeeperException
+   *           if unexpected ZooKeeper exception
+   * @throws IllegalArgumentException
+   *           if an invalid path is specified
+   */
+  public static void deleteNodeRecursivelyMultiOrSequential(ZooKeeperWatcher zkw,
+      boolean runSequentialOnMultiFailure, String... pathRoots) throws KeeperException {
+    if (pathRoots == null || pathRoots.length <= 0) {
+      LOG.warn("Given path is not valid!");
+      return;
+    }
+    List<ZKUtilOp> ops = new ArrayList<ZKUtil.ZKUtilOp>();
+    for (String eachRoot : pathRoots) {
+      // Zookeeper Watches are one time triggers; When children of parent nodes are deleted
+      // recursively, must set another watch, get notified of delete node
+      List<String> children = listChildrenBFSAndWatchThem(zkw, eachRoot);
+      // Delete the leaves first and eventually get rid of the root
+      for (int i = children.size() - 1; i >= 0; --i) {
+        ops.add(ZKUtilOp.deleteNodeFailSilent(children.get(i)));
+      }
+      try {
+        if (zkw.getRecoverableZooKeeper().exists(eachRoot, zkw) != null) {
+          ops.add(ZKUtilOp.deleteNodeFailSilent(eachRoot));
+        }
+      } catch (InterruptedException e) {
+        zkw.interruptedException(e);
+      }
+    }
+    // atleast one element should exist
+    if (ops.size() > 0) {
+      multiOrSequential(zkw, ops, runSequentialOnMultiFailure);
+    }
+  }
+
+  /**
    * BFS Traversal of all the children under path, with the entries in the list,
    * in the same order as that of the traversal. Lists all the children without
    * setting any watches.
@@ -1497,6 +1543,42 @@ public class ZKUtil {
         break;
       }
       List<String> children = listChildrenNoWatch(zkw, node);
+      if (children == null) {
+        continue;
+      }
+      for (final String child : children) {
+        final String childPath = node + "/" + child;
+        queue.add(childPath);
+        tree.add(childPath);
+      }
+    }
+    return tree;
+  }
+
+  /**
+   * BFS Traversal of all the children under path, with the entries in the list,
+   * in the same order as that of the traversal.
+   * Lists all the children and set watches on to them.
+   *
+   * @param zkw
+   *          - zk reference
+   * @param znode
+   *          - path of node
+   * @return list of children znodes under the path
+   * @throws KeeperException
+   *           if unexpected ZooKeeper exception
+   */
+  private static List<String> listChildrenBFSAndWatchThem(ZooKeeperWatcher zkw, final String znode)
+      throws KeeperException {
+    Deque<String> queue = new LinkedList<String>();
+    List<String> tree = new ArrayList<String>();
+    queue.add(znode);
+    while (true) {
+      String node = queue.pollFirst();
+      if (node == null) {
+        break;
+      }
+      List<String> children = listChildrenAndWatchThem(zkw, node);
       if (children == null) {
         continue;
       }
@@ -2025,7 +2107,6 @@ public class ZKUtil {
   /**
    * Recursively print the current state of ZK (non-transactional)
    * @param root name of the root directory in zk to print
-   * @throws KeeperException
    */
   public static void logZKTree(ZooKeeperWatcher zkw, String root) {
     if (!LOG.isDebugEnabled()) return;

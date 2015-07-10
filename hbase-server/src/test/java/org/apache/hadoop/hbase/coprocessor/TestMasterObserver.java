@@ -38,6 +38,7 @@ import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
@@ -45,6 +46,8 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.RegionLocator;
+import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.master.AssignmentManager;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
@@ -445,21 +448,35 @@ public class TestMasterObserver {
       return preListNamespaceDescriptorsCalled && !postListNamespaceDescriptorsCalled;
     }
 
+    @Deprecated
     @Override
-    public void preAddColumn(ObserverContext<MasterCoprocessorEnvironment> env,
-        TableName tableName, HColumnDescriptor column) throws IOException {
+    public void preAddColumn(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily
+    ) throws IOException {
+    }
+
+    @Override
+    public void preAddColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily
+    ) throws IOException {
       if (bypass) {
-        env.bypass();
+        ctx.bypass();
       }else{
-        env.shouldBypass();
+        ctx.shouldBypass();
       }
 
       preAddColumnCalled = true;
     }
 
+    @Deprecated
     @Override
-    public void postAddColumn(ObserverContext<MasterCoprocessorEnvironment> env,
-        TableName tableName, HColumnDescriptor column) throws IOException {
+    public void postAddColumn(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily) throws IOException {
+    }
+
+    @Override
+    public void postAddColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily) throws IOException {
       postAddColumnCalled = true;
     }
 
@@ -471,18 +488,30 @@ public class TestMasterObserver {
       return preAddColumnCalled && !postAddColumnCalled;
     }
 
+    @Deprecated
     @Override
-    public void preModifyColumn(ObserverContext<MasterCoprocessorEnvironment> env,
-        TableName tableName, HColumnDescriptor descriptor) throws IOException {
+    public void preModifyColumn(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily) throws IOException {
+    }
+
+    @Override
+    public void preModifyColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily) throws IOException {
       if (bypass) {
-        env.bypass();
+        ctx.bypass();
       }
       preModifyColumnCalled = true;
     }
 
+    @Deprecated
     @Override
-    public void postModifyColumn(ObserverContext<MasterCoprocessorEnvironment> env,
-        TableName tableName, HColumnDescriptor descriptor) throws IOException {
+    public void postModifyColumn(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily) throws IOException {
+    }
+
+    @Override
+    public void postModifyColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, HColumnDescriptor columnFamily) throws IOException {
       postModifyColumnCalled = true;
     }
 
@@ -494,20 +523,33 @@ public class TestMasterObserver {
       return preModifyColumnCalled && !postModifyColumnCalled;
     }
 
+    @Deprecated
     @Override
-    public void preDeleteColumn(ObserverContext<MasterCoprocessorEnvironment> env,
-        TableName tableName, byte[] c) throws IOException {
+    public void preDeleteColumn(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, byte[] columnFamily) throws IOException {
+    }
+
+    @Override
+    public void preDeleteColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, byte[] columnFamily) throws IOException {
       if (bypass) {
-        env.bypass();
+        ctx.bypass();
       }
       preDeleteColumnCalled = true;
     }
 
+    @Deprecated
     @Override
-    public void postDeleteColumn(ObserverContext<MasterCoprocessorEnvironment> env,
-        TableName tableName, byte[] c) throws IOException {
+    public void postDeleteColumn(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, byte[] columnFamily) throws IOException {
+    }
+
+    @Override
+    public void postDeleteColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+        TableName tableName, byte[] columnFamily) throws IOException {
       postDeleteColumnCalled = true;
     }
+
 
     public boolean wasDeleteColumnCalled() {
       return preDeleteColumnCalled && postDeleteColumnCalled;
@@ -938,22 +980,37 @@ public class TestMasterObserver {
       return preModifyColumnHandlerCalled && !postModifyColumnHandlerCalled;
     }
 
+    @Deprecated
     @Override
     public void preAddColumnHandler(
-        ObserverContext<MasterCoprocessorEnvironment> env, TableName tableName,
-        HColumnDescriptor column) throws IOException {
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        HColumnDescriptor columnFamily) throws IOException {
+    }
+
+    @Override
+    public void preAddColumnFamilyHandler(
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        HColumnDescriptor columnFamily) throws IOException {
       if (bypass) {
-        env.bypass();
+        ctx.bypass();
       }
       preAddColumnHandlerCalled = true;
     }
 
+    @Deprecated
     @Override
     public void postAddColumnHandler(
         ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
-        HColumnDescriptor column) throws IOException {
+        HColumnDescriptor columnFamily) throws IOException {
+    }
+
+    @Override
+    public void postAddColumnFamilyHandler(
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        HColumnDescriptor columnFamily) throws IOException {
       postAddColumnHandlerCalled = true;
     }
+
     public boolean wasAddColumnHandlerCalled() {
       return preAddColumnHandlerCalled && postAddColumnHandlerCalled;
     }
@@ -962,20 +1019,34 @@ public class TestMasterObserver {
       return preAddColumnHandlerCalled && !postAddColumnHandlerCalled;
     }
 
+    @Deprecated
     @Override
     public void preModifyColumnHandler(
-        ObserverContext<MasterCoprocessorEnvironment> env, TableName tableName,
-        HColumnDescriptor descriptor) throws IOException {
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        HColumnDescriptor columnFamily) throws IOException {
+    }
+
+    @Override
+    public void preModifyColumnFamilyHandler(
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        HColumnDescriptor columnFamily) throws IOException {
       if (bypass) {
-        env.bypass();
+        ctx.bypass();
       }
       preModifyColumnHandlerCalled = true;
     }
 
+    @Deprecated
     @Override
     public void postModifyColumnHandler(
         ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
-        HColumnDescriptor descriptor) throws IOException {
+        HColumnDescriptor columnFamily) throws IOException {
+    }
+
+    @Override
+    public void postModifyColumnFamilyHandler(
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        HColumnDescriptor columnFamily) throws IOException {
       postModifyColumnHandlerCalled = true;
     }
 
@@ -986,20 +1057,35 @@ public class TestMasterObserver {
     public boolean preModifyColumnHandlerCalledOnly() {
       return preModifyColumnHandlerCalled && !postModifyColumnHandlerCalled;
     }
+
+    @Deprecated
     @Override
     public void preDeleteColumnHandler(
-        ObserverContext<MasterCoprocessorEnvironment> env, TableName tableName,
-        byte[] c) throws IOException {
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        byte[] columnFamily) throws IOException {
+    }
+
+    @Override
+    public void preDeleteColumnFamilyHandler(
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        byte[] columnFamily) throws IOException {
       if (bypass) {
-        env.bypass();
+        ctx.bypass();
       }
       preDeleteColumnHandlerCalled = true;
     }
 
+    @Deprecated
     @Override
     public void postDeleteColumnHandler(
         ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
-        byte[] c) throws IOException {
+        byte[] columnFamily) throws IOException {
+    }
+
+    @Override
+    public void postDeleteColumnFamilyHandler(
+        ObserverContext<MasterCoprocessorEnvironment> ctx, TableName tableName,
+        byte[] columnFamily) throws IOException {
       postDeleteColumnHandlerCalled = true;
     }
 
@@ -1529,15 +1615,15 @@ public class TestMasterObserver {
     cp.enableBypass(false);
     cp.resetStates();
 
-    HTable table = UTIL.createMultiRegionTable(tableName, TEST_FAMILY);
+    Table table = UTIL.createMultiRegionTable(tableName, TEST_FAMILY);
 
-    try {
+    try (RegionLocator r = UTIL.getConnection().getRegionLocator(tableName)) {
       UTIL.waitUntilAllRegionsAssigned(tableName);
 
-      NavigableMap<HRegionInfo, ServerName> regions = table.getRegionLocations();
-      Map.Entry<HRegionInfo, ServerName> firstGoodPair = null;
-      for (Map.Entry<HRegionInfo, ServerName> e: regions.entrySet()) {
-        if (e.getValue() != null) {
+      List<HRegionLocation> regions = r.getAllRegionLocations();
+      HRegionLocation firstGoodPair = null;
+      for (HRegionLocation e: regions) {
+        if (e.getServerName() != null) {
           firstGoodPair = e;
           break;
         }
@@ -1547,7 +1633,7 @@ public class TestMasterObserver {
       // Try to force a move
       Collection<ServerName> servers = master.getClusterStatus().getServers();
       String destName = null;
-      String serverNameForFirstRegion = firstGoodPair.getValue().toString();
+      String serverNameForFirstRegion = firstGoodPair.getServerName().toString();
       LOG.info("serverNameForFirstRegion=" + serverNameForFirstRegion);
       ServerName masterServerName = master.getServerName();
       boolean found = false;
@@ -1564,7 +1650,7 @@ public class TestMasterObserver {
       assertTrue("Found server", found);
       LOG.info("Found " + destName);
       master.getMasterRpcServices().moveRegion(null, RequestConverter.buildMoveRegionRequest(
-          firstGoodPair.getKey().getEncodedNameAsBytes(),Bytes.toBytes(destName)));
+          firstGoodPair.getRegionInfo().getEncodedNameAsBytes(),Bytes.toBytes(destName)));
       assertTrue("Coprocessor should have been called on region move",
         cp.wasMoveCalled());
 

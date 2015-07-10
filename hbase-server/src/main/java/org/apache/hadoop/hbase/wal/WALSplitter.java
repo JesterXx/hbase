@@ -70,7 +70,6 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.ConnectionUtils;
 import org.apache.hadoop.hbase.client.Delete;
@@ -124,6 +123,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ServiceException;
+import com.google.protobuf.TextFormat;
 
 /**
  * This class is responsible for splitting up a bunch of regionserver commit log
@@ -316,15 +316,19 @@ public class WALSplitter {
       failedServerName = (serverName == null) ? "" : serverName.getServerName();
       while ((entry = getNextLogLine(in, logPath, skipErrors)) != null) {
         byte[] region = entry.getKey().getEncodedRegionName();
-        String key = Bytes.toString(region);
-        lastFlushedSequenceId = lastFlushedSequenceIds.get(key);
+        String encodedRegionNameAsStr = Bytes.toString(region);
+        lastFlushedSequenceId = lastFlushedSequenceIds.get(encodedRegionNameAsStr);
         if (lastFlushedSequenceId == null) {
           if (this.distributedLogReplay) {
             RegionStoreSequenceIds ids =
                 csm.getSplitLogWorkerCoordination().getRegionFlushedSequenceId(failedServerName,
-                  key);
+                  encodedRegionNameAsStr);
             if (ids != null) {
               lastFlushedSequenceId = ids.getLastFlushedSequenceId();
+              if (LOG.isDebugEnabled()) {
+                LOG.debug("DLR Last flushed sequenceid for " + encodedRegionNameAsStr + ": " +
+                  TextFormat.shortDebugString(ids));
+              }
             }
           } else if (sequenceIdChecker != null) {
             RegionStoreSequenceIds ids = sequenceIdChecker.getLastSequenceId(region);
@@ -333,13 +337,17 @@ public class WALSplitter {
               maxSeqIdInStores.put(storeSeqId.getFamilyName().toByteArray(),
                 storeSeqId.getSequenceId());
             }
-            regionMaxSeqIdInStores.put(key, maxSeqIdInStores);
+            regionMaxSeqIdInStores.put(encodedRegionNameAsStr, maxSeqIdInStores);
             lastFlushedSequenceId = ids.getLastFlushedSequenceId();
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("DLS Last flushed sequenceid for " + encodedRegionNameAsStr + ": " +
+                  TextFormat.shortDebugString(ids));
+            }
           }
           if (lastFlushedSequenceId == null) {
             lastFlushedSequenceId = -1L;
           }
-          lastFlushedSequenceIds.put(key, lastFlushedSequenceId);
+          lastFlushedSequenceIds.put(encodedRegionNameAsStr, lastFlushedSequenceId);
         }
         if (lastFlushedSequenceId >= entry.getKey().getLogSeqNum()) {
           editsSkipped++;
@@ -1064,7 +1072,7 @@ public class WALSplitter {
     }
 
     private void doRun() throws IOException {
-      LOG.debug("Writer thread " + this + ": starting");
+      if (LOG.isTraceEnabled()) LOG.trace("Writer thread starting");
       while (true) {
         RegionEntryBuffer buffer = entryBuffers.getChunkToWrite();
         if (buffer == null) {
@@ -1219,7 +1227,8 @@ public class WALSplitter {
         }
       }
       controller.checkForErrors();
-      LOG.info("Split writers finished");
+      LOG.info((this.writerThreads == null? 0: this.writerThreads.size()) +
+        " split writers finished; closing...");
       return (!progress_failed);
     }
 
@@ -1310,12 +1319,14 @@ public class WALSplitter {
       CompletionService<Void> completionService =
         new ExecutorCompletionService<Void>(closeThreadPool);
       for (final Map.Entry<byte[], SinkWriter> writersEntry : writers.entrySet()) {
-        LOG.debug("Submitting close of " + ((WriterAndPath)writersEntry.getValue()).p);
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Submitting close of " + ((WriterAndPath)writersEntry.getValue()).p);
+        }
         completionService.submit(new Callable<Void>() {
           @Override
           public Void call() throws Exception {
             WriterAndPath wap = (WriterAndPath) writersEntry.getValue();
-            LOG.debug("Closing " + wap.p);
+            if (LOG.isTraceEnabled()) LOG.trace("Closing " + wap.p);
             try {
               wap.w.close();
             } catch (IOException ioe) {
@@ -1323,9 +1334,11 @@ public class WALSplitter {
               thrown.add(ioe);
               return null;
             }
-            LOG.info("Closed wap " + wap.p + " (wrote " + wap.editsWritten + " edits in "
-                + (wap.nanosSpent / 1000 / 1000) + "ms)");
-
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("Closed wap " + wap.p + " (wrote " + wap.editsWritten
+                + " edits, skipped " + wap.editsSkipped + " edits in "
+                + (wap.nanosSpent / 1000 / 1000) + "ms");
+            }
             if (wap.editsWritten == 0) {
               // just remove the empty recovered.edits file
               if (fs.exists(wap.p) && !fs.delete(wap.p, false)) {
@@ -1483,8 +1496,8 @@ public class WALSplitter {
         }
       }
       Writer w = createWriter(regionedits);
-      LOG.info("Creating writer path=" + regionedits + " region=" + Bytes.toStringBinary(region));
-      return (new WriterAndPath(regionedits, w));
+      LOG.debug("Creating writer path=" + regionedits);
+      return new WriterAndPath(regionedits, w);
     }
 
     private void filterCellByStore(Entry logEntry) {
@@ -1537,9 +1550,11 @@ public class WALSplitter {
           filterCellByStore(logEntry);
           if (!logEntry.getEdit().isEmpty()) {
             wap.w.append(logEntry);
+            this.updateRegionMaximumEditLogSeqNum(logEntry);
+            editsCount++;
+          } else {
+            wap.incrementSkippedEdits(1);
           }
-          this.updateRegionMaximumEditLogSeqNum(logEntry);
-          editsCount++;
         }
         // Pass along summary statistics
         wap.incrementEdits(editsCount);
@@ -1578,11 +1593,17 @@ public class WALSplitter {
   public abstract static class SinkWriter {
     /* Count of edits written to this path */
     long editsWritten = 0;
+    /* Count of edits skipped to this path */
+    long editsSkipped = 0;
     /* Number of nanos spent writing to this log */
     long nanosSpent = 0;
 
     void incrementEdits(int edits) {
       editsWritten += edits;
+    }
+
+    void incrementSkippedEdits(int skipped) {
+      editsSkipped += skipped;
     }
 
     void incrementNanoTime(long nanos) {
@@ -1673,12 +1694,13 @@ public class WALSplitter {
       int maxSize = 0;
       List<Pair<HRegionLocation, Entry>> maxQueue = null;
       synchronized (this.serverToBufferQueueMap) {
-        for (String key : this.serverToBufferQueueMap.keySet()) {
-          List<Pair<HRegionLocation, Entry>> curQueue = this.serverToBufferQueueMap.get(key);
+        for (Map.Entry<String, List<Pair<HRegionLocation, Entry>>> entry :
+            this.serverToBufferQueueMap.entrySet()) {
+          List<Pair<HRegionLocation, Entry>> curQueue = entry.getValue();
           if (curQueue.size() > maxSize) {
             maxSize = curQueue.size();
             maxQueue = curQueue;
-            maxLocKey = key;
+            maxLocKey = entry.getKey();
           }
         }
         if (maxSize < minBatchSize
@@ -1969,11 +1991,12 @@ public class WALSplitter {
       int curSize = 0;
       List<Pair<HRegionLocation, Entry>> curQueue = null;
       synchronized (this.serverToBufferQueueMap) {
-        for (String locationKey : this.serverToBufferQueueMap.keySet()) {
-          curQueue = this.serverToBufferQueueMap.get(locationKey);
+        for (Map.Entry<String, List<Pair<HRegionLocation, Entry>>> entry :
+                this.serverToBufferQueueMap.entrySet()) {
+          curQueue = entry.getValue();
           if (!curQueue.isEmpty()) {
             curSize = curQueue.size();
-            curLoc = locationKey;
+            curLoc = entry.getKey();
             break;
           }
         }
@@ -2043,12 +2066,12 @@ public class WALSplitter {
           }
         } finally {
           synchronized (writers) {
-            for (String locationKey : writers.keySet()) {
-              RegionServerWriter tmpW = writers.get(locationKey);
+            for (Map.Entry<String, RegionServerWriter> entry : writers.entrySet()) {
+              RegionServerWriter tmpW = entry.getValue();
               try {
                 tmpW.close();
               } catch (IOException ioe) {
-                LOG.error("Couldn't close writer for region server:" + locationKey, ioe);
+                LOG.error("Couldn't close writer for region server:" + entry.getKey(), ioe);
                 result.add(ioe);
               }
             }
@@ -2056,8 +2079,9 @@ public class WALSplitter {
 
           // close connections
           synchronized (this.tableNameToHConnectionMap) {
-            for (TableName tableName : this.tableNameToHConnectionMap.keySet()) {
-              HConnection hconn = this.tableNameToHConnectionMap.get(tableName);
+            for (Map.Entry<TableName,HConnection> entry :
+                    this.tableNameToHConnectionMap.entrySet()) {
+              HConnection hconn = entry.getValue();
               try {
                 hconn.clearRegionCache();
                 hconn.close();
@@ -2204,13 +2228,13 @@ public class WALSplitter {
   }
 
   /**
-   * This function is used to construct mutations from a WALEntry. It also reconstructs WALKey &
-   * WALEdit from the passed in WALEntry
+   * This function is used to construct mutations from a WALEntry. It also
+   * reconstructs WALKey &amp; WALEdit from the passed in WALEntry
    * @param entry
    * @param cells
    * @param logEntry pair of WALKey and WALEdit instance stores WALKey and WALEdit instances
    *          extracted from the passed in WALEntry.
-   * @return list of Pair<MutationType, Mutation> to be replayed
+   * @return list of Pair&lt;MutationType, Mutation&gt; to be replayed
    * @throws IOException
    */
   public static List<MutationReplay> getMutationsFromWALEntry(WALEntry entry, CellScanner cells,

@@ -94,7 +94,8 @@ public class CreateTableProcedure
   }
 
   @Override
-  protected Flow executeFromState(final MasterProcedureEnv env, final CreateTableState state) {
+  protected Flow executeFromState(final MasterProcedureEnv env, final CreateTableState state)
+      throws InterruptedException {
     if (LOG.isTraceEnabled()) {
       LOG.trace(this + " execute state=" + state);
     }
@@ -135,7 +136,7 @@ public class CreateTableProcedure
         default:
           throw new UnsupportedOperationException("unhandled state=" + state);
       }
-    } catch (InterruptedException|IOException e) {
+    } catch (IOException e) {
       LOG.error("Error trying to create table=" + getTableName() + " state=" + state, e);
       setFailure("master-create-table", e);
     }
@@ -265,12 +266,15 @@ public class CreateTableProcedure
 
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
-    return env.getProcedureQueue().tryAcquireTableWrite(getTableName(), "create table");
+    if (!env.isInitialized() && !getTableName().isSystemTable()) {
+      return false;
+    }
+    return env.getProcedureQueue().tryAcquireTableExclusiveLock(getTableName(), "create table");
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseTableWrite(getTableName());
+    env.getProcedureQueue().releaseTableExclusiveLock(getTableName());
   }
 
   private boolean prepareCreate(final MasterProcedureEnv env) throws IOException {

@@ -29,7 +29,7 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import com.google.common.annotations.VisibleForTesting;
 
 /**
- * The basic building block for the {@link CompoundBloomFilter}
+ * The basic building block for the {@link org.apache.hadoop.hbase.io.hfile.CompoundBloomFilter}
  */
 @InterfaceAudience.Private
 public class BloomFilterChunk implements BloomFilterBase {
@@ -88,7 +88,7 @@ public class BloomFilterChunk implements BloomFilterBase {
   }
 
   /**
-   * Determines & initializes bloom filter meta data from user config. Call
+   * Determines &amp; initializes bloom filter meta data from user config. Call
    * {@link #allocBloom()} to allocate bloom filter data.
    *
    * @param maxKeys Maximum expected number of keys that will be stored in this

@@ -22,11 +22,13 @@ package org.apache.hadoop.hbase.io;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
+import org.apache.hadoop.hbase.util.ByteBufferUtils;
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
@@ -57,6 +59,7 @@ public class ByteBufferOutputStream extends OutputStream {
    * @see #getByteBuffer()
    */
   public ByteBufferOutputStream(final ByteBuffer bb) {
+    assert bb.order() == ByteOrder.BIG_ENDIAN;
     this.buf = bb;
     this.buf.clear();
   }
@@ -87,7 +90,7 @@ public class ByteBufferOutputStream extends OutputStream {
       newSize = Math.max(newSize, buf.position() + extra);
       ByteBuffer newBuf = allocate(newSize, buf.isDirect());
       buf.flip();
-      newBuf.put(buf);
+      ByteBufferUtils.copyFromBufferToBuffer(buf, newBuf);
       buf = newBuf;
     }
   }
@@ -96,7 +99,6 @@ public class ByteBufferOutputStream extends OutputStream {
   @Override
   public void write(int b) throws IOException {
     checkSizeAndGrow(Bytes.SIZEOF_BYTE);
-
     buf.put((byte)b);
   }
 
@@ -116,16 +118,24 @@ public class ByteBufferOutputStream extends OutputStream {
 
   @Override
   public void write(byte[] b) throws IOException {
-    checkSizeAndGrow(b.length);
-
-    buf.put(b);
+    write(b, 0, b.length);
   }
 
   @Override
   public void write(byte[] b, int off, int len) throws IOException {
     checkSizeAndGrow(len);
+    ByteBufferUtils.copyFromArrayToBuffer(buf, b, off, len);
+  }
 
-    buf.put(b, off, len);
+  /**
+   * Writes an <code>int</code> to the underlying output stream as four
+   * bytes, high byte first.
+   * @param i the <code>int</code> to write
+   * @throws IOException if an I/O error occurs.
+   */
+  public void writeInt(int i) throws IOException {
+    checkSizeAndGrow(Bytes.SIZEOF_INT);
+    ByteBufferUtils.putInt(this.buf, i);
   }
 
   @Override

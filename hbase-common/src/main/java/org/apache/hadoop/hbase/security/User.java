@@ -194,7 +194,6 @@ public abstract class User {
    * @param action
    * @return the result of the action
    * @throws IOException
-   * @throws InterruptedException
    */
   @SuppressWarnings({ "rawtypes", "unchecked" })
   public static <T> T runAsLoginUser(PrivilegedExceptionAction<T> action) throws IOException {
@@ -228,7 +227,8 @@ public abstract class User {
    */
   public static User createUserForTesting(Configuration conf,
       String name, String[] groups) {
-    return SecureHadoopUser.createUserForTesting(conf, name, groups);
+    User userForTesting = SecureHadoopUser.createUserForTesting(conf, name, groups);
+    return userForTesting;
   }
 
   /**

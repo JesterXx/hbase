@@ -41,7 +41,7 @@ import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
 
 /**
- * A Base for {@link TableInputFormat}s. Receives a {@link HTable}, a
+ * A Base for {@link TableInputFormat}s. Receives a {@link Table}, a
  * byte[] of input columns and optionally a {@link Filter}.
  * Subclasses may use other TableRecordReader implementations.
  *
@@ -168,7 +168,7 @@ implements InputFormat<ImmutableBytesWritable, Result> {
 
   /**
    * Calculates the splits that will serve as input for the map tasks.
-   * <ul>
+   *
    * Splits are created in number equal to the smallest between numSplits and
    * the number of {@link org.apache.hadoop.hbase.regionserver.HRegion}s in the table. 
    * If the number of splits is smaller than the number of 

@@ -87,7 +87,8 @@ public class ModifyTableProcedure
   }
 
   @Override
-  protected Flow executeFromState(final MasterProcedureEnv env, final ModifyTableState state) {
+  protected Flow executeFromState(final MasterProcedureEnv env, final ModifyTableState state)
+      throws InterruptedException {
     if (isTraceEnabled()) {
       LOG.trace(this + " execute state=" + state);
     }
@@ -128,7 +129,7 @@ public class ModifyTableProcedure
       default:
         throw new UnsupportedOperationException("unhandled state=" + state);
       }
-    } catch (InterruptedException|IOException e) {
+    } catch (IOException e) {
       if (!isRollbackSupported(state)) {
         // We reach a state that cannot be rolled back. We just need to keep retry.
         LOG.warn("Error trying to modify table=" + getTableName() + " state=" + state, e);
@@ -214,14 +215,14 @@ public class ModifyTableProcedure
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
     if (!env.isInitialized()) return false;
-    return env.getProcedureQueue().tryAcquireTableWrite(
+    return env.getProcedureQueue().tryAcquireTableExclusiveLock(
       getTableName(),
       EventType.C_M_MODIFY_TABLE.toString());
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseTableWrite(getTableName());
+    env.getProcedureQueue().releaseTableExclusiveLock(getTableName());
   }
 
   @Override

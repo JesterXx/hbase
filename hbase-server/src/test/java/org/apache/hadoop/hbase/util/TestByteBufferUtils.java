@@ -323,4 +323,81 @@ public class TestByteBufferUtils {
     assertEquals(5, buffer.position());
     assertEquals(5, buffer.limit());
   }
+
+  @Test
+  public void testToPrimitiveTypes() {
+    ByteBuffer buffer = ByteBuffer.allocate(15);
+    long l = 988L;
+    int i = 135;
+    short s = 7;
+    buffer.putLong(l);
+    buffer.putShort(s);
+    buffer.putInt(i);
+    assertEquals(l, ByteBufferUtils.toLong(buffer, 0));
+    assertEquals(s, ByteBufferUtils.toShort(buffer, 8));
+    assertEquals(i, ByteBufferUtils.toInt(buffer, 10));
+  }
+
+  @Test
+  public void testCopyFromArrayToBuffer() {
+    byte[] b = new byte[15];
+    b[0] = -1;
+    long l = 988L;
+    int i = 135;
+    short s = 7;
+    Bytes.putLong(b, 1, l);
+    Bytes.putShort(b, 9, s);
+    Bytes.putInt(b, 11, i);
+    ByteBuffer buffer = ByteBuffer.allocate(14);
+    ByteBufferUtils.copyFromArrayToBuffer(buffer, b, 1, 14);
+    buffer.rewind();
+    assertEquals(l, buffer.getLong());
+    assertEquals(s, buffer.getShort());
+    assertEquals(i, buffer.getInt());
+  }
+
+  @Test
+  public void testCopyFromBufferToArray() {
+    ByteBuffer buffer = ByteBuffer.allocate(15);
+    buffer.put((byte) -1);
+    long l = 988L;
+    int i = 135;
+    short s = 7;
+    buffer.putShort(s);
+    buffer.putInt(i);
+    buffer.putLong(l);
+    byte[] b = new byte[15];
+    ByteBufferUtils.copyFromBufferToArray(b, buffer, 1, 1, 14);
+    assertEquals(s, Bytes.toShort(b, 1));
+    assertEquals(i, Bytes.toInt(b, 3));
+    assertEquals(l, Bytes.toLong(b, 7));
+  }
+
+  @Test
+  public void testCompareTo() {
+    ByteBuffer bb1 = ByteBuffer.allocate(135);
+    ByteBuffer bb2 = ByteBuffer.allocate(135);
+    byte[] b = new byte[71];
+    fillBB(bb1, (byte) 5);
+    fillBB(bb2, (byte) 5);
+    fillArray(b, (byte) 5);
+    assertEquals(0, ByteBufferUtils.compareTo(bb1, 0, bb1.remaining(), bb2, 0, bb2.remaining()));
+    assertTrue(ByteBufferUtils.compareTo(bb1, 0, bb1.remaining(), b, 0, b.length) > 0);
+    bb2.put(134, (byte) 6);
+    assertTrue(ByteBufferUtils.compareTo(bb1, 0, bb1.remaining(), bb2, 0, bb2.remaining()) < 0);
+    bb2.put(6, (byte) 4);
+    assertTrue(ByteBufferUtils.compareTo(bb1, 0, bb1.remaining(), bb2, 0, bb2.remaining()) > 0);
+  }
+
+  private static void fillBB(ByteBuffer bb, byte b) {
+    for (int i = bb.position(); i < bb.limit(); i++) {
+      bb.put(i, b);
+    }
+  }
+
+  private static void fillArray(byte[] bb, byte b) {
+    for (int i = 0; i < bb.length; i++) {
+      bb[i] = b;
+    }
+  }
 }

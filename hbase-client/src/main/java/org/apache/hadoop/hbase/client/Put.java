@@ -123,7 +123,7 @@ public class Put extends Mutation implements HeapSize, Comparable<Row> {
     this(putToCopy.getRow(), putToCopy.ts);
     this.familyMap = new TreeMap<byte [], List<Cell>>(Bytes.BYTES_COMPARATOR);
     for(Map.Entry<byte [], List<Cell>> entry: putToCopy.getFamilyCellMap().entrySet()) {
-      this.familyMap.put(entry.getKey(), entry.getValue());
+      this.familyMap.put(entry.getKey(), new ArrayList<Cell>(entry.getValue()));
     }
     this.durability = putToCopy.durability;
     for (Map.Entry<String, byte[]> entry : putToCopy.getAttributesMap().entrySet()) {
@@ -328,7 +328,7 @@ public class Put extends Mutation implements HeapSize, Comparable<Row> {
 
   /**
    * A convenience method to determine if this object's familyMap contains
-   * a value assigned to the given family & qualifier.
+   * a value assigned to the given family &amp; qualifier.
    * Both given arguments must match the KeyValue object to return true.
    *
    * @param family column family

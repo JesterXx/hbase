@@ -49,6 +49,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.filter.ParseFilter;
@@ -63,7 +64,8 @@ import org.apache.hadoop.hbase.util.Strings;
 import org.apache.hadoop.net.DNS;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.SaslRpcServer.SaslGssCallbackHandler;
-import org.apache.hadoop.util.GenericOptionsParser;
+import org.apache.hadoop.util.Tool;
+import org.apache.hadoop.util.ToolRunner;
 import org.apache.thrift.TException;
 import org.apache.thrift.TProcessor;
 import org.apache.thrift.protocol.TBinaryProtocol;
@@ -91,7 +93,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
  */
 @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.TOOLS)
 @SuppressWarnings({ "rawtypes", "unchecked" })
-public class ThriftServer {
+public class ThriftServer extends Configured implements Tool {
   private static final Log log = LogFactory.getLog(ThriftServer.class);
 
   /**
@@ -127,6 +129,7 @@ public class ThriftServer {
     options.addOption("p", "port", true, "Port to bind to [default: " + DEFAULT_LISTEN_PORT + "]");
     options.addOption("f", "framed", false, "Use framed transport");
     options.addOption("c", "compact", false, "Use the compact protocol");
+    options.addOption("w", "workers", true, "How many worker threads to use.");
     options.addOption("h", "help", false, "Print help information");
     options.addOption(null, "infoport", true, "Port for web UI");
 
@@ -141,10 +144,8 @@ public class ThriftServer {
 
   private static CommandLine parseArguments(Configuration conf, Options options, String[] args)
       throws ParseException, IOException {
-    GenericOptionsParser genParser = new GenericOptionsParser(conf, args);
-    String[] remainingArgs = genParser.getRemainingArgs();
     CommandLineParser parser = new PosixParser();
-    return parser.parse(options, remainingArgs);
+    return parser.parse(options, args);
   }
 
   private static TProtocolFactory getTProtocolFactory(boolean isCompact) {
@@ -233,11 +234,15 @@ public class ThriftServer {
 
   private static TServer getTHsHaServer(TProtocolFactory protocolFactory,
       TProcessor processor, TTransportFactory transportFactory,
+      int workerThreads,
       InetSocketAddress inetSocketAddress, ThriftMetrics metrics)
       throws TTransportException {
     TNonblockingServerTransport serverTransport = new TNonblockingServerSocket(inetSocketAddress);
     log.info("starting HBase HsHA Thrift server on " + inetSocketAddress.toString());
     THsHaServer.Args serverArgs = new THsHaServer.Args(serverTransport);
+    if (workerThreads > 0) {
+      serverArgs.workerThreads(workerThreads);
+    }
     ExecutorService executorService = createExecutor(
         serverArgs.getWorkerThreads(), metrics);
     serverArgs.executorService(executorService);
@@ -254,18 +259,27 @@ public class ThriftServer {
     ThreadFactoryBuilder tfb = new ThreadFactoryBuilder();
     tfb.setDaemon(true);
     tfb.setNameFormat("thrift2-worker-%d");
-    return new ThreadPoolExecutor(workerThreads, workerThreads,
+    ThreadPoolExecutor pool = new ThreadPoolExecutor(workerThreads, workerThreads,
             Long.MAX_VALUE, TimeUnit.SECONDS, callQueue, tfb.build());
+    pool.prestartAllCoreThreads();
+    return pool;
   }
 
-  private static TServer getTThreadPoolServer(TProtocolFactory protocolFactory, TProcessor processor,
-      TTransportFactory transportFactory, InetSocketAddress inetSocketAddress) throws TTransportException {
+  private static TServer getTThreadPoolServer(TProtocolFactory protocolFactory,
+                                              TProcessor processor,
+                                              TTransportFactory transportFactory,
+                                              int workerThreads,
+                                              InetSocketAddress inetSocketAddress)
+      throws TTransportException {
     TServerTransport serverTransport = new TServerSocket(inetSocketAddress);
     log.info("starting HBase ThreadPool Thrift server on " + inetSocketAddress.toString());
     TThreadPoolServer.Args serverArgs = new TThreadPoolServer.Args(serverTransport);
     serverArgs.processor(processor);
     serverArgs.transportFactory(transportFactory);
     serverArgs.protocolFactory(protocolFactory);
+    if (workerThreads > 0) {
+      serverArgs.maxWorkerThreads(workerThreads);
+    }
     return new TThreadPoolServer(serverArgs);
   }
 
@@ -290,14 +304,21 @@ public class ThriftServer {
 
   /**
    * Start up the Thrift2 server.
-   *
-   * @param args
    */
   public static void main(String[] args) throws Exception {
+    final Configuration conf = HBaseConfiguration.create();
+    // for now, only time we return is on an argument error.
+    final int status = ToolRunner.run(conf, new ThriftServer(), args);
+    System.exit(status);
+  }
+
+  @Override
+  public int run(String[] args) throws Exception {
+    final Configuration conf = getConf();
     TServer server = null;
     Options options = getOptions();
-    Configuration conf = HBaseConfiguration.create();
     CommandLine cmd = parseArguments(conf, options, args);
+    int workerThreads = 0;
 
     /**
      * This is to please both bin/hbase and bin/hbase-daemon. hbase-daemon provides "start" and "stop" arguments hbase
@@ -306,7 +327,7 @@ public class ThriftServer {
     List<?> argList = cmd.getArgList();
     if (cmd.hasOption("help") || !argList.contains("start") || argList.contains("stop")) {
       printUsage();
-      System.exit(1);
+      return 1;
     }
 
     // Get address to bind
@@ -414,6 +435,10 @@ public class ThriftServer {
       };
     }
 
+    if (cmd.hasOption("w")) {
+      workerThreads = Integer.parseInt(cmd.getOptionValue("w"));
+    }
+
     // check for user-defined info server port setting, if so override the conf
     try {
       if (cmd.hasOption("infoport")) {
@@ -438,11 +463,23 @@ public class ThriftServer {
     }
 
     if (nonblocking) {
-      server = getTNonBlockingServer(protocolFactory, processor, transportFactory, inetSocketAddress);
+      server = getTNonBlockingServer(protocolFactory,
+          processor,
+          transportFactory,
+          inetSocketAddress);
     } else if (hsha) {
-      server = getTHsHaServer(protocolFactory, processor, transportFactory, inetSocketAddress, metrics);
+      server = getTHsHaServer(protocolFactory,
+          processor,
+          transportFactory,
+          workerThreads,
+          inetSocketAddress,
+          metrics);
     } else {
-      server = getTThreadPoolServer(protocolFactory, processor, transportFactory, inetSocketAddress);
+      server = getTThreadPoolServer(protocolFactory,
+          processor,
+          transportFactory,
+          workerThreads,
+          inetSocketAddress);
     }
 
     final TServer tserver = server;
@@ -454,5 +491,7 @@ public class ThriftServer {
           return null;
         }
       });
+    // when tserver.stop eventually happens we'll get here.
+    return 0;
   }
 }

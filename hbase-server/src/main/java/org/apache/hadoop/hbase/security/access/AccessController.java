@@ -96,6 +96,7 @@ import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.replication.ReplicationEndpoint;
 import org.apache.hadoop.hbase.security.AccessDeniedException;
+import org.apache.hadoop.hbase.security.Superusers;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.security.access.Permission.Action;
@@ -126,6 +127,7 @@ import com.google.protobuf.Service;
  * <p>
  * {@code AccessController} performs authorization checks for HBase operations
  * based on:
+ * </p>
  * <ul>
  *   <li>the identity of the user performing the operation</li>
  *   <li>the scope over which the operation is performed, in increasing
@@ -133,6 +135,7 @@ import com.google.protobuf.Service;
  *   <li>the type of action being performed (as mapped to
  *   {@link Permission.Action} values)</li>
  * </ul>
+ * <p>
  * If the authorization check fails, an {@link AccessDeniedException}
  * will be thrown for the operation.
  * </p>
@@ -180,9 +183,6 @@ public class AccessController extends BaseMasterAndRegionObserver
 
   /** Provider for mapping principal names to Users */
   private UserProvider userProvider;
-
-  /** The list of users with superuser authority */
-  private List<String> superusers;
 
   /** if we are active, usually true, only not true if "hbase.security.authorization"
    has been set to false in site configuration */
@@ -891,7 +891,7 @@ public class AccessController extends BaseMasterAndRegionObserver
       return;
     }
     // Superusers are allowed to store cells unconditionally.
-    if (superusers.contains(user.getShortName())) {
+    if (Superusers.isSuperUser(user)) {
       m.setAttribute(TAG_CHECK_PASSED, TRUE);
       return;
     }
@@ -954,11 +954,6 @@ public class AccessController extends BaseMasterAndRegionObserver
 
     // set the user-provider.
     this.userProvider = UserProvider.instantiate(env.getConfiguration());
-
-    // set up the list of users with superuser privilege
-    User user = userProvider.getCurrent();
-    superusers = Lists.asList(user.getShortName(),
-      conf.getStrings(AccessControlLists.SUPERUSER_CONF_KEY, new String[0]));
 
     // If zk is null or IOException while obtaining auth manager,
     // throw RuntimeException so that the coprocessor is unloaded.
@@ -1119,33 +1114,35 @@ public class AccessController extends BaseMasterAndRegionObserver
   }
 
   @Override
-  public void preAddColumn(ObserverContext<MasterCoprocessorEnvironment> c, TableName tableName,
-      HColumnDescriptor column) throws IOException {
-    requireTablePermission("addColumn", tableName, column.getName(), null, Action.ADMIN,
-        Action.CREATE);
+  public void preAddColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                 TableName tableName, HColumnDescriptor columnFamily)
+      throws IOException {
+    requireTablePermission("addColumn", tableName, columnFamily.getName(), null, Action.ADMIN,
+                           Action.CREATE);
   }
 
   @Override
-  public void preModifyColumn(ObserverContext<MasterCoprocessorEnvironment> c, TableName tableName,
-      HColumnDescriptor descriptor) throws IOException {
-    requirePermission("modifyColumn", tableName, descriptor.getName(), null, Action.ADMIN,
+  public void preModifyColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                    TableName tableName, HColumnDescriptor columnFamily)
+      throws IOException {
+    requirePermission("modifyColumn", tableName, columnFamily.getName(), null, Action.ADMIN,
       Action.CREATE);
   }
 
   @Override
-  public void preDeleteColumn(ObserverContext<MasterCoprocessorEnvironment> c, TableName tableName,
-      byte[] col) throws IOException {
-    requirePermission("deleteColumn", tableName, col, null, Action.ADMIN, Action.CREATE);
+  public void preDeleteColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                    TableName tableName, byte[] columnFamily) throws IOException {
+    requirePermission("deleteColumn", tableName, columnFamily, null, Action.ADMIN, Action.CREATE);
   }
 
   @Override
-  public void postDeleteColumn(ObserverContext<MasterCoprocessorEnvironment> c,
-      final TableName tableName, final byte[] col) throws IOException {
-    final Configuration conf = c.getEnvironment().getConfiguration();
+  public void postDeleteColumnFamily(ObserverContext<MasterCoprocessorEnvironment> ctx,
+      final TableName tableName, final byte[] columnFamily) throws IOException {
+    final Configuration conf = ctx.getEnvironment().getConfiguration();
     User.runAsLoginUser(new PrivilegedExceptionAction<Void>() {
       @Override
       public Void run() throws Exception {
-        AccessControlLists.removeTablePermissions(conf, tableName, col);
+        AccessControlLists.removeTablePermissions(conf, tableName, columnFamily);
         return null;
       }
     });
@@ -1356,7 +1353,7 @@ public class AccessController extends BaseMasterAndRegionObserver
     } else {
       HRegionInfo regionInfo = region.getRegionInfo();
       if (regionInfo.getTable().isSystemTable()) {
-        isSystemOrSuperUser(regionEnv.getConfiguration());
+        checkSystemOrSuperUser();
       } else {
         requirePermission("preOpen", Action.ADMIN);
       }
@@ -2047,6 +2044,13 @@ public class AccessController extends BaseMasterAndRegionObserver
     scannerOwners.remove(s);
   }
 
+  @Override
+  public boolean postScannerFilterRow(final ObserverContext<RegionCoprocessorEnvironment> e,
+      final InternalScanner s, final Cell curRowCell, final boolean hasMore) throws IOException {
+    // Impl in BaseRegionObserver might do unnecessary copy for Off heap backed Cells.
+    return hasMore;
+  }
+
   /**
    * Verify, when servicing an RPC, that the caller is the scanner owner.
    * If so, we assume that access control is correctly enforced based on
@@ -2395,20 +2399,15 @@ public class AccessController extends BaseMasterAndRegionObserver
     requirePermission("preClose", Action.ADMIN);
   }
 
-  private void isSystemOrSuperUser(Configuration conf) throws IOException {
+  private void checkSystemOrSuperUser() throws IOException {
     // No need to check if we're not going to throw
     if (!authorizationEnabled) {
       return;
     }
-    User user = userProvider.getCurrent();
-    if (user == null) {
-      throw new IOException("Unable to obtain the current user, " +
-        "authorization checks for internal operations will not work correctly!");
-    }
     User activeUser = getActiveUser();
-    if (!(superusers.contains(activeUser.getShortName()))) {
-      throw new AccessDeniedException("User '" + (user != null ? user.getShortName() : "null") +
-        "is not system or super user.");
+    if (!Superusers.isSuperUser(activeUser)) {
+      throw new AccessDeniedException("User '" + (activeUser != null ?
+        activeUser.getShortName() : "null") + "is not system or super user.");
     }
   }
 

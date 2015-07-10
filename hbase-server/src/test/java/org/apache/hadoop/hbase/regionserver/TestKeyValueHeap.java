@@ -190,12 +190,14 @@ public class TestKeyValueHeap extends HBaseTestCase {
     l1.add(new KeyValue(row1, fam1, col5, data));
     l1.add(new KeyValue(row2, fam1, col1, data));
     l1.add(new KeyValue(row2, fam1, col2, data));
-    scanners.add(new Scanner(l1));
+    Scanner s1 = new Scanner(l1);
+    scanners.add(s1);
 
     List<Cell> l2 = new ArrayList<Cell>();
     l2.add(new KeyValue(row1, fam1, col1, data));
     l2.add(new KeyValue(row1, fam1, col2, data));
-    scanners.add(new Scanner(l2));
+    Scanner s2 = new Scanner(l2);
+    scanners.add(s2);
 
     List<Cell> l3 = new ArrayList<Cell>();
     l3.add(new KeyValue(row1, fam1, col3, data));
@@ -203,18 +205,79 @@ public class TestKeyValueHeap extends HBaseTestCase {
     l3.add(new KeyValue(row1, fam2, col1, data));
     l3.add(new KeyValue(row1, fam2, col2, data));
     l3.add(new KeyValue(row2, fam1, col3, data));
-    scanners.add(new Scanner(l3));
+    Scanner s3 = new Scanner(l3);
+    scanners.add(s3);
 
     List<Cell> l4 = new ArrayList<Cell>();
-    scanners.add(new Scanner(l4));
+    Scanner s4 = new Scanner(l4);
+    scanners.add(s4);
 
     //Creating KeyValueHeap
     KeyValueHeap kvh = new KeyValueHeap(scanners, CellComparator.COMPARATOR);
 
     while(kvh.next() != null);
-
+    // Once the internal scanners go out of Cells, those will be removed from KVHeap's priority
+    // queue and added to a Set for lazy close. The actual close will happen only on KVHeap#close()
+    assertEquals(4, kvh.scannersForDelayedClose.size());
+    assertTrue(kvh.scannersForDelayedClose.contains(s1));
+    assertTrue(kvh.scannersForDelayedClose.contains(s2));
+    assertTrue(kvh.scannersForDelayedClose.contains(s3));
+    assertTrue(kvh.scannersForDelayedClose.contains(s4));
+    kvh.close();
     for(KeyValueScanner scanner : scanners) {
       assertTrue(((Scanner)scanner).isClosed());
+    }
+  }
+
+  @Test
+  public void testScannerException() throws IOException {
+    // Test for NPE issue when exception happens in scanners (HBASE-13835)
+
+    List<Cell> l1 = new ArrayList<Cell>();
+    l1.add(new KeyValue(row1, fam1, col5, data));
+    l1.add(new KeyValue(row2, fam1, col1, data));
+    l1.add(new KeyValue(row2, fam1, col2, data));
+    SeekScanner s1 = new SeekScanner(l1);
+    scanners.add(s1);
+
+    List<Cell> l2 = new ArrayList<Cell>();
+    l2.add(new KeyValue(row1, fam1, col1, data));
+    l2.add(new KeyValue(row1, fam1, col2, data));
+    SeekScanner s2 = new SeekScanner(l2);
+    scanners.add(s2);
+
+    List<Cell> l3 = new ArrayList<Cell>();
+    l3.add(new KeyValue(row1, fam1, col3, data));
+    l3.add(new KeyValue(row1, fam1, col4, data));
+    l3.add(new KeyValue(row1, fam2, col1, data));
+    l3.add(new KeyValue(row1, fam2, col2, data));
+    l3.add(new KeyValue(row2, fam1, col3, data));
+    SeekScanner s3 = new SeekScanner(l3);
+    scanners.add(s3);
+
+    List<Cell> l4 = new ArrayList<Cell>();
+    SeekScanner s4 = new SeekScanner(l4);
+    scanners.add(s4);
+
+    // Creating KeyValueHeap
+    KeyValueHeap kvh = new KeyValueHeap(scanners, CellComparator.COMPARATOR);
+
+    try {
+      for (KeyValueScanner scanner : scanners) {
+        ((SeekScanner) scanner).setRealSeekDone(false);
+      }
+      while (kvh.next() != null);
+      // The pollRealKV should throw IOE.
+      assertTrue(false);
+    } catch (IOException ioe) {
+      kvh.close();
+    }
+
+    // It implies there is no NPE thrown from kvh.close() if getting here
+    for (KeyValueScanner scanner : scanners) {
+      // Verify that close is called and only called once for each scanner
+      assertTrue(((SeekScanner) scanner).isClosed());
+      assertEquals(((SeekScanner) scanner).getClosedNum(), 1);
     }
   }
 
@@ -227,6 +290,7 @@ public class TestKeyValueHeap extends HBaseTestCase {
       super(list);
     }
 
+    @Override
     public void close(){
       closed = true;
     }
@@ -236,6 +300,36 @@ public class TestKeyValueHeap extends HBaseTestCase {
     }
   }
 
+  private static class SeekScanner extends Scanner {
+    private int closedNum = 0;
+    private boolean realSeekDone = true;
 
+    public SeekScanner(List<Cell> list) {
+      super(list);
+    }
+
+    @Override
+    public void close() {
+      super.close();
+      closedNum++;
+    }
+
+    public int getClosedNum() {
+      return closedNum;
+    }
+
+    @Override
+    public boolean realSeekDone() {
+      return realSeekDone;
+    }
+
+    public void setRealSeekDone(boolean done) {
+      realSeekDone = done;
+    }
+
+    @Override
+    public void enforceSeek() throws IOException {
+      throw new IOException("enforceSeek must not be called on a " + "non-lazy scanner");
+    }
+  }
 }
-

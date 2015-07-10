@@ -93,9 +93,9 @@ public class EnableTableProcedure
   /**
    * Constructor
    * @param env MasterProcedureEnv
-   * @throws IOException
    * @param tableName the table to operate on
    * @param skipTableStateCheck whether to check table state
+   * @throws IOException
    */
   public EnableTableProcedure(
       final MasterProcedureEnv env,
@@ -118,7 +118,8 @@ public class EnableTableProcedure
   }
 
   @Override
-  protected Flow executeFromState(final MasterProcedureEnv env, final EnableTableState state) {
+  protected Flow executeFromState(final MasterProcedureEnv env, final EnableTableState state)
+      throws InterruptedException {
     if (isTraceEnabled()) {
       LOG.trace(this + " execute state=" + state);
     }
@@ -155,7 +156,7 @@ public class EnableTableProcedure
       default:
         throw new UnsupportedOperationException("unhandled state=" + state);
       }
-    } catch (InterruptedException|IOException e) {
+    } catch (IOException e) {
       LOG.error("Error trying to enable table=" + tableName + " state=" + state, e);
       setFailure("master-enable-table", e);
     }
@@ -234,14 +235,14 @@ public class EnableTableProcedure
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
     if (!env.isInitialized()) return false;
-    return env.getProcedureQueue().tryAcquireTableWrite(
+    return env.getProcedureQueue().tryAcquireTableExclusiveLock(
       tableName,
       EventType.C_M_ENABLE_TABLE.toString());
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseTableWrite(tableName);
+    env.getProcedureQueue().releaseTableExclusiveLock(tableName);
   }
 
   @Override

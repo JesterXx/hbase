@@ -271,6 +271,7 @@ EOF
               org.apache.hadoop.hbase.util.Bytes::toStringBinary(row.getRow))
       end
 
+      scanner.close()
       # Return the counter
       return count
     end
@@ -407,6 +408,8 @@ EOF
 
     def _hash_to_scan(args)
       if args.any?
+        enablemetrics = args["ALL_METRICS"].nil? ? false : args["ALL_METRICS"]
+        enablemetrics = enablemetrics || !args["METRICS"].nil?
         filter = args["FILTER"]
         startrow = args["STARTROW"] || ''
         stoprow = args["STOPROW"]
@@ -425,6 +428,7 @@ EOF
         consistency = args[CONSISTENCY]
         # Normalize column names
         columns = [columns] if columns.class == String
+        limit = args["LIMIT"] || -1
         unless columns.kind_of?(Array)
           raise ArgumentError.new("COLUMNS must be specified as a String or an Array")
         end
@@ -453,6 +457,7 @@ EOF
           scan.setFilter(org.apache.hadoop.hbase.filter.ParseFilter.new.parseFilterString(filter))
         end
 
+        scan.setScanMetricsEnabled(enablemetrics) if enablemetrics
         scan.setTimeStamp(timestamp) if timestamp
         scan.setCacheBlocks(cache_blocks)
         scan.setReversed(reversed)
@@ -460,6 +465,7 @@ EOF
         scan.setMaxVersions(versions) if versions > 1
         scan.setTimeRange(timerange[0], timerange[1]) if timerange
         scan.setRaw(raw)
+        scan.setCaching(limit) if limit > 0
         set_attributes(scan, attributes) if attributes
         set_authorizations(scan, authorizations) if authorizations
         scan.setConsistency(org.apache.hadoop.hbase.client.Consistency.valueOf(consistency)) if consistency
@@ -476,10 +482,12 @@ EOF
 
     #----------------------------------------------------------------------------------------------
     # Scans whole table or a range of keys and returns rows matching specific criteria
-    def _scan_internal(args = {})
-      raise(ArgumentError, "Arguments should be a Hash") unless args.kind_of?(Hash)
+    def _scan_internal(args = {}, scan = nil)
+      raise(ArgumentError, "Args should be a Hash") unless args.kind_of?(Hash)
+      raise(ArgumentError, "Scan argument should be org.apache.hadoop.hbase.client.Scan") \
+        unless scan == nil || scan.kind_of?(org.apache.hadoop.hbase.client.Scan)
 
-      limit = args.delete("LIMIT") || -1
+      limit = args["LIMIT"] || -1
       maxlength = args.delete("MAXLENGTH") || -1
       count = 0
       res = {}
@@ -487,15 +495,12 @@ EOF
       @converters.clear()
 
       # Start the scanner
-      scanner = @table.getScanner(_hash_to_scan(args))
+      scan = scan == nil ? _hash_to_scan(args) : scan
+      scanner = @table.getScanner(scan)
       iter = scanner.iterator
 
       # Iterate results
       while iter.hasNext
-        if limit > 0 && count >= limit
-          break
-        end
-
         row = iter.next
         key = org.apache.hadoop.hbase.util.Bytes::toStringBinary(row.getRow)
 
@@ -516,8 +521,13 @@ EOF
 
         # One more row processed
         count += 1
+        if limit > 0 && count >= limit
+          # If we reached the limit, exit before the next call to hasNext
+          break
+        end
       end
 
+      scanner.close()
       return ((block_given?) ? count : res)
     end
 

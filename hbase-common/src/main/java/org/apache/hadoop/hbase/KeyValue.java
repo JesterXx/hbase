@@ -37,6 +37,7 @@ import java.util.Map;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.io.ByteBufferOutputStream;
 import org.apache.hadoop.hbase.io.HeapSize;
 import org.apache.hadoop.hbase.io.util.StreamUtils;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -63,23 +64,27 @@ import com.google.common.annotations.VisibleForTesting;
  * <p>
  * KeyValue wraps a byte array and takes offsets and lengths into passed array at where to start
  * interpreting the content as KeyValue. The KeyValue format inside a byte array is:
- * <code>&lt;keylength> &lt;valuelength> &lt;key> &lt;value></code> Key is further decomposed as:
- * <code>&lt;rowlength> &lt;row> &lt;columnfamilylength> &lt;columnfamily> &lt;columnqualifier>
- * &lt;timestamp> &lt;keytype></code>
+ * <code>&lt;keylength&gt; &lt;valuelength&gt; &lt;key&gt; &lt;value&gt;</code>
+ * Key is further decomposed as:
+ * <code>&lt;rowlength&gt; &lt;row&gt; &lt;columnfamilylength&gt;
+ * &lt;columnfamily&gt; &lt;columnqualifier&gt;
+ * &lt;timestamp&gt; &lt;keytype&gt;</code>
  * The <code>rowlength</code> maximum is <code>Short.MAX_SIZE</code>, column family length maximum
- * is <code>Byte.MAX_SIZE</code>, and column qualifier + key length must be <
+ * is <code>Byte.MAX_SIZE</code>, and column qualifier + key length must be &lt;
  * <code>Integer.MAX_SIZE</code>. The column does not contain the family/qualifier delimiter,
  * {@link #COLUMN_FAMILY_DELIMITER}<br>
  * KeyValue can optionally contain Tags. When it contains tags, it is added in the byte array after
- * the value part. The format for this part is: <code>&lt;tagslength>&lt;tagsbytes></code>.
+ * the value part. The format for this part is: <code>&lt;tagslength&gt;&lt;tagsbytes&gt;</code>.
  * <code>tagslength</code> maximum is <code>Short.MAX_SIZE</code>. The <code>tagsbytes</code>
  * contain one or more tags where as each tag is of the form
- * <code>&lt;taglength>&lt;tagtype>&lt;tagbytes></code>.  <code>tagtype</code> is one byte and
+ * <code>&lt;taglength&gt;&lt;tagtype&gt;&lt;tagbytes&gt;</code>.
+ * <code>tagtype</code> is one byte and
  * <code>taglength</code> maximum is <code>Short.MAX_SIZE</code> and it includes 1 byte type length
  * and actual tag bytes length.
  */
 @InterfaceAudience.Private
-public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, SettableTimestamp {
+public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
+    SettableTimestamp, Streamable {
   private static final ArrayList<Tag> EMPTY_ARRAY_LIST = new ArrayList<Tag>();
 
   private static final Log LOG = LogFactory.getLog(KeyValue.class);
@@ -141,6 +146,8 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
   public static final int ROW_OFFSET =
     Bytes.SIZEOF_INT /*keylength*/ +
     Bytes.SIZEOF_INT /*valuelength*/;
+
+  public static final int ROW_KEY_OFFSET = ROW_OFFSET + ROW_LENGTH_SIZE;
 
   // Size of the length ints in a KeyValue datastructure.
   public static final int KEYVALUE_INFRASTRUCTURE_SIZE = ROW_OFFSET;
@@ -1161,7 +1168,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
    * as JSON. Values are left out due to their tendency to be large. If needed,
    * they can be added manually.
    *
-   * @return the Map<String,?> containing data from this key
+   * @return the Map&lt;String,?&gt; containing data from this key
    */
   public Map<String, Object> toStringMap() {
     Map<String, Object> stringMap = new HashMap<String, Object>();
@@ -1323,7 +1330,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
    */
   @Override
   public int getRowOffset() {
-    return getKeyOffset() + Bytes.SIZEOF_SHORT;
+    return this.offset + ROW_KEY_OFFSET;
   }
 
   /**
@@ -1354,7 +1361,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
    * @return Family offset
    */
   private int getFamilyOffset(int rlength) {
-    return this.offset + ROW_OFFSET + Bytes.SIZEOF_SHORT + rlength + Bytes.SIZEOF_BYTE;
+    return this.offset + ROW_KEY_OFFSET + rlength + Bytes.SIZEOF_BYTE;
   }
 
   /**
@@ -1876,7 +1883,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
      * Compares the only the user specified portion of a Key.  This is overridden by MetaComparator.
      * @param left
      * @param right
-     * @return 0 if equal, <0 if left smaller, >0 if right smaller
+     * @return 0 if equal, &lt;0 if left smaller, &gt;0 if right smaller
      */
     protected int compareRowKey(final Cell left, final Cell right) {
       return CellComparator.COMPARATOR.compareRows(left, right);
@@ -1891,7 +1898,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
      * @param right
      * @param roffset
      * @param rlength
-     * @return  0 if equal, <0 if left smaller, >0 if right smaller
+     * @return  0 if equal, &lt;0 if left smaller, &gt;0 if right smaller
      */
     public int compareFlatKey(byte[] left, int loffset, int llength,
         byte[] right, int roffset, int rlength) {
@@ -2003,7 +2010,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
      * @param right
      * @param roffset
      * @param rlength
-     * @return 0 if equal, <0 if left smaller, >0 if right smaller
+     * @return 0 if equal, &lt;0 if left smaller, &gt;0 if right smaller
      */
     public int compareRows(byte [] left, int loffset, int llength,
         byte [] right, int roffset, int rlength) {
@@ -2052,7 +2059,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
      * @param right
      * @param roffset
      * @param rlength
-     * @return 0 if equal, <0 if left smaller, >0 if right smaller
+     * @return 0 if equal, &lt;0 if left smaller, &gt;0 if right smaller
      */
     @Override // SamePrefixComparator
     public int compareIgnoringPrefix(int commonPrefix, byte[] left,
@@ -2290,7 +2297,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
      * This is a HFile block index key optimization.
      * @param leftKey
      * @param rightKey
-     * @return 0 if equal, <0 if left smaller, >0 if right smaller
+     * @return 0 if equal, &lt;0 if left smaller, &gt;0 if right smaller
      * @deprecated Since 0.99.2;
      */
     @Deprecated
@@ -2460,7 +2467,9 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
    * @return Created KeyValue OR if we find a length of zero, we will return null which
    * can be useful marking a stream as done.
    * @throws IOException
+   * {@link Deprecated} As of 1.2. Use {@link KeyValueUtil#iscreate(InputStream, boolean)} instead.
    */
+  @Deprecated
   public static KeyValue iscreate(final InputStream in) throws IOException {
     byte [] intBytes = new byte[Bytes.SIZEOF_INT];
     int bytesRead = 0;
@@ -2501,47 +2510,48 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
    * Named <code>oswrite</code> so does not clash with {@link #write(KeyValue, DataOutput)}
    * @param kv
    * @param out
-   * @return Length written on stream
-   * @throws IOException
-   * @see #create(DataInput) for the inverse function
-   * @see #write(KeyValue, DataOutput)
-   * @deprecated use {@link #oswrite(KeyValue, OutputStream, boolean)} instead
-   */
-  @Deprecated
-  public static long oswrite(final KeyValue kv, final OutputStream out)
-      throws IOException {
-    int length = kv.getLength();
-    // This does same as DataOuput#writeInt (big-endian, etc.)
-    out.write(Bytes.toBytes(length));
-    out.write(kv.getBuffer(), kv.getOffset(), length);
-    return length + Bytes.SIZEOF_INT;
-  }
-
-  /**
-   * Write out a KeyValue in the manner in which we used to when KeyValue was a Writable but do
-   * not require a {@link DataOutput}, just take plain {@link OutputStream}
-   * Named <code>oswrite</code> so does not clash with {@link #write(KeyValue, DataOutput)}
-   * @param kv
-   * @param out
    * @param withTags
    * @return Length written on stream
    * @throws IOException
    * @see #create(DataInput) for the inverse function
    * @see #write(KeyValue, DataOutput)
    * @see KeyValueUtil#oswrite(Cell, OutputStream, boolean)
+   * @deprecated As of release 2.0.0, this will be removed in HBase 3.0.0.
+   *             Instead use {@link #write(OutputStream, boolean)}
    */
+  @Deprecated
   public static long oswrite(final KeyValue kv, final OutputStream out, final boolean withTags)
       throws IOException {
+    return kv.write(out, withTags);
+  }
+
+  @Override
+  public int write(OutputStream out) throws IOException {
+    return write(out, true);
+  }
+
+  @Override
+  public int write(OutputStream out, boolean withTags) throws IOException {
     // In KeyValueUtil#oswrite we do a Cell serialization as KeyValue. Any changes doing here, pls
     // check KeyValueUtil#oswrite also and do necessary changes.
-    int length = kv.getLength();
+    int length = this.length;
     if (!withTags) {
-      length = kv.getKeyLength() + kv.getValueLength() + KEYVALUE_INFRASTRUCTURE_SIZE;
+      length = this.getKeyLength() + this.getValueLength() + KEYVALUE_INFRASTRUCTURE_SIZE;
     }
-    // This does same as DataOuput#writeInt (big-endian, etc.)
-    StreamUtils.writeInt(out, length);
-    out.write(kv.getBuffer(), kv.getOffset(), length);
+    writeInt(out, length);
+    out.write(this.bytes, this.offset, length);
     return length + Bytes.SIZEOF_INT;
+  }
+
+  // This does same as DataOuput#writeInt (big-endian, etc.)
+  public static void writeInt(OutputStream out, int v) throws IOException {
+    // We have writeInt in ByteBufferOutputStream so that it can directly write int to underlying
+    // ByteBuffer in one step.
+    if (out instanceof ByteBufferOutputStream) {
+      ((ByteBufferOutputStream) out).writeInt(v);
+    } else {
+      StreamUtils.writeInt(out, v);
+    }
   }
 
   /**
@@ -2654,27 +2664,6 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId, 
     sum += ClassSize.REFERENCE;// pointer to "bytes"
     sum += ClassSize.align(ClassSize.ARRAY);// "bytes"
     sum += ClassSize.align(length);// number of bytes of data in the "bytes" array
-    sum += 2 * Bytes.SIZEOF_INT;// offset, length
-    sum += Bytes.SIZEOF_LONG;// memstoreTS
-    return ClassSize.align(sum);
-  }
-
-  /**
-   * This is a hack that should be removed once we don't care about matching
-   * up client- and server-side estimations of cell size. It needed to be
-   * backwards compatible with estimations done by older clients. We need to
-   * pretend that tags never exist and KeyValues aren't serialized with tag
-   * length included. See HBASE-13262 and HBASE-13303
-   */
-  @Deprecated
-  public long heapSizeWithoutTags() {
-    int sum = 0;
-    sum += ClassSize.OBJECT;// the KeyValue object itself
-    sum += ClassSize.REFERENCE;// pointer to "bytes"
-    sum += ClassSize.align(ClassSize.ARRAY);// "bytes"
-    sum += KeyValue.KEYVALUE_INFRASTRUCTURE_SIZE;
-    sum += getKeyLength();
-    sum += getValueLength();
     sum += 2 * Bytes.SIZEOF_INT;// offset, length
     sum += Bytes.SIZEOF_LONG;// memstoreTS
     return ClassSize.align(sum);

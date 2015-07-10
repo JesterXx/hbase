@@ -55,9 +55,9 @@ function tgz_mover {
 
 function deploy {
   MAVEN_OPTS="${mvnopts}" ${mvn} clean install -DskipTests -Prelease
-  MAVEN_OPTS="${mvnopts}" ${mvn} install -DskipTests site assembly:single -Prelease 
+  MAVEN_OPTS="${mvnopts}" ${mvn} install -DskipTests post-site assembly:single -Prelease
   tgz_mover
-  MAVEN_OPTS="${mvnopts}" ${mvn} deploy -DskipTests -Papache-release 
+  MAVEN_OPTS="${mvnopts}" ${mvn} deploy -DskipTests -Papache-release -Prelease
 }
 
 # Build src tarball

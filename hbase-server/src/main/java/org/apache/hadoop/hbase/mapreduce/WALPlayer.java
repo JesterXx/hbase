@@ -45,7 +45,6 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-import org.apache.hadoop.util.GenericOptionsParser;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
@@ -85,6 +84,10 @@ public class WALPlayer extends Configured implements Tool {
   }
 
   private final static String JOB_NAME_CONF_KEY = "mapreduce.job.name";
+
+  protected WALPlayer(final Configuration c) {
+    super(c);
+  }
 
   /**
    * A mapper that just writes out KeyValues.
@@ -208,13 +211,6 @@ public class WALPlayer extends Configured implements Tool {
         }
       }
     }
-  }
-
-  /**
-   * @param conf The {@link Configuration} to use.
-   */
-  public WALPlayer(Configuration conf) {
-    super(conf);
   }
 
   void setupTime(Configuration conf, String option) throws IOException {
@@ -341,12 +337,11 @@ public class WALPlayer extends Configured implements Tool {
 
   @Override
   public int run(String[] args) throws Exception {
-    String[] otherArgs = new GenericOptionsParser(getConf(), args).getRemainingArgs();
-    if (otherArgs.length < 2) {
-      usage("Wrong number of arguments: " + otherArgs.length);
+    if (args.length < 2) {
+      usage("Wrong number of arguments: " + args.length);
       System.exit(-1);
     }
-    Job job = createSubmittableJob(otherArgs);
+    Job job = createSubmittableJob(args);
     return job.waitForCompletion(true) ? 0 : 1;
   }
 }

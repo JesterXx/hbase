@@ -27,8 +27,6 @@ import java.util.List;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
@@ -46,8 +44,6 @@ import org.apache.hadoop.hbase.regionserver.StoreFile.Reader;
  */
 @InterfaceAudience.LimitedPrivate("Coprocessor")
 public class StoreFileScanner implements KeyValueScanner {
-  private static final Log LOG = LogFactory.getLog(HStore.class);
-
   // the reader it comes from:
   private final StoreFile.Reader reader;
   private final HFileScanner hfs;
@@ -139,7 +135,7 @@ public class StoreFileScanner implements KeyValueScanner {
       // only seek if we aren't at the end. cur == null implies 'end'.
       if (cur != null) {
         hfs.next();
-        setCurrentCell(hfs.getKeyValue());
+        setCurrentCell(hfs.getCell());
         if (hasMVCCInfo || this.reader.isBulkLoaded()) {
           skipKVsNewerThanReadpoint();
         }
@@ -158,11 +154,11 @@ public class StoreFileScanner implements KeyValueScanner {
     try {
       try {
         if(!seekAtOrAfter(hfs, key)) {
-          close();
+          this.cur = null;
           return false;
         }
 
-        setCurrentCell(hfs.getKeyValue());
+        setCurrentCell(hfs.getCell());
 
         if (!hasMVCCInfo && this.reader.isBulkLoaded()) {
           return skipKVsNewerThanReadpoint();
@@ -185,10 +181,10 @@ public class StoreFileScanner implements KeyValueScanner {
     try {
       try {
         if (!reseekAtOrAfter(hfs, key)) {
-          close();
+          this.cur = null;
           return false;
         }
-        setCurrentCell(hfs.getKeyValue());
+        setCurrentCell(hfs.getCell());
 
         if (!hasMVCCInfo && this.reader.isBulkLoaded()) {
           return skipKVsNewerThanReadpoint();
@@ -219,9 +215,9 @@ public class StoreFileScanner implements KeyValueScanner {
     Cell startKV = cur;
     while(enforceMVCC
         && cur != null
-        && (cur.getMvccVersion() > readPt)) {
+        && (cur.getSequenceId() > readPt)) {
       hfs.next();
-      setCurrentCell(hfs.getKeyValue());
+      setCurrentCell(hfs.getCell());
       if (this.stopSkippingKVsIfNextRow
           && getComparator().compareRows(cur, startKV) > 0) {
         return false;
@@ -229,7 +225,6 @@ public class StoreFileScanner implements KeyValueScanner {
     }
 
     if (cur == null) {
-      close();
       return false;
     }
 
@@ -237,8 +232,8 @@ public class StoreFileScanner implements KeyValueScanner {
   }
 
   public void close() {
-    // Nothing to close on HFileScanner?
     cur = null;
+    this.hfs.close();
   }
 
   /**
@@ -347,7 +342,7 @@ public class StoreFileScanner implements KeyValueScanner {
         // a higher timestamp than the max timestamp in this file. We know that
         // the next point when we have to consider this file again is when we
         // pass the max timestamp of this file (with the same row/column).
-        setCurrentCell(KeyValueUtil.createFirstOnRowColTS(kv, maxTimestampInFile));
+        setCurrentCell(CellUtil.createFirstOnRowColTS(kv, maxTimestampInFile));
       } else {
         // This will be the case e.g. when we need to seek to the next
         // row/column, and we don't know exactly what they are, so we set the
@@ -365,7 +360,7 @@ public class StoreFileScanner implements KeyValueScanner {
     // key/value and the store scanner will progress to the next column. This
     // is obviously not a "real real" seek, but unlike the fake KV earlier in
     // this method, we want this to be propagated to ScanQueryMatcher.
-    setCurrentCell(KeyValueUtil.createLastOnRowCol(kv));
+    setCurrentCell(CellUtil.createLastOnRowCol(kv));
 
     realSeekDone = true;
     return true;
@@ -421,27 +416,25 @@ public class StoreFileScanner implements KeyValueScanner {
   }
 
   @Override
-  @SuppressWarnings("deprecation")
   public boolean seekToPreviousRow(Cell key) throws IOException {
     try {
       try {
-        KeyValue seekKey = KeyValueUtil.createFirstOnRow(key.getRowArray(), key.getRowOffset(),
-            key.getRowLength());
+        Cell seekKey = CellUtil.createFirstOnRow(key);
         if (seekCount != null) seekCount.incrementAndGet();
         if (!hfs.seekBefore(seekKey)) {
-          close();
+          this.cur = null;
           return false;
         }
-        KeyValue firstKeyOfPreviousRow = KeyValueUtil.createFirstOnRow(hfs.getKeyValue()
-            .getRowArray(), hfs.getKeyValue().getRowOffset(), hfs.getKeyValue().getRowLength());
+        Cell curCell = hfs.getCell();
+        Cell firstKeyOfPreviousRow = CellUtil.createFirstOnRow(curCell);
 
         if (seekCount != null) seekCount.incrementAndGet();
         if (!seekAtOrAfter(hfs, firstKeyOfPreviousRow)) {
-          close();
+          this.cur = null;
           return false;
         }
 
-        setCurrentCell(hfs.getKeyValue());
+        setCurrentCell(hfs.getCell());
         this.stopSkippingKVsIfNextRow = true;
         boolean resultOfSkipKVs;
         try {
@@ -493,5 +486,10 @@ public class StoreFileScanner implements KeyValueScanner {
   @Override
   public Cell getNextIndexedKey() {
     return hfs.getNextIndexedKey();
+  }
+
+  @Override
+  public void shipped() throws IOException {
+    this.hfs.shipped();
   }
 }

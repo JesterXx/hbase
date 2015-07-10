@@ -255,7 +255,7 @@ public final class ProtobufUtil {
    * to flag what follows as a protobuf in hbase.  Prepend these bytes to all content written to
    * znodes, etc.
    * @param bytes Bytes to decorate
-   * @return The passed <code>bytes</codes> with magic prepended (Creates a new
+   * @return The passed <code>bytes</code> with magic prepended (Creates a new
    * byte array that is <code>bytes.length</code> plus {@link ProtobufMagic#PB_MAGIC}.length.
    */
   public static byte [] prependPBMagic(final byte [] bytes) {
@@ -267,22 +267,21 @@ public final class ProtobufUtil {
    * @return True if passed <code>bytes</code> has {@link ProtobufMagic#PB_MAGIC} for a prefix.
    */
   public static boolean isPBMagicPrefix(final byte [] bytes) {
-    if (bytes == null) return false;
-    return isPBMagicPrefix(bytes, 0, bytes.length);
+    return ProtobufMagic.isPBMagicPrefix(bytes);
   }
 
   /**
    * @param bytes Bytes to check.
+   * @param offset offset to start at
+   * @param len length to use
    * @return True if passed <code>bytes</code> has {@link ProtobufMagic#PB_MAGIC} for a prefix.
    */
   public static boolean isPBMagicPrefix(final byte [] bytes, int offset, int len) {
-    if (bytes == null || len < ProtobufMagic.PB_MAGIC.length) return false;
-    return Bytes.compareTo(ProtobufMagic.PB_MAGIC, 0, ProtobufMagic.PB_MAGIC.length,
-      bytes, offset, ProtobufMagic.PB_MAGIC.length) == 0;
+    return ProtobufMagic.isPBMagicPrefix(bytes, offset, len);
   }
 
   /**
-   * @param bytes
+   * @param bytes bytes to check
    * @throws DeserializationException if we are missing the pb magic prefix
    */
   public static void expectPBMagicPrefix(final byte [] bytes) throws DeserializationException {
@@ -293,10 +292,10 @@ public final class ProtobufUtil {
   }
 
   /**
-   * @return Length of {@link ProtobufMagic#PB_MAGIC}
+   * @return Length of {@link ProtobufMagic#lengthOfPBMagic()}
    */
   public static int lengthOfPBMagic() {
-    return ProtobufMagic.PB_MAGIC.length;
+    return ProtobufMagic.lengthOfPBMagic();
   }
 
   /**
@@ -2123,7 +2122,7 @@ public final class ProtobufUtil {
   }
 
   /**
-   * Convert a ListMultimap<String, TablePermission> where key is username
+   * Convert a ListMultimap&lt;String, TablePermission&gt; where key is username
    * to a protobuf UserPermission
    *
    * @param perm the list of user and table permissions
@@ -2377,7 +2376,7 @@ public final class ProtobufUtil {
 
   /**
    * Convert a protobuf UserTablePermissions to a
-   * ListMultimap<String, TablePermission> where key is username.
+   * ListMultimap&lt;String, TablePermission&gt; where key is username.
    *
    * @param proto the protobuf UserPermission
    * @return the converted UserPermission
@@ -2908,6 +2907,10 @@ public final class ProtobufUtil {
     switch (proto) {
       case REQUEST_NUMBER: return ThrottleType.REQUEST_NUMBER;
       case REQUEST_SIZE:   return ThrottleType.REQUEST_SIZE;
+      case WRITE_NUMBER:   return ThrottleType.WRITE_NUMBER;
+      case WRITE_SIZE:     return ThrottleType.WRITE_SIZE;
+      case READ_NUMBER:    return ThrottleType.READ_NUMBER;
+      case READ_SIZE:      return ThrottleType.READ_SIZE;
     }
     throw new RuntimeException("Invalid ThrottleType " + proto);
   }
@@ -2922,6 +2925,10 @@ public final class ProtobufUtil {
     switch (type) {
       case REQUEST_NUMBER: return QuotaProtos.ThrottleType.REQUEST_NUMBER;
       case REQUEST_SIZE:   return QuotaProtos.ThrottleType.REQUEST_SIZE;
+      case WRITE_NUMBER:   return QuotaProtos.ThrottleType.WRITE_NUMBER;
+      case WRITE_SIZE:     return QuotaProtos.ThrottleType.WRITE_SIZE;
+      case READ_NUMBER:    return QuotaProtos.ThrottleType.READ_NUMBER;
+      case READ_SIZE:      return QuotaProtos.ThrottleType.READ_SIZE;
     }
     throw new RuntimeException("Invalid ThrottleType " + type);
   }

@@ -41,14 +41,14 @@ import com.google.protobuf.InvalidProtocolBufferException;
  * Since you can use Filter Lists as children of Filter Lists, you can create a
  * hierarchy of filters to be evaluated.
  *
- * <br/>
+ * <br>
  * {@link Operator#MUST_PASS_ALL} evaluates lazily: evaluation stops as soon as one filter does
  * not include the KeyValue.
  *
- * <br/>
+ * <br>
  * {@link Operator#MUST_PASS_ONE} evaluates non-lazily: all filters are always evaluated.
  *
- * <br/>
+ * <br>
  * Defaults to {@link Operator#MUST_PASS_ALL}.
  */
 @InterfaceAudience.Public
@@ -198,6 +198,25 @@ final public class FilterList extends Filter {
   }
 
   @Override
+  public boolean filterRowKey(Cell firstRowCell) throws IOException {
+    boolean flag = (this.operator == Operator.MUST_PASS_ONE) ? true : false;
+    int listize = filters.size();
+    for (int i = 0; i < listize; i++) {
+      Filter filter = filters.get(i);
+      if (this.operator == Operator.MUST_PASS_ALL) {
+        if (filter.filterAllRemaining() || filter.filterRowKey(firstRowCell)) {
+          flag = true;
+        }
+      } else if (this.operator == Operator.MUST_PASS_ONE) {
+        if (!filter.filterAllRemaining() && !filter.filterRowKey(firstRowCell)) {
+          flag = false;
+        }
+      }
+    }
+    return flag;
+  }
+
+  @Override
   public boolean filterAllRemaining() throws IOException {
     int listize = filters.size();
     for (int i = 0; i < listize; i++) {
@@ -296,7 +315,7 @@ final public class FilterList extends Filter {
    * Filters that never filter by modifying the returned List of Cells can
    * inherit this implementation that does nothing.
    *
-   * @inheritDoc
+   * {@inheritDoc}
    */
   @Override
   public void filterRowCells(List<Cell> cells) throws IOException {

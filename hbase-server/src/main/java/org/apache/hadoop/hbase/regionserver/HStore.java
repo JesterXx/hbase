@@ -55,7 +55,6 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.KeyValue;
-import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.KeyValue.KVComparator;
 import org.apache.hadoop.hbase.Tag;
@@ -112,16 +111,6 @@ import com.google.common.collect.Sets;
  * services to manage sets of StoreFiles.  One of the most important of those
  * services is compaction services where files are aggregated once they pass
  * a configurable threshold.
- *
- * <p>The only thing having to do with logs that Store needs to deal with is
- * the reconstructionLog.  This is a segment of an HRegion's log that might
- * NOT be present upon startup.  If the param is NULL, there's nothing to do.
- * If the param is non-NULL, we need to process the log to reconstruct
- * a TreeMap that might not have been written to disk before the process
- * died.
- *
- * <p>It's assumed that after this constructor returns, the reconstructionLog
- * file will be deleted (by whoever has instantiated the Store).
  *
  * <p>Locking and transactions are handled at a higher level.  This API should
  * not be called directly but by an HRegion manager.
@@ -744,9 +733,9 @@ public class HStore implements Store {
 
       byte[] firstKey = reader.getFirstRowKey();
       Preconditions.checkState(firstKey != null, "First key can not be null");
-      byte[] lk = reader.getLastKey();
+      Cell lk = reader.getLastKey();
       Preconditions.checkState(lk != null, "Last key can not be null");
-      byte[] lastKey =  KeyValueUtil.createKeyValueFromKey(lk).getRow();
+      byte[] lastKey =  CellUtil.cloneRow(lk);
 
       LOG.debug("HFile bounds: first=" + Bytes.toStringBinary(firstKey) +
           " last=" + Bytes.toStringBinary(lastKey));
@@ -773,7 +762,7 @@ public class HStore implements Store {
         HFileScanner scanner = reader.getScanner(false, false, false);
         scanner.seekTo();
         do {
-          Cell cell = scanner.getKeyValue();
+          Cell cell = scanner.getCell();
           if (prevCell != null) {
             if (comparator.compareRows(prevCell, cell) > 0) {
               throw new InvalidHFileException("Previous row is greater than"
@@ -921,8 +910,7 @@ public class HStore implements Store {
   }
 
   /**
-   * Write out current snapshot.  Presumes {@link #snapshot()} has been called
-   * previously.
+   * Write out current snapshot.  Presumes {@link #snapshot()} has been called previously.
    * @param logCacheFlushId flush sequence number
    * @param snapshot
    * @param status
@@ -1782,7 +1770,6 @@ public class HStore implements Store {
    */
   static boolean isCellTTLExpired(final Cell cell, final long oldestTimestamp, final long now) {
     // Do not create an Iterator or Tag objects unless the cell actually has tags.
-    // TODO: This check for tags is really expensive. We decode an int for key and value. Costs.
     if (cell.getTagsLength() > 0) {
       // Look for a TTL tag first. Use it instead of the family setting if
       // found. If a cell has multiple TTLs, resolve the conflict by using the
@@ -1871,19 +1858,17 @@ public class HStore implements Store {
       return false;
     }
     // TODO: Cache these keys rather than make each time?
-    byte [] fk = r.getFirstKey();
-    if (fk == null) return false;
-    KeyValue firstKV = KeyValueUtil.createKeyValueFromKey(fk, 0, fk.length);
-    byte [] lk = r.getLastKey();
-    KeyValue lastKV = KeyValueUtil.createKeyValueFromKey(lk, 0, lk.length);
-    KeyValue firstOnRow = state.getTargetKey();
+    Cell  firstKV = r.getFirstKey();
+    if (firstKV == null) return false;
+    Cell lastKV = r.getLastKey();
+    Cell firstOnRow = state.getTargetKey();
     if (this.comparator.compareRows(lastKV, firstOnRow) < 0) {
       // If last key in file is not of the target table, no candidates in this
       // file.  Return.
       if (!state.isTargetTable(lastKV)) return false;
       // If the row we're looking for is past the end of file, set search key to
       // last key. TODO: Cache last and first key rather than make each time.
-      firstOnRow = new KeyValue(lastKV.getRow(), HConstants.LATEST_TIMESTAMP);
+      firstOnRow = CellUtil.createFirstOnRow(lastKV);
     }
     // Get a scanner that caches blocks and that uses pread.
     HFileScanner scanner = r.getScanner(true, true, false);
@@ -1894,11 +1879,11 @@ public class HStore implements Store {
     if (walkForwardInSingleRow(scanner, firstOnRow, state)) return true;
     // If here, need to start backing up.
     while (scanner.seekBefore(firstOnRow)) {
-      Cell kv = scanner.getKeyValue();
+      Cell kv = scanner.getCell();
       if (!state.isTargetTable(kv)) break;
       if (!state.isBetterCandidate(kv)) break;
       // Make new first on row.
-      firstOnRow = new KeyValue(kv.getRow(), HConstants.LATEST_TIMESTAMP);
+      firstOnRow = CellUtil.createFirstOnRow(kv);
       // Seek scanner.  If can't seek it, break.
       if (!seekToScanner(scanner, firstOnRow, firstKV)) return false;
       // If we find something, break;
@@ -1916,10 +1901,10 @@ public class HStore implements Store {
    * @throws IOException
    */
   private boolean seekToScanner(final HFileScanner scanner,
-                                final KeyValue firstOnRow,
-                                final KeyValue firstKV)
+                                final Cell firstOnRow,
+                                final Cell firstKV)
       throws IOException {
-    KeyValue kv = firstOnRow;
+    Cell kv = firstOnRow;
     // If firstOnRow < firstKV, set to firstKV
     if (this.comparator.compareRows(firstKV, firstOnRow) == 0) kv = firstKV;
     int result = scanner.seekTo(kv);
@@ -1937,12 +1922,12 @@ public class HStore implements Store {
    * @throws IOException
    */
   private boolean walkForwardInSingleRow(final HFileScanner scanner,
-                                         final KeyValue firstOnRow,
+                                         final Cell firstOnRow,
                                          final GetClosestRowBeforeTracker state)
       throws IOException {
     boolean foundCandidate = false;
     do {
-      Cell kv = scanner.getKeyValue();
+      Cell kv = scanner.getCell();
       // If we are not in the row, skip.
       if (this.comparator.compareRows(kv, firstOnRow) < 0) continue;
       // Did we go beyond the target row? If so break.

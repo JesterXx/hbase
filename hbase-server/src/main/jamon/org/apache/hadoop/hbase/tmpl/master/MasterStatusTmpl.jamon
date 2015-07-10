@@ -215,7 +215,7 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
         <section>
             <& BackupMasterStatusTmpl; master = master &>
         </section>
-	</%if>    
+	</%if>
 
 
         <section>
@@ -241,7 +241,7 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
                 </tr>
                 <tr>
                     <td>HBase Source Checksum</td>
-                    <td><% org.apache.hadoop.util.VersionInfo.getSrcChecksum() %></td>
+                    <td><% org.apache.hadoop.hbase.util.VersionInfo.getSrcChecksum() %></td>
                     <td>HBase source MD5 checksum</td>
                 </tr>
                 <tr>
@@ -253,6 +253,21 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
                     <td>Hadoop Compiled</td>
                     <td><% org.apache.hadoop.util.VersionInfo.getDate() %>, <% org.apache.hadoop.util.VersionInfo.getUser() %></td>
                     <td>When Hadoop version was compiled and by whom</td>
+                </tr>
+                <tr>
+                    <td>Hadoop Source Checksum</td>
+                    <td><% org.apache.hadoop.util.VersionInfo.getSrcChecksum() %></td>
+                    <td>Hadoop source MD5 checksum</td>
+                </tr>
+                <tr>
+                    <td>ZooKeeper Client Version</td>
+                    <td><% org.apache.zookeeper.Version.getVersion() %>, revision=<% org.apache.zookeeper.Version.getRevision() %></td>
+                    <td>ZooKeeper client version and revision</td>
+                </tr>
+                <tr>
+                    <td>ZooKeeper Client Compiled</td>
+                    <td><% org.apache.zookeeper.Version.getBuildDate() %></td>
+                    <td>When ZooKeeper client version was compiled</td>
                 </tr>
                 <tr>
                     <td>Zookeeper Quorum</td>
@@ -355,7 +370,7 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
 	 } else if (tableName.equals(VisibilityConstants.LABELS_TABLE_NAME)){
 	     description = "The hbase:labels table holds information about visibility labels";
         } else {
-            description = "The .NAMESPACE. table holds information about namespaces.";
+            description = "The hbase:namespace table holds information about namespaces.";
         }
     </%java>
     <td><% description %></td>
@@ -367,7 +382,7 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
 
 <%def userTables>
 <%java>
-   HTableDescriptor[] tables = null; 
+   HTableDescriptor[] tables = null;
    try (Admin admin = master.getConnection().getAdmin()) {
      tables = master.isInitialized() ? admin.listTables() : null;
    }
@@ -389,9 +404,10 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
     </tr>
     <%for HTableDescriptor htDesc : tables%>
     <%java>
+      TableName tableName = htDesc.getTableName();
       Map<RegionState.State, List<HRegionInfo>> tableRegions =
           master.getAssignmentManager().getRegionStates()
-            .getRegionByStateOfTable(htDesc.getTableName());
+            .getRegionByStateOfTable(tableName);
       int openRegionsCount = tableRegions.get(RegionState.State.OPEN).size();
       int offlineRegionsCount = tableRegions.get(RegionState.State.OFFLINE).size();
       int splitRegionsCount = tableRegions.get(RegionState.State.SPLIT).size();
@@ -407,10 +423,10 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
                      - splitRegionsCount;
     </%java>
     <tr>
-        <td><% htDesc.getTableName().getNamespaceAsString() %></td>
-        <td><a href=table.jsp?name=<% htDesc.getTableName().getNameAsString() %>><% htDesc.getTableName().getQualifierAsString() %></a> </td>
+        <td><% tableName.getNamespaceAsString() %></td>
+        <td><a href=table.jsp?name=<% tableName.getNameAsString() %>><% tableName.getQualifierAsString() %></a> </td>
         <%if (frags != null) %>
-            <td align="center"><% frags.get(htDesc.getTableName().getNameAsString()) != null ? frags.get(htDesc.getTableName().getQualifierAsString()).intValue() + "%" : "n/a" %></td>
+            <td align="center"><% frags.get(tableName.getNameAsString()) != null ? frags.get(tableName.getNameAsString()).intValue() + "%" : "n/a" %></td>
         </%if>
         <td><% openRegionsCount %></td>
         <td><% offlineRegionsCount %></td>

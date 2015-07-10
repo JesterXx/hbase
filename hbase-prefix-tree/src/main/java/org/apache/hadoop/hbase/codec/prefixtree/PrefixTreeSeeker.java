@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
-import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.SettableSequenceId;
@@ -63,8 +62,9 @@ public class PrefixTreeSeeker implements EncodedSeeker {
   }
 
   /**
+   * <p>
    * Currently unused.
-   * <p/>
+   * </p>
    * TODO performance leak. should reuse the searchers. hbase does not currently have a hook where
    * this can be called
    */
@@ -74,8 +74,8 @@ public class PrefixTreeSeeker implements EncodedSeeker {
 
 
   @Override
-  public ByteBuffer getKeyDeepCopy() {
-    return KeyValueUtil.copyKeyToNewByteBuffer(ptSearcher.current());
+  public Cell getKey() {
+    return ptSearcher.current();
   }
 
 
@@ -110,12 +110,13 @@ public class PrefixTreeSeeker implements EncodedSeeker {
   }
 
   /**
+   * <p>
    * Currently unused.
-   * <p/>
+   * </p><p>
    * A nice, lightweight reference, though the underlying cell is transient. This method may return
    * the same reference to the backing PrefixTreeCell repeatedly, while other implementations may
    * return a different reference for each Cell.
-   * <p/>
+   * </p>
    * The goal will be to transition the upper layers of HBase, like Filters and KeyValueHeap, to
    * use this method instead of the getKeyValue() methods above.
    */
@@ -141,19 +142,6 @@ public class PrefixTreeSeeker implements EncodedSeeker {
   private static final boolean USE_POSITION_BEFORE = false;
 
   /*
-   * Support both of these options since the underlying PrefixTree supports both.  Possibly
-   * expand the EncodedSeeker to utilize them both.
-   */
-
-  protected int seekToOrBeforeUsingPositionAtOrBefore(byte[] keyOnlyBytes, int offset, int length,
-      boolean seekBefore){
-    // this does a deep copy of the key byte[] because the CellSearcher interface wants a Cell
-    KeyValue kv = new KeyValue.KeyOnlyKeyValue(keyOnlyBytes, offset, length);
-
-    return seekToOrBeforeUsingPositionAtOrBefore(kv, seekBefore);
-  }
-
-  /*
    * Support both of these options since the underlying PrefixTree supports
    * both. Possibly expand the EncodedSeeker to utilize them both.
    */
@@ -172,14 +160,6 @@ public class PrefixTreeSeeker implements EncodedSeeker {
     }
 
     return 1;
-  }
-
-  protected int seekToOrBeforeUsingPositionAtOrAfter(byte[] keyOnlyBytes, int offset, int length,
-      boolean seekBefore) {
-    // this does a deep copy of the key byte[] because the CellSearcher
-    // interface wants a Cell
-    KeyValue kv = new KeyValue.KeyOnlyKeyValue(keyOnlyBytes, offset, length);
-    return seekToOrBeforeUsingPositionAtOrAfter(kv, seekBefore);
   }
 
   protected int seekToOrBeforeUsingPositionAtOrAfter(Cell kv, boolean seekBefore) {
@@ -223,10 +203,8 @@ public class PrefixTreeSeeker implements EncodedSeeker {
 
   @Override
   public int compareKey(CellComparator comparator, Cell key) {
-    // can't optimize this, make a copy of the key
-    ByteBuffer bb = getKeyDeepCopy();
     return comparator.compare(key,
-        new KeyValue.KeyOnlyKeyValue(bb.array(), bb.arrayOffset(), bb.limit()));
+        ptSearcher.current());
   }
   /**
    * Cloned version of the PrefixTreeCell where except the value part, the rest

@@ -252,9 +252,8 @@ public class SplitLogManager {
       logDirs + " for serverName=" + serverNames);
     FileStatus[] logfiles = getFileList(logDirs, filter);
     status.setStatus("Checking directory contents...");
-    LOG.debug("Scheduling batch of logs to split");
     SplitLogCounters.tot_mgr_log_split_batch_start.incrementAndGet();
-    LOG.info("started splitting " + logfiles.length + " logs in " + logDirs +
+    LOG.info("Started splitting " + logfiles.length + " logs in " + logDirs +
       " for " + serverNames);
     long t = EnvironmentEdgeManager.currentTime();
     long totalSize = 0;
@@ -300,8 +299,8 @@ public class SplitLogManager {
       } catch (IOException ioe) {
         FileStatus[] files = fs.listStatus(logDir);
         if (files != null && files.length > 0) {
-          LOG.warn("returning success without actually splitting and "
-              + "deleting all the log files in path " + logDir);
+          LOG.warn("Returning success without actually splitting and "
+              + "deleting all the log files in path " + logDir + ": " + files, ioe);
         } else {
           LOG.warn("Unable to delete log src dir. Ignoring. " + logDir, ioe);
         }
@@ -406,16 +405,15 @@ public class SplitLogManager {
       // the function is only used in WALEdit direct replay mode
       return;
     }
+    if (serverNames == null || serverNames.isEmpty()) return;
 
     Set<String> recoveredServerNameSet = new HashSet<String>();
-    if (serverNames != null) {
-      for (ServerName tmpServerName : serverNames) {
-        recoveredServerNameSet.add(tmpServerName.getServerName());
-      }
+    for (ServerName tmpServerName : serverNames) {
+      recoveredServerNameSet.add(tmpServerName.getServerName());
     }
-
+   
+    this.recoveringRegionLock.lock();
     try {
-      this.recoveringRegionLock.lock();
       ((BaseCoordinatedStateManager) server.getCoordinatedStateManager())
           .getSplitLogManagerCoordination().removeRecoveringRegions(recoveredServerNameSet,
             isMetaRecovery);

@@ -62,6 +62,7 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.TreeMultimap;
 import com.google.protobuf.ServiceException;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
@@ -76,6 +77,7 @@ import org.apache.hadoop.fs.permission.FsAction;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hbase.Abortable;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.ClusterStatus;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
@@ -85,7 +87,6 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
-import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.RegionLocations;
@@ -134,7 +135,6 @@ import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
-import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.ReflectionUtils;
@@ -199,7 +199,13 @@ public class HBaseFsck extends Configured implements Closeable {
   private static final String TO_BE_LOADED = "to_be_loaded";
   private static final String HBCK_LOCK_FILE = "hbase-hbck.lock";
   private static final int DEFAULT_MAX_LOCK_FILE_ATTEMPTS = 5;
-  private static final int DEFAULT_LOCK_FILE_ATTEMPT_SLEEP_INTERVAL = 200;
+  private static final int DEFAULT_LOCK_FILE_ATTEMPT_SLEEP_INTERVAL = 200; // milliseconds
+  private static final int DEFAULT_LOCK_FILE_ATTEMPT_MAX_SLEEP_TIME = 5000; // milliseconds
+  // We have to set the timeout value > HdfsConstants.LEASE_SOFTLIMIT_PERIOD.
+  // In HADOOP-2.6 and later, the Namenode proxy now created with custom RetryPolicy for
+  // AlreadyBeingCreatedException which is implies timeout on this operations up to
+  // HdfsConstants.LEASE_SOFTLIMIT_PERIOD (60 seconds).
+  private static final int DEFAULT_WAIT_FOR_LOCK_TIMEOUT = 80; // seconds
 
   /**********************
    * Internal resources
@@ -317,9 +323,11 @@ public class HBaseFsck extends Configured implements Closeable {
     int numThreads = conf.getInt("hbasefsck.numthreads", MAX_NUM_THREADS);
     executor = new ScheduledThreadPoolExecutor(numThreads, Threads.newDaemonThreadFactory("hbasefsck"));
     lockFileRetryCounterFactory = new RetryCounterFactory(
-        getConf().getInt("hbase.hbck.lockfile.attempts", DEFAULT_MAX_LOCK_FILE_ATTEMPTS), 
-        getConf().getInt("hbase.hbck.lockfile.attempt.sleep.interval",
-            DEFAULT_LOCK_FILE_ATTEMPT_SLEEP_INTERVAL));
+      getConf().getInt("hbase.hbck.lockfile.attempts", DEFAULT_MAX_LOCK_FILE_ATTEMPTS),
+      getConf().getInt(
+        "hbase.hbck.lockfile.attempt.sleep.interval", DEFAULT_LOCK_FILE_ATTEMPT_SLEEP_INTERVAL),
+      getConf().getInt(
+        "hbase.hbck.lockfile.attempt.maxsleeptime", DEFAULT_LOCK_FILE_ATTEMPT_MAX_SLEEP_TIME));
   }
 
   /**
@@ -338,10 +346,13 @@ public class HBaseFsck extends Configured implements Closeable {
     errors = getErrorReporter(getConf());
     this.executor = exec;
     lockFileRetryCounterFactory = new RetryCounterFactory(
-        getConf().getInt("hbase.hbck.lockfile.attempts", DEFAULT_MAX_LOCK_FILE_ATTEMPTS),
-        getConf().getInt("hbase.hbck.lockfile.attempt.sleep.interval", DEFAULT_LOCK_FILE_ATTEMPT_SLEEP_INTERVAL));
+      getConf().getInt("hbase.hbck.lockfile.attempts", DEFAULT_MAX_LOCK_FILE_ATTEMPTS),
+      getConf().getInt(
+        "hbase.hbck.lockfile.attempt.sleep.interval", DEFAULT_LOCK_FILE_ATTEMPT_SLEEP_INTERVAL),
+      getConf().getInt(
+        "hbase.hbck.lockfile.attempt.maxsleeptime", DEFAULT_LOCK_FILE_ATTEMPT_MAX_SLEEP_TIME));
   }
-  
+
   private class FileLockCallable implements Callable<FSDataOutputStream> {
     RetryCounter retryCounter;
 
@@ -411,7 +422,8 @@ public class HBaseFsck extends Configured implements Closeable {
     ExecutorService executor = Executors.newFixedThreadPool(1);
     FutureTask<FSDataOutputStream> futureTask = new FutureTask<FSDataOutputStream>(callable);
     executor.execute(futureTask);
-    final int timeoutInSeconds = 30;
+    final int timeoutInSeconds = getConf().getInt(
+      "hbase.hbck.lockfile.maxwaittime", DEFAULT_WAIT_FOR_LOCK_TIMEOUT);
     FSDataOutputStream stream = null;
     try {
       stream = futureTask.get(timeoutInSeconds, TimeUnit.SECONDS);
@@ -435,9 +447,10 @@ public class HBaseFsck extends Configured implements Closeable {
       RetryCounter retryCounter = lockFileRetryCounterFactory.create();
       do {
         try {
-          IOUtils.closeStream(hbckOutFd);
+          IOUtils.closeQuietly(hbckOutFd);
           FSUtils.delete(FSUtils.getCurrentFileSystem(getConf()),
               HBCK_LOCK_PATH, true);
+          LOG.info("Finishing hbck");
           return;
         } catch (IOException ioe) {
           LOG.info("Failed to delete " + HBCK_LOCK_PATH + ", try="
@@ -454,7 +467,6 @@ public class HBaseFsck extends Configured implements Closeable {
           }
         }
       } while (retryCounter.shouldRetry());
-
     }
   }
 
@@ -477,17 +489,18 @@ public class HBaseFsck extends Configured implements Closeable {
     // Make sure to cleanup the lock
     hbckLockCleanup.set(true);
 
-    // Add a shutdown hook to this thread, incase user tries to
+    // Add a shutdown hook to this thread, in case user tries to
     // kill the hbck with a ctrl-c, we want to cleanup the lock so that
     // it is available for further calls
     Runtime.getRuntime().addShutdownHook(new Thread() {
       @Override
       public void run() {
-        IOUtils.closeStream(HBaseFsck.this);
+        IOUtils.closeQuietly(HBaseFsck.this);
         unlockHbck();
       }
     });
-    LOG.debug("Launching hbck");
+
+    LOG.info("Launching hbck");
 
     connection = (ClusterConnection)ConnectionFactory.createConnection(getConf());
     admin = connection.getAdmin();
@@ -598,7 +611,7 @@ public class HBaseFsck extends Configured implements Closeable {
    * region servers and the masters.  It makes each region's state in HDFS, in
    * hbase:meta, and deployments consistent.
    *
-   * @return If > 0 , number of errors detected, if < 0 there was an unrecoverable
+   * @return If &gt; 0 , number of errors detected, if &lt; 0 there was an unrecoverable
    * error.  If 0, we have a clean hbase.
    */
   public int onlineConsistencyRepair() throws IOException, KeeperException,
@@ -711,8 +724,11 @@ public class HBaseFsck extends Configured implements Closeable {
       unlockHbck();
     } catch (Exception io) {
       LOG.warn(io);
+    } finally {
+      IOUtils.closeQuietly(admin);
+      IOUtils.closeQuietly(meta);
+      IOUtils.closeQuietly(connection);
     }
-    IOUtils.cleanup(null, admin, meta, connection);
   }
 
   private static class RegionBoundariesInformation {
@@ -760,13 +776,13 @@ public class HBaseFsck extends Configured implements Closeable {
                   getConf()), getConf());
               if ((reader.getFirstKey() != null)
                   && ((storeFirstKey == null) || (comparator.compare(storeFirstKey,
-                      reader.getFirstKey()) > 0))) {
-                storeFirstKey = reader.getFirstKey();
+                      ((KeyValue.KeyOnlyKeyValue) reader.getFirstKey()).getKey()) > 0))) {
+                storeFirstKey = ((KeyValue.KeyOnlyKeyValue)reader.getFirstKey()).getKey();
               }
               if ((reader.getLastKey() != null)
                   && ((storeLastKey == null) || (comparator.compare(storeLastKey,
-                      reader.getLastKey())) < 0)) {
-                storeLastKey = reader.getLastKey();
+                      ((KeyValue.KeyOnlyKeyValue)reader.getLastKey()).getKey())) < 0)) {
+                storeLastKey = ((KeyValue.KeyOnlyKeyValue)reader.getLastKey()).getKey();
               }
               reader.close();
             }
@@ -774,7 +790,7 @@ public class HBaseFsck extends Configured implements Closeable {
         }
         currentRegionBoundariesInformation.metaFirstKey = regionInfo.getStartKey();
         currentRegionBoundariesInformation.metaLastKey = regionInfo.getEndKey();
-        currentRegionBoundariesInformation.storesFirstKey = keyOnly(storeFirstKey);
+        currentRegionBoundariesInformation.storesFirstKey = storeFirstKey;
         currentRegionBoundariesInformation.storesLastKey = keyOnly(storeLastKey);
         if (currentRegionBoundariesInformation.metaFirstKey.length == 0)
           currentRegionBoundariesInformation.metaFirstKey = null;
@@ -863,10 +879,10 @@ public class HBaseFsck extends Configured implements Closeable {
           CacheConfig cacheConf = new CacheConfig(getConf());
           hf = HFile.createReader(fs, hfile.getPath(), cacheConf, getConf());
           hf.loadFileInfo();
-          KeyValue startKv = KeyValueUtil.createKeyValueFromKey(hf.getFirstKey());
+          Cell startKv = hf.getFirstKey();
           start = startKv.getRow();
-          KeyValue endKv = KeyValueUtil.createKeyValueFromKey(hf.getLastKey());
-          end = endKv.getRow();
+          Cell endKv = hf.getLastKey();
+          end = CellUtil.cloneRow(endKv);
         } catch (IOException ioe) {
           LOG.warn("Problem reading orphan file " + hfile + ", skipping");
           continue;
@@ -3315,7 +3331,11 @@ public class HBaseFsck extends Configured implements Closeable {
   KeeperException {
     undeployRegions(hi);
     ZooKeeperWatcher zkw = createZooKeeperWatcher();
-    ZKUtil.deleteNode(zkw, zkw.getZNodeForReplica(hi.metaEntry.getReplicaId()));
+    try {
+      ZKUtil.deleteNode(zkw, zkw.getZNodeForReplica(hi.metaEntry.getReplicaId()));
+    } finally {
+      zkw.close();
+    }
   }
 
   private void assignMetaReplica(int replicaId)
@@ -4660,7 +4680,7 @@ public class HBaseFsck extends Configured implements Closeable {
         setRetCode(code);
       }
     } finally {
-      IOUtils.cleanup(null, this);
+      IOUtils.closeQuietly(this);
     }
     return this;
   }

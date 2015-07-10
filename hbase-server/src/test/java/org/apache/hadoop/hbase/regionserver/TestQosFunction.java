@@ -1,4 +1,3 @@
-package org.apache.hadoop.hbase.regionserver;
 /**
 * Licensed to the Apache Software Foundation (ASF) under one
 * or more contributor license agreements.  See the NOTICE file
@@ -16,12 +15,17 @@ package org.apache.hadoop.hbase.regionserver;
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
+
+package org.apache.hadoop.hbase.regionserver;
+
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.when;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.security.Superusers;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
@@ -39,6 +43,8 @@ import org.mockito.Mockito;
 
 import com.google.protobuf.Message;
 
+import java.io.IOException;
+
 /**
  * Basic test that qos function is sort of working; i.e. a change in method naming style
  * over in pb doesn't break it.
@@ -55,17 +61,19 @@ public class TestQosFunction {
       new AnnotationReadingPriorityFunction(rpcServices, RSRpcServices.class);
 
     // Set method name in pb style with the method name capitalized.
-    checkMethod("ReplicateWALEntry", HConstants.REPLICATION_QOS, qosFunction);
+    checkMethod(conf, "ReplicateWALEntry", HConstants.REPLICATION_QOS, qosFunction);
     // Set method name in pb style with the method name capitalized.
-    checkMethod("OpenRegion", HConstants.ADMIN_QOS, qosFunction);
+    checkMethod(conf, "OpenRegion", HConstants.ADMIN_QOS, qosFunction);
     // Check multi works.
-    checkMethod("Multi", HConstants.NORMAL_QOS, qosFunction, MultiRequest.getDefaultInstance());
+    checkMethod(conf, "Multi", HConstants.NORMAL_QOS, qosFunction,
+        MultiRequest.getDefaultInstance());
 
   }
 
   @Test
-  public void testRegionInTransition() {
+  public void testRegionInTransition() throws IOException {
     Configuration conf = HBaseConfiguration.create();
+    Superusers.initialize(conf);
     RSRpcServices rpcServices = Mockito.mock(RSRpcServices.class);
     when(rpcServices.getConfiguration()).thenReturn(conf);
 
@@ -103,19 +111,21 @@ public class TestQosFunction {
             .addTransition(normalTransition).build();
 
     final String reportFuncName = "ReportRegionStateTransition";
-    checkMethod(reportFuncName, HConstants.SYSTEMTABLE_QOS, qosFunction, metaTransitionRequest);
-    checkMethod(reportFuncName, HConstants.NORMAL_QOS, qosFunction, normalTransitionRequest);
+    checkMethod(conf, reportFuncName, HConstants.SYSTEMTABLE_QOS, qosFunction,
+        metaTransitionRequest);
+    checkMethod(conf, reportFuncName, HConstants.NORMAL_QOS, qosFunction, normalTransitionRequest);
   }
 
-  private void checkMethod(final String methodName, final int expected,
+  private void checkMethod(Configuration conf, final String methodName, final int expected,
       final AnnotationReadingPriorityFunction qosf) {
-    checkMethod(methodName, expected, qosf, null);
+    checkMethod(conf, methodName, expected, qosf, null);
   }
 
-  private void checkMethod(final String methodName, final int expected,
+  private void checkMethod(Configuration conf, final String methodName, final int expected,
       final AnnotationReadingPriorityFunction qosf, final Message param) {
     RequestHeader.Builder builder = RequestHeader.newBuilder();
     builder.setMethodName(methodName);
-    assertEquals(methodName, expected, qosf.getPriority(builder.build(), param));
+    assertEquals(methodName, expected, qosf.getPriority(builder.build(), param,
+      User.createUserForTesting(conf, "someuser", new String[]{"somegroup"})));
   }
 }

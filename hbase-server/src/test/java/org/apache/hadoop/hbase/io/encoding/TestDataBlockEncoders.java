@@ -30,13 +30,16 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.codec.prefixtree.PrefixTreeSeeker;
 import org.apache.hadoop.hbase.io.compress.Compression;
 import org.apache.hadoop.hbase.io.hfile.HFileBlock.Writer.BufferGrabbingByteArrayOutputStream;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
@@ -212,7 +215,7 @@ public class TestDataBlockEncoders {
     for (boolean seekBefore : new boolean[] { false, true }) {
       checkSeekingConsistency(encodedSeekers, seekBefore, sampleKv.get(sampleKv.size() - 1));
       KeyValue midKv = sampleKv.get(sampleKv.size() / 2);
-      KeyValue lastMidKv =KeyValueUtil.createLastOnRowCol(midKv);
+      Cell lastMidKv =CellUtil.createLastOnRowCol(midKv);
       checkSeekingConsistency(encodedSeekers, seekBefore, lastMidKv);
     }
   }
@@ -300,25 +303,33 @@ public class TestDataBlockEncoders {
       DataBlockEncoder encoder = encoding.getEncoder();
       ByteBuffer encodedBuffer = encodeKeyValues(encoding, sampleKv,
           getEncodingContext(Compression.Algorithm.NONE, encoding));
-      ByteBuffer keyBuffer = encoder.getFirstKeyInBlock(encodedBuffer);
+      Cell key = encoder.getFirstKeyCellInBlock(encodedBuffer);
+      KeyValue keyBuffer = null;
+      if(encoding == DataBlockEncoding.PREFIX_TREE) {
+        // This is not an actual case. So the Prefix tree block is not loaded in case of Prefix_tree
+        // Just copy only the key part to form a keyBuffer
+        byte[] serializedKey = CellUtil.getCellKeySerializedAsKeyValueKey(key);
+        keyBuffer = KeyValueUtil.createKeyValueFromKey(serializedKey);
+      } else {
+        keyBuffer = KeyValueUtil.ensureKeyValue(key);
+      }
       KeyValue firstKv = sampleKv.get(0);
-      if (0 != Bytes.compareTo(keyBuffer.array(), keyBuffer.arrayOffset(), keyBuffer.limit(),
-          firstKv.getBuffer(), firstKv.getKeyOffset(), firstKv.getKeyLength())) {
+      if (0 != CellComparator.COMPARATOR.compareKeyIgnoresMvcc(keyBuffer, firstKv)) {
 
         int commonPrefix = 0;
-        int length = Math.min(keyBuffer.limit(), firstKv.getKeyLength());
+        int length = Math.min(keyBuffer.getKeyLength(), firstKv.getKeyLength());
         while (commonPrefix < length
-            && keyBuffer.array()[keyBuffer.arrayOffset() + commonPrefix] == firstKv.getBuffer()[firstKv
-                .getKeyOffset() + commonPrefix]) {
+            && keyBuffer.getBuffer()[keyBuffer.getKeyOffset() + commonPrefix] == firstKv
+                .getBuffer()[firstKv.getKeyOffset() + commonPrefix]) {
           commonPrefix++;
         }
         fail(String.format("Bug in '%s' commonPrefix %d", encoder.toString(), commonPrefix));
       }
     }
   }
-  
+
   private void checkSeekingConsistency(List<DataBlockEncoder.EncodedSeeker> encodedSeekers,
-      boolean seekBefore, KeyValue keyValue) {
+      boolean seekBefore, Cell keyValue) {
     ByteBuffer expectedKeyValue = null;
     ByteBuffer expectedKey = null;
     ByteBuffer expectedValue = null;
@@ -327,7 +338,13 @@ public class TestDataBlockEncoders {
       seeker.rewind();
 
       ByteBuffer actualKeyValue = seeker.getKeyValueBuffer();
-      ByteBuffer actualKey = seeker.getKeyDeepCopy();
+      ByteBuffer actualKey = null;
+      if (seeker instanceof PrefixTreeSeeker) {
+        byte[] serializedKey = CellUtil.getCellKeySerializedAsKeyValueKey(seeker.getKey());
+        actualKey = ByteBuffer.wrap(KeyValueUtil.createKeyValueFromKey(serializedKey).getKey());
+      } else {
+        actualKey = ByteBuffer.wrap(((KeyValue) seeker.getKey()).getKey());
+      }
       ByteBuffer actualValue = seeker.getValueShallowCopy();
 
       if (expectedKeyValue != null) {

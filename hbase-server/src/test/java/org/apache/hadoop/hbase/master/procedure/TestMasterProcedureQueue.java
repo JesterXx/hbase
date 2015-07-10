@@ -18,14 +18,16 @@
 
 package org.apache.hadoop.hbase.master.procedure;
 
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -38,7 +40,6 @@ import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.testclassification.MasterTests;
 
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -64,6 +65,56 @@ public class TestMasterProcedureQueue {
   @After
   public void tearDown() throws IOException {
     assertEquals(0, queue.size());
+  }
+
+  @Test
+  public void testConcurrentCreateDelete() throws Exception {
+    final MasterProcedureQueue procQueue = queue;
+    final TableName table = TableName.valueOf("testtb");
+    final AtomicBoolean running = new AtomicBoolean(true);
+    final AtomicBoolean failure = new AtomicBoolean(false);
+    Thread createThread = new Thread() {
+      @Override
+      public void run() {
+        try {
+          while (running.get() && !failure.get()) {
+            if (procQueue.tryAcquireTableExclusiveLock(table, "create")) {
+              procQueue.releaseTableExclusiveLock(table);
+            }
+          }
+        } catch (Throwable e) {
+          LOG.error("create failed", e);
+          failure.set(true);
+        }
+      }
+    };
+
+    Thread deleteThread = new Thread() {
+      @Override
+      public void run() {
+        try {
+          while (running.get() && !failure.get()) {
+            if (procQueue.tryAcquireTableExclusiveLock(table, "delete")) {
+              procQueue.releaseTableExclusiveLock(table);
+            }
+            procQueue.markTableAsDeleted(table);
+          }
+        } catch (Throwable e) {
+          LOG.error("delete failed", e);
+          failure.set(true);
+        }
+      }
+    };
+
+    createThread.start();
+    deleteThread.start();
+    for (int i = 0; i < 100 && running.get() && !failure.get(); ++i) {
+      Thread.sleep(100);
+    }
+    running.set(false);
+    createThread.join();
+    deleteThread.join();
+    assertEquals(false, failure.get());
   }
 
   /**
@@ -119,12 +170,12 @@ public class TestMasterProcedureQueue {
     // fetch item and take a lock
     assertEquals(1, queue.poll().longValue());
     // take the xlock
-    assertTrue(queue.tryAcquireTableWrite(tableName, "write"));
+    assertTrue(queue.tryAcquireTableExclusiveLock(tableName, "write"));
     // table can't be deleted because we have the lock
     assertEquals(0, queue.size());
     assertFalse(queue.markTableAsDeleted(tableName));
     // release the xlock
-    queue.releaseTableWrite(tableName);
+    queue.releaseTableExclusiveLock(tableName);
     // complete the table deletion
     assertTrue(queue.markTableAsDeleted(tableName));
   }
@@ -150,7 +201,7 @@ public class TestMasterProcedureQueue {
       // fetch item and take a lock
       assertEquals(i, queue.poll().longValue());
       // take the rlock
-      assertTrue(queue.tryAcquireTableRead(tableName, "read " + i));
+      assertTrue(queue.tryAcquireTableSharedLock(tableName, "read " + i));
       // table can't be deleted because we have locks and/or items in the queue
       assertFalse(queue.markTableAsDeleted(tableName));
     }
@@ -159,7 +210,7 @@ public class TestMasterProcedureQueue {
       // table can't be deleted because we have locks
       assertFalse(queue.markTableAsDeleted(tableName));
       // release the rlock
-      queue.releaseTableRead(tableName);
+      queue.releaseTableSharedLock(tableName);
     }
 
     // there are no items and no lock in the queeu
@@ -188,47 +239,47 @@ public class TestMasterProcedureQueue {
     // Fetch the 1st item and take the write lock
     Long procId = queue.poll();
     assertEquals(1, procId.longValue());
-    assertEquals(true, queue.tryAcquireTableWrite(tableName, "write " + procId));
+    assertEquals(true, queue.tryAcquireTableExclusiveLock(tableName, "write " + procId));
 
     // Fetch the 2nd item and verify that the lock can't be acquired
     assertEquals(null, queue.poll());
 
     // Release the write lock and acquire the read lock
-    queue.releaseTableWrite(tableName);
+    queue.releaseTableExclusiveLock(tableName);
 
     // Fetch the 2nd item and take the read lock
     procId = queue.poll();
     assertEquals(2, procId.longValue());
-    assertEquals(true, queue.tryAcquireTableRead(tableName, "read " + procId));
+    assertEquals(true, queue.tryAcquireTableSharedLock(tableName, "read " + procId));
 
     // Fetch the 3rd item and verify that the lock can't be acquired
     procId = queue.poll();
     assertEquals(3, procId.longValue());
-    assertEquals(false, queue.tryAcquireTableWrite(tableName, "write " + procId));
+    assertEquals(false, queue.tryAcquireTableExclusiveLock(tableName, "write " + procId));
 
     // release the rdlock of item 2 and take the wrlock for the 3d item
-    queue.releaseTableRead(tableName);
-    assertEquals(true, queue.tryAcquireTableWrite(tableName, "write " + procId));
+    queue.releaseTableSharedLock(tableName);
+    assertEquals(true, queue.tryAcquireTableExclusiveLock(tableName, "write " + procId));
 
     // Fetch 4th item and verify that the lock can't be acquired
     assertEquals(null, queue.poll());
 
     // Release the write lock and acquire the read lock
-    queue.releaseTableWrite(tableName);
+    queue.releaseTableExclusiveLock(tableName);
 
     // Fetch the 4th item and take the read lock
     procId = queue.poll();
     assertEquals(4, procId.longValue());
-    assertEquals(true, queue.tryAcquireTableRead(tableName, "read " + procId));
+    assertEquals(true, queue.tryAcquireTableSharedLock(tableName, "read " + procId));
 
     // Fetch the 4th item and take the read lock
     procId = queue.poll();
     assertEquals(5, procId.longValue());
-    assertEquals(true, queue.tryAcquireTableRead(tableName, "read " + procId));
+    assertEquals(true, queue.tryAcquireTableSharedLock(tableName, "read " + procId));
 
     // Release 4th and 5th read-lock
-    queue.releaseTableRead(tableName);
-    queue.releaseTableRead(tableName);
+    queue.releaseTableSharedLock(tableName);
+    queue.releaseTableSharedLock(tableName);
 
     // remove table queue
     assertEquals(0, queue.size());
@@ -354,11 +405,11 @@ public class TestMasterProcedureQueue {
           case CREATE:
           case DELETE:
           case EDIT:
-            avail = queue.tryAcquireTableWrite(proc.getTableName(),
+            avail = queue.tryAcquireTableExclusiveLock(proc.getTableName(),
               "op="+ proc.getTableOperationType());
             break;
           case READ:
-            avail = queue.tryAcquireTableRead(proc.getTableName(),
+            avail = queue.tryAcquireTableSharedLock(proc.getTableName(),
               "op="+ proc.getTableOperationType());
             break;
         }
@@ -375,10 +426,10 @@ public class TestMasterProcedureQueue {
         case CREATE:
         case DELETE:
         case EDIT:
-          queue.releaseTableWrite(proc.getTableName());
+          queue.releaseTableExclusiveLock(proc.getTableName());
           break;
         case READ:
-          queue.releaseTableRead(proc.getTableName());
+          queue.releaseTableSharedLock(proc.getTableName());
           break;
       }
     }

@@ -56,6 +56,7 @@ import org.apache.hadoop.hbase.Waiter.Predicate;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.BufferedMutator;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Consistency;
@@ -64,6 +65,7 @@ import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
+import org.apache.hadoop.hbase.client.HRegionLocator;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.RegionLocator;
@@ -583,8 +585,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
       true, null, null, hosts, null);
 
     // Set this just-started cluster as our filesystem.
-    FileSystem fs = this.dfsCluster.getFileSystem();
-    FSUtils.setFsDefault(this.conf, new Path(fs.getUri()));
+    setFs();
 
     // Wait for the cluster to be totally up
     this.dfsCluster.waitClusterUp();
@@ -595,6 +596,14 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return this.dfsCluster;
   }
 
+  private void setFs() throws IOException {
+    if(this.dfsCluster == null){
+      LOG.info("Skipping setting fs because dfsCluster is null");
+      return;
+    }
+    FileSystem fs = this.dfsCluster.getFileSystem();
+    FSUtils.setFsDefault(this.conf, new Path(fs.getUri()));
+  }
 
   public MiniDFSCluster startMiniDFSCluster(int servers, final  String racks[], String hosts[])
       throws Exception {
@@ -965,7 +974,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
 
     // Bring up mini dfs cluster. This spews a bunch of warnings about missing
     // scheme. Complaints are 'Scheme is undefined for build/test/data/dfs/name1'.
-    startMiniDFSCluster(numDataNodes, dataNodeHosts);
+    if(this.dfsCluster == null) {
+      dfsCluster = startMiniDFSCluster(numDataNodes, dataNodeHosts);
+    }
 
     // Start up a zk cluster.
     if (this.zkCluster == null) {
@@ -1026,6 +1037,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
 
     getHBaseAdmin(); // create immediately the hbaseAdmin
     LOG.info("Minicluster is up");
+
+    // Set the hbase.fs.tmp.dir config to make sure that we have some default value. This is
+    // for tests that do not read hbase-defaults.xml
+    setHBaseFsTmpDir();
+
     return (MiniHBaseCluster)this.hbaseCluster;
   }
 
@@ -1187,6 +1203,17 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return createRootDir(false);
   }
 
+
+  private void setHBaseFsTmpDir() throws IOException {
+    String hbaseFsTmpDirInString = this.conf.get("hbase.fs.tmp.dir");
+    if (hbaseFsTmpDirInString == null) {
+      this.conf.set("hbase.fs.tmp.dir",  getDataTestDirOnTestFS("hbase-staging").toString());
+      LOG.info("Setting hbase.fs.tmp.dir to " + this.conf.get("hbase.fs.tmp.dir"));
+    } else {
+      LOG.info("The hbase.fs.tmp.dir is set to " + hbaseFsTmpDirInString);
+    }
+  }
+
   /**
    * Flushes all caches in the mini hbase cluster
    * @throws IOException
@@ -1237,10 +1264,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param family
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[])}
    */
-  public HTable createTable(byte[] tableName, byte[] family)
-  throws IOException{
-    return createTable(TableName.valueOf(tableName), new byte[][]{family});
+  @Deprecated
+  public HTable createTable(byte[] tableName, byte[] family) throws IOException {
+    return createTable(TableName.valueOf(tableName), new byte[][] { family });
   }
 
   /**
@@ -1296,7 +1324,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param families
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][])}
    */
+  @Deprecated
   public HTable createTable(byte[] tableName, byte[][] families)
   throws IOException {
     return createTable(tableName, families,
@@ -1339,16 +1369,18 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return createTable(tableName, families, splitKeys, new Configuration(getConfiguration()));
   }
 
-  public HTable createTable(byte[] tableName, byte[][] families,
-      int numVersions, byte[] startKey, byte[] endKey, int numRegions) throws IOException {
-    return createTable(TableName.valueOf(tableName), families, numVersions,
-        startKey, endKey, numRegions);
+  @Deprecated
+  public HTable createTable(byte[] tableName, byte[][] families, int numVersions, byte[] startKey,
+      byte[] endKey, int numRegions) throws IOException {
+    return createTable(TableName.valueOf(tableName), families, numVersions, startKey, endKey,
+        numRegions);
   }
 
-  public HTable createTable(String tableName, byte[][] families,
-      int numVersions, byte[] startKey, byte[] endKey, int numRegions) throws IOException {
-    return createTable(TableName.valueOf(tableName), families, numVersions,
-        startKey, endKey, numRegions);
+  @Deprecated
+  public HTable createTable(String tableName, byte[][] families, int numVersions, byte[] startKey,
+      byte[] endKey, int numRegions) throws IOException {
+    return createTable(TableName.valueOf(tableName), families, numVersions, startKey, endKey,
+        numRegions);
   }
 
   public HTable createTable(TableName tableName, byte[][] families,
@@ -1427,10 +1459,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param c Configuration to use
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][])}
    */
-  public HTable createTable(TableName tableName, byte[][] families,
-      final Configuration c)
-  throws IOException {
+  @Deprecated
+  public HTable createTable(TableName tableName, byte[][] families, final Configuration c)
+      throws IOException {
     return createTable(tableName, families, (byte[][]) null, c);
   }
 
@@ -1455,10 +1488,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param c Configuration to use
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][])}
    */
-  public HTable createTable(byte[] tableName, byte[][] families,
-      final Configuration c)
-  throws IOException {
+  @Deprecated
+  public HTable createTable(byte[] tableName, byte[][] families, final Configuration c)
+      throws IOException {
     HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(tableName));
     for(byte[] family : families) {
       HColumnDescriptor hcd = new HColumnDescriptor(family);
@@ -1480,7 +1514,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param numVersions
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][], int)}
    */
+  @Deprecated
   public HTable createTable(TableName tableName, byte[][] families,
       final Configuration c, int numVersions)
   throws IOException {
@@ -1504,14 +1540,15 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param numVersions
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][], int)}
    */
+  @Deprecated
   public HTable createTable(byte[] tableName, byte[][] families,
       final Configuration c, int numVersions)
   throws IOException {
     HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(tableName));
-    for(byte[] family : families) {
-      HColumnDescriptor hcd = new HColumnDescriptor(family)
-          .setMaxVersions(numVersions);
+    for (byte[] family : families) {
+      HColumnDescriptor hcd = new HColumnDescriptor(family).setMaxVersions(numVersions);
       desc.addFamily(hcd);
     }
     getHBaseAdmin().createTable(desc);
@@ -1525,7 +1562,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param numVersions
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[], int)}
    */
+  @Deprecated
   public HTable createTable(byte[] tableName, byte[] family, int numVersions)
   throws IOException {
     return createTable(tableName, new byte[][]{family}, numVersions);
@@ -1551,10 +1590,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param numVersions
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][], int)}
    */
-  public HTable createTable(byte[] tableName, byte[][] families,
-      int numVersions)
-  throws IOException {
+  @Deprecated
+  public HTable createTable(byte[] tableName, byte[][] families, int numVersions)
+      throws IOException {
     return createTable(TableName.valueOf(tableName), families, numVersions);
   }
 
@@ -1566,9 +1606,8 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @return An HTable instance for the created table.
    * @throws IOException
    */
-  public HTable createTable(TableName tableName, byte[][] families,
-      int numVersions)
-  throws IOException {
+  public HTable createTable(TableName tableName, byte[][] families, int numVersions)
+      throws IOException {
     return createTable(tableName, families, numVersions, (byte[][]) null);
   }
 
@@ -1615,7 +1654,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param blockSize
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][], int, int)}
    */
+  @Deprecated
   public HTable createTable(byte[] tableName, byte[][] families,
     int numVersions, int blockSize) throws IOException {
     return createTable(TableName.valueOf(tableName),
@@ -1653,7 +1694,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param numVersions
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][], int)}
    */
+  @Deprecated
   public HTable createTable(byte[] tableName, byte[][] families,
       int[] numVersions)
   throws IOException {
@@ -1692,7 +1735,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param splitRows
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[], byte[][])}
    */
+  @Deprecated
   public HTable createTable(byte[] tableName, byte[] family, byte[][] splitRows)
     throws IOException{
     return createTable(TableName.valueOf(tableName), family, splitRows);
@@ -1735,7 +1780,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param splitRows
    * @return An HTable instance for the created table.
    * @throws IOException
+   * @deprecated use {@link #createTable(TableName, byte[][], byte[][])}
    */
+  @Deprecated
   public HTable createTable(byte[] tableName, byte[][] families, byte[][] splitRows)
       throws IOException {
     HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(tableName));
@@ -1792,7 +1839,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   /**
    * Drop an existing table
    * @param tableName existing table
+   * @deprecated use {@link #deleteTable(TableName)}
    */
+  @Deprecated
   public void deleteTable(String tableName) throws IOException {
     deleteTable(TableName.valueOf(tableName));
   }
@@ -1800,7 +1849,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   /**
    * Drop an existing table
    * @param tableName existing table
+   * @deprecated use {@link #deleteTable(TableName)}
    */
+  @Deprecated
   public void deleteTable(byte[] tableName) throws IOException {
     deleteTable(TableName.valueOf(tableName));
   }
@@ -1845,9 +1896,27 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   public static final byte [] START_KEY_BYTES = {FIRST_CHAR, FIRST_CHAR, FIRST_CHAR};
   public static final String START_KEY = new String(START_KEY_BYTES, HConstants.UTF8_CHARSET);
 
+  @Deprecated
   public HTableDescriptor createTableDescriptor(final String name,
       final int minVersions, final int versions, final int ttl, KeepDeletedCells keepDeleted) {
-    HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(name));
+    return this.createTableDescriptor(TableName.valueOf(name), minVersions, versions, ttl,
+        keepDeleted);
+  }
+
+  /**
+   * Create a table of name <code>name</code>.
+   * @param name Name to give table.
+   * @return Column descriptor.
+   */
+  @Deprecated
+  public HTableDescriptor createTableDescriptor(final String name) {
+    return createTableDescriptor(TableName.valueOf(name),  HColumnDescriptor.DEFAULT_MIN_VERSIONS,
+        MAXVERSIONS, HConstants.FOREVER, HColumnDescriptor.DEFAULT_KEEP_DELETED);
+  }
+
+  public HTableDescriptor createTableDescriptor(final TableName name,
+      final int minVersions, final int versions, final int ttl, KeepDeletedCells keepDeleted) {
+    HTableDescriptor htd = new HTableDescriptor(name);
     for (byte[] cfName : new byte[][]{ fam1, fam2, fam3 }) {
       htd.addFamily(new HColumnDescriptor(cfName)
           .setMinVersions(minVersions)
@@ -1865,7 +1934,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param name Name to give table.
    * @return Column descriptor.
    */
-  public HTableDescriptor createTableDescriptor(final String name) {
+  public HTableDescriptor createTableDescriptor(final TableName name) {
     return createTableDescriptor(name,  HColumnDescriptor.DEFAULT_MIN_VERSIONS,
         MAXVERSIONS, HConstants.FOREVER, HColumnDescriptor.DEFAULT_KEEP_DELETED);
   }
@@ -1917,11 +1986,33 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @throws IOException
    * @return A region on which you must call
              {@link HBaseTestingUtility#closeRegionAndWAL(HRegion)} when done.
+   * @deprecated use
+   * {@link #createLocalHRegion(TableName, byte[], byte[], boolean, Durability, WAL, byte[]...)}
    */
+  @Deprecated
   public HRegion createLocalHRegion(byte[] tableName, byte[] startKey, byte[] stopKey,
       String callingMethod, Configuration conf, boolean isReadOnly, Durability durability,
       WAL wal, byte[]... families) throws IOException {
-    HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(tableName));
+    return this
+        .createLocalHRegion(TableName.valueOf(tableName), startKey, stopKey, isReadOnly, durability,
+            wal, families);
+  }
+
+  /**
+   * @param tableName
+   * @param startKey
+   * @param stopKey
+   * @param callingMethod
+   * @param conf
+   * @param isReadOnly
+   * @param families
+   * @return A region on which you must call
+   * {@link HBaseTestingUtility#closeRegionAndWAL(HRegion)} when done.
+   * @throws IOException
+   */
+  public HRegion createLocalHRegion(TableName tableName, byte[] startKey, byte[] stopKey,
+      boolean isReadOnly, Durability durability, WAL wal, byte[]... families) throws IOException {
+    HTableDescriptor htd = new HTableDescriptor(tableName);
     htd.setReadOnly(isReadOnly);
     for (byte[] family : families) {
       HColumnDescriptor hcd = new HColumnDescriptor(family);
@@ -1933,6 +2024,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     HRegionInfo info = new HRegionInfo(htd.getTableName(), startKey, stopKey, false);
     return createLocalHRegion(info, htd, wal);
   }
+
   //
   // ==========================================================================
 
@@ -1942,7 +2034,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param tableName existing table
    * @return HTable to that new table
    * @throws IOException
+   * @deprecated use {@link #deleteTableData(TableName)}
    */
+  @Deprecated
   public HTable deleteTableData(byte[] tableName) throws IOException {
     return deleteTableData(TableName.valueOf(tableName));
   }
@@ -1996,11 +2090,15 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   /**
    * Truncate a table using the admin command.
    * Effectively disables, deletes, and recreates the table.
-   * @param tableName table which must exist.
+   *
+   * @param tableName       table which must exist.
    * @param preserveRegions keep the existing split points
    * @return HTable for the new table
+   * @deprecated use {@link #truncateTable(TableName, boolean)}
    */
-  public HTable truncateTable(final byte[] tableName, final boolean preserveRegions) throws IOException {
+  @Deprecated
+  public HTable truncateTable(final byte[] tableName, final boolean preserveRegions)
+      throws IOException {
     return truncateTable(TableName.valueOf(tableName), preserveRegions);
   }
 
@@ -2010,11 +2108,14 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * For previous behavior of issuing row deletes, see
    * deleteTableData.
    * Expressly does not preserve regions of existing table.
+   *
    * @param tableName table which must exist.
    * @return HTable for the new table
+   * @deprecated use {@link #truncateTable(TableName)}
    */
+  @Deprecated
   public HTable truncateTable(final byte[] tableName) throws IOException {
-    return truncateTable(tableName, false);
+    return truncateTable(TableName.valueOf(tableName), false);
   }
 
   /**
@@ -2370,7 +2471,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   public List<HRegionInfo> createMultiRegionsInMeta(final Configuration conf,
       final HTableDescriptor htd, byte [][] startKeys)
   throws IOException {
-    Table meta = (HTable) getConnection().getTable(TableName.META_TABLE_NAME);
+    Table meta = getConnection().getTable(TableName.META_TABLE_NAME);
     Arrays.sort(startKeys, Bytes.BYTES_COMPARATOR);
     List<HRegionInfo> newRegions = new ArrayList<HRegionInfo>(startKeys.length);
     MetaTableAccessor
@@ -2430,7 +2531,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    */
   public List<byte[]> getMetaTableRows() throws IOException {
     // TODO: Redo using MetaTableAccessor class
-    Table t = (HTable) getConnection().getTable(TableName.META_TABLE_NAME);
+    Table t = getConnection().getTable(TableName.META_TABLE_NAME);
     List<byte[]> rows = new ArrayList<byte[]>();
     ResultScanner s = t.getScanner(new Scan());
     for (Result result : s) {
@@ -2966,11 +3067,25 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return dfsCluster;
   }
 
-  public void setDFSCluster(MiniDFSCluster cluster) throws IOException {
-    if (dfsCluster != null && dfsCluster.isClusterUp()) {
-      throw new IOException("DFSCluster is already running! Shut it down first.");
+  public void setDFSCluster(MiniDFSCluster cluster) throws IllegalStateException, IOException {
+    setDFSCluster(cluster, true);
+  }
+
+  /**
+   * Set the MiniDFSCluster
+   * @param cluster cluster to use
+   * @param requireDown require the that cluster not be "up" (MiniDFSCluster#isClusterUp) before
+   * it is set.
+   * @throws IllegalStateException if the passed cluster is up when it is required to be down
+   * @throws IOException if the FileSystem could not be set from the passed dfs cluster
+   */
+  public void setDFSCluster(MiniDFSCluster cluster, boolean requireDown)
+      throws IllegalStateException, IOException {
+    if (dfsCluster != null && requireDown && dfsCluster.isClusterUp()) {
+      throw new IllegalStateException("DFSCluster is already running! Shut it down first.");
     }
     this.dfsCluster = cluster;
+    this.setFs();
   }
 
   public FileSystem getTestFileSystem() throws IOException {
@@ -3471,8 +3586,17 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
             HConstants.DEFAULT_ZOOKEEPER_ZNODE_PARENT);
   }
 
+  @Deprecated
+  public HTable createRandomTable(String tableName, final Collection<String> families,
+      final int maxVersions, final int numColsPerRow, final int numFlushes, final int numRegions,
+      final int numRowsPerFlush) throws IOException, InterruptedException {
+    return (HTable) this
+        .createRandomTable(TableName.valueOf(tableName), families, maxVersions, numColsPerRow,
+            numFlushes, numRegions, numRowsPerFlush);
+  }
+
   /** Creates a random table with the given parameters */
-  public HTable createRandomTable(String tableName,
+  public Table createRandomTable(TableName tableName,
       final Collection<String> families,
       final int maxVersions,
       final int numColsPerRow,
@@ -3502,7 +3626,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     final int splitStartKey = actualStartKey + keysPerRegion;
     final int splitEndKey = actualEndKey - keysPerRegion;
     final String keyFormat = "%08x";
-    final HTable table = createTable(tableName, cfBytes,
+    final Table table = createTable(tableName, cfBytes,
         maxVersions,
         Bytes.toBytes(String.format(keyFormat, splitStartKey)),
         Bytes.toBytes(String.format(keyFormat, splitEndKey)),
@@ -3511,6 +3635,8 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     if (hbaseCluster != null) {
       getMiniHBaseCluster().flushcache(TableName.META_TABLE_NAME);
     }
+
+    BufferedMutator mutator = getConnection().getBufferedMutator(tableName);
 
     for (int iFlush = 0; iFlush < numFlushes; ++iFlush) {
       for (int iRow = 0; iRow < numRowsPerFlush; ++iRow) {
@@ -3536,19 +3662,20 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
         }
 
         if (!put.isEmpty()) {
-          table.put(put);
+          mutator.mutate(put);
         }
 
         if (!del.isEmpty()) {
-          table.delete(del);
+          mutator.mutate(del);
         }
       }
       LOG.info("Initiating flush #" + iFlush + " for table " + tableName);
-      table.flushCommits();
+      mutator.flush();
       if (hbaseCluster != null) {
         getMiniHBaseCluster().flushcache(table.getName());
       }
     }
+    mutator.close();
 
     return table;
   }

@@ -59,7 +59,7 @@ public class HalfStoreFileReader extends StoreFile.Reader {
 
   protected final Cell splitCell;
 
-  private byte[] firstKey = null;
+  private Cell firstKey = null;
 
   private boolean firstKeySeeked = false;
 
@@ -125,7 +125,7 @@ public class HalfStoreFileReader extends StoreFile.Reader {
       final HFileScanner delegate = s;
       public boolean atEnd = false;
 
-      public ByteBuffer getKey() {
+      public Cell getKey() {
         if (atEnd) return null;
         return delegate.getKey();
       }
@@ -148,10 +148,10 @@ public class HalfStoreFileReader extends StoreFile.Reader {
         return delegate.getValueString();
       }
 
-      public Cell getKeyValue() {
+      public Cell getCell() {
         if (atEnd) return null;
 
-        return delegate.getKeyValue();
+        return delegate.getCell();
       }
 
       public boolean next() throws IOException {
@@ -163,9 +163,7 @@ public class HalfStoreFileReader extends StoreFile.Reader {
         }
         // constrain the bottom.
         if (!top) {
-          ByteBuffer bb = getKey();
-          if (getComparator().compare(splitCell, bb.array(), bb.arrayOffset(),
-              bb.limit()) <= 0) {
+          if (getComparator().compare(splitCell, getKey()) <= 0) {
             atEnd = true;
             return false;
           }
@@ -195,10 +193,7 @@ public class HalfStoreFileReader extends StoreFile.Reader {
           return b;
         }
         // Check key.
-        ByteBuffer k = this.delegate.getKey();
-        return (this.delegate.getReader().getComparator().
-          compare(splitCell, k.array(), k.arrayOffset(), k.limit()
-            )) > 0;
+        return (this.delegate.getReader().getComparator().compare(splitCell, getKey())) > 0;
       }
 
       public org.apache.hadoop.hbase.io.hfile.HFile.Reader getReader() {
@@ -262,7 +257,7 @@ public class HalfStoreFileReader extends StoreFile.Reader {
       @Override
       public boolean seekBefore(Cell key) throws IOException {
         if (top) {
-          Cell fk = new KeyValue.KeyOnlyKeyValue(getFirstKey(), 0, getFirstKey().length);
+          Cell fk = getFirstKey();
           if (getComparator().compareKeyIgnoresMvcc(key, fk) <= 0) {
             return false;
           }
@@ -288,6 +283,16 @@ public class HalfStoreFileReader extends StoreFile.Reader {
       public Cell getNextIndexedKey() {
         return null;
       }
+
+      @Override
+      public void close() {
+        this.delegate.close();
+      }
+
+      @Override
+      public void shipped() throws IOException {
+        this.delegate.shipped();
+      }
     };
   }
   
@@ -297,7 +302,7 @@ public class HalfStoreFileReader extends StoreFile.Reader {
   }
   
   @Override
-  public byte[] getLastKey() {
+  public Cell getLastKey() {
     if (top) {
       return super.getLastKey();
     }
@@ -305,7 +310,7 @@ public class HalfStoreFileReader extends StoreFile.Reader {
     HFileScanner scanner = getScanner(true, true);
     try {
       if (scanner.seekBefore(this.splitCell)) {
-        return Bytes.toBytes(scanner.getKey());
+        return scanner.getKey();
       }
     } catch (IOException e) {
       LOG.warn("Failed seekBefore " + Bytes.toStringBinary(this.splitkey), e);
@@ -314,18 +319,18 @@ public class HalfStoreFileReader extends StoreFile.Reader {
   }
 
   @Override
-  public byte[] midkey() throws IOException {
+  public Cell midkey() throws IOException {
     // Returns null to indicate file is not splitable.
     return null;
   }
 
   @Override
-  public byte[] getFirstKey() {
+  public Cell getFirstKey() {
     if (!firstKeySeeked) {
       HFileScanner scanner = getScanner(true, true, false);
       try {
         if (scanner.seekTo()) {
-          this.firstKey = Bytes.toBytes(scanner.getKey());
+          this.firstKey = scanner.getKey();
         }
         firstKeySeeked = true;
       } catch (IOException e) {

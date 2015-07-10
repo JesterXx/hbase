@@ -179,7 +179,7 @@ public class HFilePrettyPrinter extends Configured implements Tool {
     if (cmd.hasOption("w")) {
       String key = cmd.getOptionValue("w");
       if (key != null && key.length() != 0) {
-        row = key.getBytes();
+        row = Bytes.toBytesBinary(key);
         isSeekToRow = true;
       } else {
         System.err.println("Invalid row is specified.");
@@ -336,7 +336,7 @@ public class HFilePrettyPrinter extends Configured implements Tool {
     Set<String> foundMobFiles = new LinkedHashSet<String>(FOUND_MOB_FILES_CACHE_CAPACITY);
     Set<String> missingMobFiles = new LinkedHashSet<String>(MISSING_MOB_FILES_CACHE_CAPACITY);
     do {
-      Cell cell = scanner.getKeyValue();
+      Cell cell = scanner.getCell();
       if (row != null && row.length != 0) {
         int result = CellComparator.COMPARATOR.compareRows(cell, row, 0, row.length);
         if (result > 0) {
@@ -508,7 +508,7 @@ public class HFilePrettyPrinter extends Configured implements Tool {
     }
 
     try {
-      System.out.println("Mid-key: " + Bytes.toStringBinary(reader.midkey()));
+      System.out.println("Mid-key: " + (CellUtil.getCellKeyAsString(reader.midkey())));
     } catch (Exception e) {
       System.out.println ("Unable to retrieve the midkey");
     }
@@ -580,7 +580,7 @@ public class HFilePrettyPrinter extends Configured implements Tool {
       keyLen.update(curRowKeyLength);
 
       if (curRowBytes > maxRowBytes && prevCell != null) {
-        biggestRow = prevCell.getRow();
+        biggestRow = CellUtil.cloneRow(prevCell);
         maxRowBytes = curRowBytes;
       }
 

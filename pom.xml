@@ -156,6 +156,14 @@
       <organizationUrl>http://www.intel.com</organizationUrl>
     </developer>
     <developer>
+      <id>antonov</id>
+      <name>Mikhail Antonov</name>
+      <email>antonov@apache.org</email>
+      <timezone>-8</timezone>
+      <organization>WANdisco</organization>
+      <organizationUrl>http://www.wandisco.com/</organizationUrl>
+    </developer>
+    <developer>
       <id>busbey</id>
       <name>Sean Busbey</name>
       <email>busbey@apache.org</email>
@@ -250,6 +258,14 @@
       <timezone>-8</timezone>
       <organization>Continuuity</organization>
       <organizationUrl>http://www.continuuity.com</organizationUrl>
+    </developer>
+    <developer>
+      <id>esteban</id>
+      <name>Esteban Gutierrez</name>
+      <email>esteban@apache.org</email>
+      <timezone>-8</timezone>
+      <organization>Cloudera</organization>
+      <organizationUrl>http://www.cloudera.com</organizationUrl>
     </developer>
     <developer>
       <id>jmhsieh</id>
@@ -644,7 +660,6 @@
               <exclude>log4j.properties</exclude>
               <exclude>mapred-queues.xml</exclude>
               <exclude>mapred-site.xml</exclude>
-              <exclude>zoo.cfg</exclude>
             </excludes>
           </configuration>
         </plugin>
@@ -757,6 +772,7 @@
               <!--It don't like freebsd license-->
               <exclude>**/src/main/site/resources/css/freebsd_docbook.css</exclude>
               <exclude>dev-support/hbase_docker/README.md</exclude>
+              <exclude>src/main/asciidoc/asciidoctor.css</exclude>
               <!--  exclude source control files -->
               <exclude>.git/**</exclude>
               <exclude>.svn/**</exclude>
@@ -805,6 +821,13 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
+        <dependencies>
+          <dependency>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>extra-enforcer-rules</artifactId>
+            <version>${extra.enforcer.version}</version>
+          </dependency>
+        </dependencies>
         <!-- version set by parent -->
         <configuration>
           <rules>
@@ -1065,6 +1088,7 @@
         </executions>
       </plugin>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-antrun-plugin</artifactId>
         <version>${maven.antrun.version}</version>
         <inherited>false</inherited>
@@ -1176,10 +1200,10 @@
     <bouncycastle.version>1.46</bouncycastle.version>
     <!-- Plugin Dependencies -->
     <maven.assembly.version>2.4</maven.assembly.version>
-    <maven.antrun.version>1.6</maven.antrun.version>
+    <maven.antrun.version>1.8</maven.antrun.version>
     <jamon.plugin.version>2.3.4</jamon.plugin.version>
     <findbugs-annotations>1.3.9-1</findbugs-annotations>
-    <javadoc.version>2.9</javadoc.version>
+    <javadoc.version>2.10.3</javadoc.version>
     <!-- General Packaging -->
     <package.prefix>/usr</package.prefix>
     <package.conf.dir>/etc/hbase</package.conf.dir>
@@ -1220,7 +1244,8 @@
       "-Djava.library.path=${hadoop.library.path};${java.library.path}"
     </hbase-surefire.cygwin-argline>
     <hbase.skip-jacoco>true</hbase.skip-jacoco>
-    <jacoco.version>0.6.2.201302030002</jacoco.version>
+    <jacoco.version>0.7.5.201505241946</jacoco.version>
+    <extra.enforcer.version>1.0-beta-3</extra.enforcer.version>
   </properties>
   <!-- Sorted by groups of dependencies then groupId and artifactId -->
   <dependencyManagement>
@@ -1778,7 +1803,7 @@
                 </goals>
                 <configuration>
                   <tasks>
-                    <echo>Maven Exceution Environment</echo>
+                    <echo>Maven Execution Environment</echo>
                     <echo>MAVEN_OPTS="${env.MAVEN_OPTS}"</echo>
                   </tasks>
                 </configuration>
@@ -1857,6 +1882,24 @@
                 </goals>
               </execution>
             </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-enforcer-plugin</artifactId>
+            <configuration>
+              <rules>
+                <enforceBytecodeVersion>
+                <maxJdkVersion>${compileSource}</maxJdkVersion>
+                <message>HBase has unsupported dependencies.
+  HBase requires that all dependencies be compiled with version ${compileSource} or earlier
+  of the JDK to properly build from source.  You appear to be using a newer dependency. You can use
+  either "mvn -version" or "mvn enforcer:display-info" to verify what version is active.
+  Non-release builds can temporarily build with a newer JDK version by setting the
+  'compileSource' property (eg. mvn -DcompileSource=1.8 clean package).
+                </message>
+              </enforceBytecodeVersion>
+            </rules>
+          </configuration>
           </plugin>
         </plugins>
       </build>
@@ -2706,12 +2749,25 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <version>2.9.1</version>
+        <version>2.10.3</version>
         <configuration>
           <sourceFilesExclude>**/generated</sourceFilesExclude>
-          <excludePackageNames>org.apache.hadoop.hbase.generated.master</excludePackageNames>
+          <excludePackageNames>org.apache.hadoop.hbase.generated.master:org.apache.hadoop.hbase.protobuf.generated</excludePackageNames>
           <maxmemory>2048m</maxmemory>
           <notimestamp>true</notimestamp>
+          <!-- JDK8 javadoc requires test scope transitive dependencies due to our custom doclet -->
+          <additionalDependencies>
+            <additionalDependency>
+              <groupId>org.mockito</groupId>
+              <artifactId>mockito-all</artifactId>
+              <version>${mockito-all.version}</version>
+            </additionalDependency>
+            <additionalDependency>
+              <groupId>org.hamcrest</groupId>
+              <artifactId>hamcrest-core</artifactId>
+              <version>${hamcrest.version}</version>
+            </additionalDependency>
+          </additionalDependencies>
         </configuration>
         <reportSets>
           <reportSet>

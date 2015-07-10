@@ -19,14 +19,18 @@
 package org.apache.hadoop.hbase.procedure2;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.hbase.procedure2.store.ProcedureStore;
+import org.apache.hadoop.hbase.procedure2.store.NoopProcedureStore;
 import org.apache.hadoop.hbase.procedure2.store.wal.WALProcedureStore;
 
 import static org.junit.Assert.assertEquals;
@@ -57,11 +61,11 @@ public class ProcedureTestingUtility {
 
   public static <TEnv> void restart(ProcedureExecutor<TEnv> procExecutor)
       throws Exception {
-    restart(procExecutor, null);
+    restart(procExecutor, null, true);
   }
 
   public static <TEnv> void restart(ProcedureExecutor<TEnv> procExecutor,
-      Runnable beforeStartAction) throws Exception {
+      Runnable beforeStartAction, boolean failOnCorrupted) throws Exception {
     ProcedureStore procStore = procExecutor.getStore();
     int storeThreads = procExecutor.getNumThreads();
     int execThreads = procExecutor.getNumThreads();
@@ -75,7 +79,7 @@ public class ProcedureTestingUtility {
     }
     // re-start
     procStore.start(storeThreads);
-    procExecutor.start(execThreads);
+    procExecutor.start(execThreads, failOnCorrupted);
   }
 
   public static <TEnv> void setKillBeforeStoreUpdate(ProcedureExecutor<TEnv> procExecutor,
@@ -109,8 +113,28 @@ public class ProcedureTestingUtility {
     ProcedureTestingUtility.setToggleKillBeforeStoreUpdate(procExecutor, value);
   }
 
+  public static <TEnv> long submitAndWait(Configuration conf, TEnv env, Procedure<TEnv> proc)
+      throws IOException {
+    NoopProcedureStore procStore = new NoopProcedureStore();
+    ProcedureExecutor<TEnv> procExecutor = new ProcedureExecutor<TEnv>(conf, env, procStore);
+    procStore.start(1);
+    procExecutor.start(1, false);
+    try {
+      return submitAndWait(procExecutor, proc, HConstants.NO_NONCE, HConstants.NO_NONCE);
+    } finally {
+      procStore.stop(false);
+      procExecutor.stop();
+    }
+  }
+
   public static <TEnv> long submitAndWait(ProcedureExecutor<TEnv> procExecutor, Procedure proc) {
-    long procId = procExecutor.submitProcedure(proc);
+    return submitAndWait(procExecutor, proc, HConstants.NO_NONCE, HConstants.NO_NONCE);
+  }
+
+  public static <TEnv> long submitAndWait(ProcedureExecutor<TEnv> procExecutor, Procedure proc,
+      final long nonceGroup,
+      final long nonce) {
+    long procId = procExecutor.submitProcedure(proc, nonceGroup, nonce);
     waitProcedure(procExecutor, procId);
     return procId;
   }
@@ -159,5 +183,35 @@ public class ProcedureTestingUtility {
     Throwable cause = result.getException().getCause();
     assertTrue("expected abort exception, got "+ cause,
         cause instanceof ProcedureAbortedException);
+  }
+
+  public static class TestProcedure extends Procedure<Void> {
+    public TestProcedure() {}
+
+    public TestProcedure(long procId, long parentId) {
+      setProcId(procId);
+      if (parentId > 0) {
+        setParentProcId(parentId);
+      }
+    }
+
+    public void addStackId(final int index) {
+      addStackIndex(index);
+    }
+
+    @Override
+    protected Procedure[] execute(Void env) { return null; }
+
+    @Override
+    protected void rollback(Void env) { }
+
+    @Override
+    protected boolean abort(Void env) { return false; }
+
+    @Override
+    protected void serializeStateData(final OutputStream stream) throws IOException { }
+
+    @Override
+    protected void deserializeStateData(final InputStream stream) throws IOException { }
   }
 }

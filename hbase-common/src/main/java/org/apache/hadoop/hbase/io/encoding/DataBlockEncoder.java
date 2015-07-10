@@ -83,14 +83,14 @@ public interface DataBlockEncoder {
       throws IOException;
 
   /**
-   * Return first key in block. Useful for indexing. Typically does not make
+   * Return first key in block as a cell. Useful for indexing. Typically does not make
    * a deep copy but returns a buffer wrapping a segment of the actual block's
    * byte array. This is because the first key in block is usually stored
    * unencoded.
    * @param block encoded block we want index, the position will not change
-   * @return First key in block.
+   * @return First key in block as a cell.
    */
-  ByteBuffer getFirstKeyInBlock(ByteBuffer block);
+  Cell getFirstKeyCellInBlock(ByteBuffer block);
 
   /**
    * Create a HFileBlock seeker which find KeyValues within a block.
@@ -140,11 +140,11 @@ public interface DataBlockEncoder {
     void setCurrentBuffer(ByteBuffer buffer);
 
     /**
-     * Does a deep copy of the key at the current position. A deep copy is
-     * necessary because buffers are reused in the decoder.
+     * From the current position creates a cell using the key part
+     * of the current buffer
      * @return key at current position
      */
-    ByteBuffer getKeyDeepCopy();
+    Cell getKey();
 
     /**
      * Does a shallow copy of the value at the current position. A shallow
@@ -153,8 +153,9 @@ public interface DataBlockEncoder {
      * @return value at current position
      */
     ByteBuffer getValueShallowCopy();
-
-    /** @return key value at current position with position set to limit */
+    
+    //TODO : to be removed - currently used in testcases only
+    /** @return a key value buffer with the position set at the beginning of the buffer */
     ByteBuffer getKeyValueBuffer();
 
     /**

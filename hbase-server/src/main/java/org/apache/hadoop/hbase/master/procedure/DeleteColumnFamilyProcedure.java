@@ -81,7 +81,8 @@ public class DeleteColumnFamilyProcedure
   }
 
   @Override
-  protected Flow executeFromState(final MasterProcedureEnv env, DeleteColumnFamilyState state) {
+  protected Flow executeFromState(final MasterProcedureEnv env, DeleteColumnFamilyState state)
+      throws InterruptedException {
     if (isTraceEnabled()) {
       LOG.trace(this + " execute state=" + state);
     }
@@ -114,7 +115,7 @@ public class DeleteColumnFamilyProcedure
       default:
         throw new UnsupportedOperationException(this + " unhandled state=" + state);
       }
-    } catch (InterruptedException|IOException e) {
+    } catch (IOException e) {
       if (!isRollbackSupported(state)) {
         // We reach a state that cannot be rolled back. We just need to keep retry.
         LOG.warn("Error trying to delete the column family " + getColumnFamilyName()
@@ -200,14 +201,14 @@ public class DeleteColumnFamilyProcedure
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
     if (!env.isInitialized()) return false;
-    return env.getProcedureQueue().tryAcquireTableWrite(
+    return env.getProcedureQueue().tryAcquireTableExclusiveLock(
       tableName,
       EventType.C_M_DELETE_FAMILY.toString());
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseTableWrite(tableName);
+    env.getProcedureQueue().releaseTableExclusiveLock(tableName);
   }
 
   @Override
@@ -282,6 +283,11 @@ public class DeleteColumnFamilyProcedure
     if (!unmodifiedHTableDescriptor.hasFamily(familyName)) {
       throw new InvalidFamilyOperationException("Family '" + getColumnFamilyName()
           + "' does not exist, so it cannot be deleted");
+    }
+
+    if (unmodifiedHTableDescriptor.getColumnFamilies().length == 1) {
+      throw new InvalidFamilyOperationException("Family '" + getColumnFamilyName()
+        + "' is the only column family in the table, so it cannot be deleted");
     }
   }
 

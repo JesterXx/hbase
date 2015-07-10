@@ -24,14 +24,10 @@ import static com.google.common.base.Preconditions.checkPositionIndex;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.Charset;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Collection;
@@ -56,8 +52,6 @@ import sun.misc.Unsafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
-
-import org.apache.hadoop.hbase.util.Bytes.LexicographicalComparerHolder.UnsafeComparer;
 
 /**
  * Utility class that handles byte arrays, conversions to/from other types,
@@ -648,7 +642,7 @@ public class Bytes implements Comparable<Bytes> {
     if (off + len > b.length) len = b.length - off;
     for (int i = off; i < off + len ; ++i) {
       int ch = b[i] & 0xFF;
-      if ( (ch >= '0' && ch <= '9')
+      if ((ch >= '0' && ch <= '9')
           || (ch >= 'A' && ch <= 'Z')
           || (ch >= 'a' && ch <= 'z')
           || " `~!@#$%^&*()-_=+[]{}|;:'\",.<>/?".indexOf(ch) >= 0) {
@@ -795,8 +789,8 @@ public class Bytes implements Comparable<Bytes> {
     if (length != SIZEOF_LONG || offset + length > bytes.length) {
       throw explainWrongLengthOrOffset(bytes, offset, length, SIZEOF_LONG);
     }
-    if (UnsafeComparer.isAvailable()) {
-      return toLongUnsafe(bytes, offset);
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.toLong(bytes, offset);
     } else {
       long l = 0;
       for(int i = offset; i < offset + length; i++) {
@@ -836,8 +830,8 @@ public class Bytes implements Comparable<Bytes> {
       throw new IllegalArgumentException("Not enough room to put a long at"
           + " offset " + offset + " in a " + bytes.length + " byte array");
     }
-    if (UnsafeComparer.isAvailable()) {
-      return putLongUnsafe(bytes, offset, val);
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.putLong(bytes, offset, val);
     } else {
       for(int i = offset + 7; i > offset; i--) {
         bytes[i] = (byte) val;
@@ -854,15 +848,11 @@ public class Bytes implements Comparable<Bytes> {
    * @param offset position in the array
    * @param val long to write out
    * @return incremented offset
+   * @deprecated As of release 2.0.0, this will be removed in HBase 3.0.0.
    */
-  public static int putLongUnsafe(byte[] bytes, int offset, long val)
-  {
-    if (UnsafeComparer.littleEndian) {
-      val = Long.reverseBytes(val);
-    }
-    UnsafeComparer.theUnsafe.putLong(bytes, (long) offset +
-      UnsafeComparer.BYTE_ARRAY_BASE_OFFSET , val);
-    return offset + SIZEOF_LONG;
+  @Deprecated
+  public static int putLongUnsafe(byte[] bytes, int offset, long val) {
+    return UnsafeAccess.putLong(bytes, offset, val);
   }
 
   /**
@@ -991,8 +981,8 @@ public class Bytes implements Comparable<Bytes> {
     if (length != SIZEOF_INT || offset + length > bytes.length) {
       throw explainWrongLengthOrOffset(bytes, offset, length, SIZEOF_INT);
     }
-    if (UnsafeComparer.isAvailable()) {
-      return toIntUnsafe(bytes, offset);
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.toInt(bytes, offset);
     } else {
       int n = 0;
       for(int i = offset; i < (offset + length); i++) {
@@ -1008,15 +998,11 @@ public class Bytes implements Comparable<Bytes> {
    * @param bytes byte array
    * @param offset offset into array
    * @return the int value
+   * @deprecated As of release 2.0.0, this will be removed in HBase 3.0.0.
    */
+  @Deprecated
   public static int toIntUnsafe(byte[] bytes, int offset) {
-    if (UnsafeComparer.littleEndian) {
-      return Integer.reverseBytes(UnsafeComparer.theUnsafe.getInt(bytes,
-        (long) offset + UnsafeComparer.BYTE_ARRAY_BASE_OFFSET));
-    } else {
-      return UnsafeComparer.theUnsafe.getInt(bytes,
-        (long) offset + UnsafeComparer.BYTE_ARRAY_BASE_OFFSET);
-    }
+    return UnsafeAccess.toInt(bytes, offset);
   }
 
   /**
@@ -1024,15 +1010,11 @@ public class Bytes implements Comparable<Bytes> {
    * @param bytes byte array
    * @param offset offset into array
    * @return the short value
+   * @deprecated As of release 2.0.0, this will be removed in HBase 3.0.0.
    */
+  @Deprecated
   public static short toShortUnsafe(byte[] bytes, int offset) {
-    if (UnsafeComparer.littleEndian) {
-      return Short.reverseBytes(UnsafeComparer.theUnsafe.getShort(bytes,
-        (long) offset + UnsafeComparer.BYTE_ARRAY_BASE_OFFSET));
-    } else {
-      return UnsafeComparer.theUnsafe.getShort(bytes,
-        (long) offset + UnsafeComparer.BYTE_ARRAY_BASE_OFFSET);
-    }
+    return UnsafeAccess.toShort(bytes, offset);
   }
 
   /**
@@ -1040,15 +1022,11 @@ public class Bytes implements Comparable<Bytes> {
    * @param bytes byte array
    * @param offset offset into array
    * @return the long value
+   * @deprecated As of release 2.0.0, this will be removed in HBase 3.0.0.
    */
+  @Deprecated
   public static long toLongUnsafe(byte[] bytes, int offset) {
-    if (UnsafeComparer.littleEndian) {
-      return Long.reverseBytes(UnsafeComparer.theUnsafe.getLong(bytes,
-        (long) offset + UnsafeComparer.BYTE_ARRAY_BASE_OFFSET));
-    } else {
-      return UnsafeComparer.theUnsafe.getLong(bytes,
-        (long) offset + UnsafeComparer.BYTE_ARRAY_BASE_OFFSET);
-    }
+    return UnsafeAccess.toLong(bytes, offset);
   }
 
   /**
@@ -1087,8 +1065,8 @@ public class Bytes implements Comparable<Bytes> {
       throw new IllegalArgumentException("Not enough room to put an int at"
           + " offset " + offset + " in a " + bytes.length + " byte array");
     }
-    if (UnsafeComparer.isAvailable()) {
-      return putIntUnsafe(bytes, offset, val);
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.putInt(bytes, offset, val);
     } else {
       for(int i= offset + 3; i > offset; i--) {
         bytes[i] = (byte) val;
@@ -1105,15 +1083,11 @@ public class Bytes implements Comparable<Bytes> {
    * @param offset position in the array
    * @param val int to write out
    * @return incremented offset
+   * @deprecated As of release 2.0.0, this will be removed in HBase 3.0.0.
    */
-  public static int putIntUnsafe(byte[] bytes, int offset, int val)
-  {
-    if (UnsafeComparer.littleEndian) {
-      val = Integer.reverseBytes(val);
-    }
-    UnsafeComparer.theUnsafe.putInt(bytes, (long) offset +
-      UnsafeComparer.BYTE_ARRAY_BASE_OFFSET , val);
-    return offset + SIZEOF_INT;
+  @Deprecated
+  public static int putIntUnsafe(byte[] bytes, int offset, int val) {
+    return UnsafeAccess.putInt(bytes, offset, val);
   }
 
   /**
@@ -1161,8 +1135,8 @@ public class Bytes implements Comparable<Bytes> {
     if (length != SIZEOF_SHORT || offset + length > bytes.length) {
       throw explainWrongLengthOrOffset(bytes, offset, length, SIZEOF_SHORT);
     }
-    if (UnsafeComparer.isAvailable()) {
-      return toShortUnsafe(bytes, offset);
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.toShort(bytes, offset);
     } else {
       short n = 0;
       n ^= bytes[offset] & 0xFF;
@@ -1199,8 +1173,8 @@ public class Bytes implements Comparable<Bytes> {
       throw new IllegalArgumentException("Not enough room to put a short at"
           + " offset " + offset + " in a " + bytes.length + " byte array");
     }
-    if (UnsafeComparer.isAvailable()) {
-      return putShortUnsafe(bytes, offset, val);
+    if (UnsafeAccess.isAvailable()) {
+      return UnsafeAccess.putShort(bytes, offset, val);
     } else {
       bytes[offset+1] = (byte) val;
       val >>= 8;
@@ -1215,15 +1189,11 @@ public class Bytes implements Comparable<Bytes> {
    * @param offset position in the array
    * @param val short to write out
    * @return incremented offset
+   * @deprecated As of release 2.0.0, this will be removed in HBase 3.0.0.
    */
-  public static int putShortUnsafe(byte[] bytes, int offset, short val)
-  {
-    if (UnsafeComparer.littleEndian) {
-      val = Short.reverseBytes(val);
-    }
-    UnsafeComparer.theUnsafe.putShort(bytes, (long) offset +
-      UnsafeComparer.BYTE_ARRAY_BASE_OFFSET , val);
-    return offset + SIZEOF_SHORT;
+  @Deprecated
+  public static int putShortUnsafe(byte[] bytes, int offset, short val) {
+    return UnsafeAccess.putShort(bytes, offset, val);
   }
 
   /**
@@ -1377,7 +1347,7 @@ public class Bytes implements Comparable<Bytes> {
    * @param offset Offset into array at which vint begins.
    * @throws java.io.IOException e
    * @return deserialized long from buffer.
-   * @deprecated Use {@link #readAsVLong(byte[], int)} instead.
+   * @deprecated Use {@link #readAsVLong(byte[],int)} instead.
    */
   @Deprecated
   public static long readVLong(final byte [] buffer, final int offset)
@@ -1409,7 +1379,7 @@ public class Bytes implements Comparable<Bytes> {
   /**
    * @param left left operand
    * @param right right operand
-   * @return 0 if equal, < 0 if left is less than right, etc.
+   * @return 0 if equal, &lt; 0 if left is less than right, etc.
    */
   public static int compareTo(final byte [] left, final byte [] right) {
     return LexicographicalComparerHolder.BEST_COMPARER.
@@ -1425,7 +1395,7 @@ public class Bytes implements Comparable<Bytes> {
    * @param offset2 Where to start comparing in the right buffer
    * @param length1 How much to compare from the left buffer
    * @param length2 How much to compare from the right buffer
-   * @return 0 if equal, < 0 if left is less than right, etc.
+   * @return 0 if equal, &lt; 0 if left is less than right, etc.
    */
   public static int compareTo(byte[] buffer1, int offset1, int length1,
       byte[] buffer2, int offset2, int length2) {
@@ -1506,39 +1476,20 @@ public class Bytes implements Comparable<Bytes> {
       INSTANCE;
 
       static final Unsafe theUnsafe;
-
-      /** The offset to the first element in a byte array. */
-      static final int BYTE_ARRAY_BASE_OFFSET;
-
       static {
-        theUnsafe = (Unsafe) AccessController.doPrivileged(
-            new PrivilegedAction<Object>() {
-              @Override
-              public Object run() {
-                try {
-                  Field f = Unsafe.class.getDeclaredField("theUnsafe");
-                  f.setAccessible(true);
-                  return f.get(null);
-                } catch (NoSuchFieldException e) {
-                  // It doesn't matter what we throw;
-                  // it's swallowed in getBestComparer().
-                  throw new Error();
-                } catch (IllegalAccessException e) {
-                  throw new Error();
-                }
-              }
-            });
-
-        BYTE_ARRAY_BASE_OFFSET = theUnsafe.arrayBaseOffset(byte[].class);
+        if (UnsafeAccess.isAvailable()) {
+          theUnsafe = UnsafeAccess.theUnsafe;
+        } else {
+          // It doesn't matter what we throw;
+          // it's swallowed in getBestComparer().
+          throw new Error();
+        }
 
         // sanity check - this should never fail
         if (theUnsafe.arrayIndexScale(byte[].class) != 1) {
           throw new AssertionError();
         }
       }
-
-      static final boolean littleEndian =
-        ByteOrder.nativeOrder().equals(ByteOrder.LITTLE_ENDIAN);
 
       /**
        * Returns true if x1 is less than x2, when both values are treated as
@@ -1548,7 +1499,7 @@ public class Bytes implements Comparable<Bytes> {
        * Big Endian format.
        */
       static boolean lessThanUnsignedLong(long x1, long x2) {
-        if (littleEndian) {
+        if (UnsafeAccess.littleEndian) {
           x1 = Long.reverseBytes(x1);
           x2 = Long.reverseBytes(x2);
         }
@@ -1563,7 +1514,7 @@ public class Bytes implements Comparable<Bytes> {
        * Big Endian format.
        */
       static boolean lessThanUnsignedInt(int x1, int x2) {
-        if (littleEndian) {
+        if (UnsafeAccess.littleEndian) {
           x1 = Integer.reverseBytes(x1);
           x2 = Integer.reverseBytes(x2);
         }
@@ -1578,20 +1529,11 @@ public class Bytes implements Comparable<Bytes> {
        * Big Endian format.
        */
       static boolean lessThanUnsignedShort(short x1, short x2) {
-        if (littleEndian) {
+        if (UnsafeAccess.littleEndian) {
           x1 = Short.reverseBytes(x1);
           x2 = Short.reverseBytes(x2);
         }
         return (x1 & 0xffff) < (x2 & 0xffff);
-      }
-
-      /**
-       * Checks if Unsafe is available
-       * @return true, if available, false - otherwise
-       */
-      public static boolean isAvailable()
-      {
-        return theUnsafe != null;
       }
 
       /**
@@ -1617,8 +1559,8 @@ public class Bytes implements Comparable<Bytes> {
         }
         final int minLength = Math.min(length1, length2);
         final int minWords = minLength / SIZEOF_LONG;
-        final long offset1Adj = offset1 + BYTE_ARRAY_BASE_OFFSET;
-        final long offset2Adj = offset2 + BYTE_ARRAY_BASE_OFFSET;
+        final long offset1Adj = offset1 + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET;
+        final long offset2Adj = offset2 + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET;
 
         /*
          * Compare 8 bytes at a time. Benchmarking shows comparing 8 bytes at a
@@ -2075,24 +2017,6 @@ public class Bytes implements Comparable<Bytes> {
   }
 
   /**
-   * Binary search for keys in indexes using Bytes.BYTES_RAWCOMPARATOR
-   *
-   * @param arr array of byte arrays to search for
-   * @param key the key you want to find
-   * @param offset the offset in the key you want to find
-   * @param length the length of the key
-   * @return zero-based index of the key, if the key is present in the array.
-   *         Otherwise, a value -(i + 1) such that the key is between arr[i -
-   *         1] and arr[i] non-inclusively, where i is in [0, i], if we define
-   *         arr[-1] = -Inf and arr[N] = Inf for an N-element array. The above
-   *         means that this function can return 2N + 1 different values
-   *         ranging from -(N + 1) to N - 1.
-   */
-  public static int binarySearch(byte[][] arr, byte[] key, int offset, int length) {
-    return binarySearch(arr, key, offset, length, (CellComparator) null);
-  }
-
-  /**
    * Binary search for keys in indexes.
    *
    * @param arr array of byte arrays to search for
@@ -2111,17 +2035,16 @@ public class Bytes implements Comparable<Bytes> {
   @Deprecated
   public static int binarySearch(byte [][]arr, byte []key, int offset,
       int length, RawComparator<?> comparator) {
-    return binarySearch(arr, key, offset, length, (CellComparator)null);
+    return binarySearch(arr, key, offset, length);
   }
 
   /**
-   * Binary search for keys in indexes.
+   * Binary search for keys in indexes using Bytes.BYTES_RAWCOMPARATOR.
    *
    * @param arr array of byte arrays to search for
    * @param key the key you want to find
    * @param offset the offset in the key you want to find
    * @param length the length of the key
-   * @param comparator a comparator to compare.
    * @return zero-based index of the key, if the key is present in the array.
    *         Otherwise, a value -(i + 1) such that the key is between arr[i -
    *         1] and arr[i] non-inclusively, where i is in [0, i], if we define
@@ -2129,23 +2052,16 @@ public class Bytes implements Comparable<Bytes> {
    *         means that this function can return 2N + 1 different values
    *         ranging from -(N + 1) to N - 1.
    */
-  public static int binarySearch(byte [][]arr, byte []key, int offset,
-      int length, CellComparator comparator) {
+  public static int binarySearch(byte[][] arr, byte[] key, int offset, int length) {
     int low = 0;
     int high = arr.length - 1;
 
-    KeyValue.KeyOnlyKeyValue r = new KeyValue.KeyOnlyKeyValue();
-    r.setKey(key, offset, length);
     while (low <= high) {
-      int mid = (low+high) >>> 1;
+      int mid = (low + high) >>> 1;
       // we have to compare in this order, because the comparator order
       // has special logic when the 'left side' is a special key.
-      int cmp = 0;
-      if (comparator != null) {
-        cmp = comparator.compare(r, arr[mid], 0, arr[mid].length);
-      } else {
-        cmp = Bytes.BYTES_RAWCOMPARATOR.compare(key, offset, length, arr[mid], 0, arr[mid].length);
-      }
+      int cmp = Bytes.BYTES_RAWCOMPARATOR
+          .compare(key, offset, length, arr[mid], 0, arr[mid].length);
       // key lives above the midpoint
       if (cmp > 0)
         low = mid + 1;
@@ -2156,7 +2072,7 @@ public class Bytes implements Comparable<Bytes> {
       else
         return mid;
     }
-    return - (low+1);
+    return -(low + 1);
   }
 
   /**
@@ -2172,7 +2088,7 @@ public class Bytes implements Comparable<Bytes> {
    *         means that this function can return 2N + 1 different values
    *         ranging from -(N + 1) to N - 1.
    * @return the index of the block
-   * @deprecated Use {@link Bytes#binarySearch(byte[][], Cell, Comparator)}
+   * @deprecated Use {@link Bytes#binarySearch(Cell[], Cell, CellComparator)}
    */
   @Deprecated
   public static int binarySearch(byte[][] arr, Cell key, RawComparator<Cell> comparator) {
@@ -2212,16 +2128,14 @@ public class Bytes implements Comparable<Bytes> {
    *         ranging from -(N + 1) to N - 1.
    * @return the index of the block
    */
-  public static int binarySearch(byte[][] arr, Cell key, Comparator<Cell> comparator) {
+  public static int binarySearch(Cell[] arr, Cell key, CellComparator comparator) {
     int low = 0;
     int high = arr.length - 1;
-    KeyValue.KeyOnlyKeyValue r = new KeyValue.KeyOnlyKeyValue();
     while (low <= high) {
       int mid = (low+high) >>> 1;
       // we have to compare in this order, because the comparator order
       // has special logic when the 'left side' is a special key.
-      r.setKey(arr[mid], 0, arr[mid].length);
-      int cmp = comparator.compare(key, r);
+      int cmp = comparator.compare(key, arr[mid]);
       // key lives above the midpoint
       if (cmp > 0)
         low = mid + 1;
@@ -2239,7 +2153,7 @@ public class Bytes implements Comparable<Bytes> {
    * Bytewise binary increment/deincrement of long contained in byte array
    * on given amount.
    *
-   * @param value - array of bytes containing long (length <= SIZEOF_LONG)
+   * @param value - array of bytes containing long (length &lt;= SIZEOF_LONG)
    * @param amount value will be incremented on (deincremented if negative)
    * @return array of bytes containing incremented long (length == SIZEOF_LONG)
    */
@@ -2616,13 +2530,46 @@ public class Bytes implements Comparable<Bytes> {
     return result;
   }
 
+  private static final char[] HEX_CHARS = {
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+  };
+
+  /**
+   * Convert a byte range into a hex string
+   */
+  public static String toHex(byte[] b, int offset, int length) {
+    checkArgument(length <= Integer.MAX_VALUE / 2);
+    int numChars = length * 2;
+    char[] ch = new char[numChars];
+    for (int i = 0; i < numChars; i += 2)
+    {
+      byte d = b[offset + i/2];
+      ch[i] = HEX_CHARS[(d >> 4) & 0x0F];
+      ch[i+1] = HEX_CHARS[d & 0x0F];
+    }
+    return new String(ch);
+  }
+  
   /**
    * Convert a byte array into a hex string
-   * @param b
    */
   public static String toHex(byte[] b) {
-    checkArgument(b.length > 0, "length must be greater than 0");
-    return String.format("%x", new BigInteger(1, b));
+    return toHex(b, 0, b.length);
+  }
+
+  private static int hexCharToNibble(char ch) {
+    if (ch <= '9' && ch >= '0') {
+      return ch - '0';
+    } else if (ch >= 'a' && ch <= 'f') {
+      return ch - 'a' + 10;
+    } else if (ch >= 'A' && ch <= 'F') {
+      return ch - 'A' + 10;
+    }
+    throw new IllegalArgumentException("Invalid hex char: " + ch);
+  }
+
+  private static byte hexCharsToByte(char c1, char c2) {
+    return (byte) ((hexCharToNibble(c1) << 4) | hexCharToNibble(c2));
   }
 
   /**
@@ -2631,14 +2578,11 @@ public class Bytes implements Comparable<Bytes> {
    * @param hex
    */
   public static byte[] fromHex(String hex) {
-    checkArgument(hex.length() > 0, "length must be greater than 0");
     checkArgument(hex.length() % 2 == 0, "length must be a multiple of 2");
-    // Make sure letters are upper case
-    hex = hex.toUpperCase();
-    byte[] b = new byte[hex.length() / 2];
-    for (int i = 0; i < b.length; i++) {
-      b[i] = (byte)((toBinaryFromHex((byte)hex.charAt(2 * i)) << 4) +
-        toBinaryFromHex((byte)hex.charAt((2 * i + 1))));
+    int len = hex.length();
+    byte[] b = new byte[len / 2];
+    for (int i = 0; i < len; i += 2) {
+        b[i / 2] = hexCharsToByte(hex.charAt(i),hex.charAt(i+1));
     }
     return b;
   }
@@ -2665,7 +2609,7 @@ public class Bytes implements Comparable<Bytes> {
 
   /**
    * Find index of passed delimiter walking from end of buffer backwards.
-   * 
+   *
    * @param b
    * @param delimiter
    * @return Index of delimiter
@@ -2684,12 +2628,12 @@ public class Bytes implements Comparable<Bytes> {
     }
     return result;
     }
-  
+
     public static int findCommonPrefix(byte[] left, byte[] right, int leftLength, int rightLength,
         int leftOffset, int rightOffset) {
       int length = Math.min(leftLength, rightLength);
       int result = 0;
-  
+
       while (result < length && left[leftOffset + result] == right[rightOffset + result]) {
         result++;
       }

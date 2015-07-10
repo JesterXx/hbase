@@ -85,8 +85,8 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
   /**
    * Key for cache data into L1 if cache is set up with more than one tier.
    * To set in the shell, do something like this:
-   * <code>hbase(main):003:0> create 't',
-   *    {NAME => 't', CONFIGURATION => {CACHE_DATA_IN_L1 => 'true'}}</code>
+   * <code>hbase(main):003:0&gt; create 't',
+   *    {NAME =&gt; 't', CONFIGURATION =&gt; {CACHE_DATA_IN_L1 =&gt; 'true'}}</code>
    */
   public static final String CACHE_DATA_IN_L1 = "CACHE_DATA_IN_L1";
 
@@ -115,7 +115,7 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
   /**
    * Retain all cells across flushes and compactions even if they fall behind
    * a delete tombstone. To see all retained cells, do a 'raw' scan; see
-   * Scan#setRaw or pass RAW => true attribute in the shell.
+   * Scan#setRaw or pass RAW =&gt; true attribute in the shell.
    */
   public static final String KEEP_DELETED_CELLS = "KEEP_DELETED_CELLS";
   public static final String COMPRESS_TAGS = "COMPRESS_TAGS";
@@ -513,6 +513,30 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
   }
 
   /**
+   * Set minimum and maximum versions to keep
+   *
+   * @param minVersions minimal number of versions
+   * @param maxVersions maximum number of versions
+   * @return this (for chained invocation)
+   */
+  public HColumnDescriptor setVersions(int minVersions, int maxVersions) {
+    if (minVersions <= 0) {
+      // TODO: Allow minVersion and maxVersion of 0 to be the way you say "Keep all versions".
+      // Until there is support, consider 0 or < 0 -- a configuration error.
+      throw new IllegalArgumentException("Minimum versions must be positive");
+    }
+
+    if (maxVersions < minVersions) {
+      throw new IllegalArgumentException("Unable to set MaxVersion to " + maxVersions
+        + " and set MinVersion to " + minVersions
+        + ", as maximum versions must be >= minimum versions.");
+    }
+    setMinVersions(minVersions);
+    setMaxVersions(maxVersions);
+    return this;
+  }
+
+  /**
    * @return The storefile/hfile blocksize for this column family.
    */
   public synchronized int getBlocksize() {
@@ -904,13 +928,13 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
     boolean hasConfigKeys = false;
 
     // print all reserved keys first
-    for (Bytes k : values.keySet()) {
-      if (!RESERVED_KEYWORDS.contains(k)) {
+    for (Map.Entry<Bytes, Bytes> entry : values.entrySet()) {
+      if (!RESERVED_KEYWORDS.contains(entry.getKey())) {
         hasConfigKeys = true;
         continue;
       }
-      String key = Bytes.toString(k.get());
-      String value = Bytes.toStringBinary(values.get(k).get());
+      String key = Bytes.toString(entry.getKey().get());
+      String value = Bytes.toStringBinary(entry.getValue().get());
       if (printDefaults
           || !DEFAULT_VALUES.containsKey(key)
           || !DEFAULT_VALUES.get(key).equalsIgnoreCase(value)) {

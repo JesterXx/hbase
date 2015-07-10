@@ -287,7 +287,10 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
   @SuppressWarnings("deprecation")
   public void doBulkLoad(Path hfofDir, final HTable table)
       throws TableNotFoundException, IOException {
-    doBulkLoad(hfofDir, table.getConnection().getAdmin(), table, table.getRegionLocator());
+    try (Admin admin = table.getConnection().getAdmin();
+        RegionLocator rl = table.getRegionLocator()) {
+      doBulkLoad(hfofDir, admin, table, rl);
+    }
   }
 
   /**
@@ -430,7 +433,7 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
       final Multimap<ByteBuffer, LoadQueueItem> regionGroups) throws IOException {
     // atomically bulk load the groups.
     Set<Future<List<LoadQueueItem>>> loadingFutures = new HashSet<Future<List<LoadQueueItem>>>();
-    for (Entry<ByteBuffer, ? extends Collection<LoadQueueItem>> e: regionGroups.asMap().entrySet()) {
+    for (Entry<ByteBuffer, ? extends Collection<LoadQueueItem>> e: regionGroups.asMap().entrySet()){
       final byte[] first = e.getKey().array();
       final Collection<LoadQueueItem> lqis =  e.getValue();
 
@@ -571,6 +574,7 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
     FileSystem fs = tmpDir.getFileSystem(getConf());
     fs.setPermission(tmpDir, FsPermission.valueOf("-rwxrwxrwx"));
     fs.setPermission(botOut, FsPermission.valueOf("-rwxrwxrwx"));
+    fs.setPermission(topOut, FsPermission.valueOf("-rwxrwxrwx"));
 
     // Add these back at the *front* of the queue, so there's a lower
     // chance that the region will just split again before we get there.
@@ -823,8 +827,7 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
       HFileScanner scanner = halfReader.getScanner(false, false, false);
       scanner.seekTo();
       do {
-        KeyValue kv = KeyValueUtil.ensureKeyValue(scanner.getKeyValue());
-        halfWriter.append(kv);
+        halfWriter.append(scanner.getCell());
       } while (scanner.next());
 
       for (Map.Entry<byte[],byte[]> entry : fileInfo.entrySet()) {
@@ -851,7 +854,8 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
    * Algo:
    * 1) Poll on the keys in order:
    *    a) Keep adding the mapped values to these keys (runningSum)
-   *    b) Each time runningSum reaches 0, add the start Key from when the runningSum had started to a boundary list.
+   *    b) Each time runningSum reaches 0, add the start Key from when the runningSum had started to
+   *       a boundary list.
    * 2) Return the boundary list.
    */
   public static byte[][] inferBoundaries(TreeMap<byte[], Integer> bdryMap) {
@@ -955,8 +959,9 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
 
       Path hfofDir = new Path(dirPath);
 
-      try (HTable table = (HTable) connection.getTable(tableName);) {
-        doBulkLoad(hfofDir, table);
+      try (Table table = connection.getTable(tableName);
+          RegionLocator locator = connection.getRegionLocator(tableName)) {
+          doBulkLoad(hfofDir, admin, table, locator);
       }
     }
 

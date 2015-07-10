@@ -88,7 +88,8 @@ public class DeleteTableProcedure
   }
 
   @Override
-  protected Flow executeFromState(final MasterProcedureEnv env, DeleteTableState state) {
+  protected Flow executeFromState(final MasterProcedureEnv env, DeleteTableState state)
+      throws InterruptedException {
     if (LOG.isTraceEnabled()) {
       LOG.trace(this + " execute state=" + state);
     }
@@ -144,9 +145,6 @@ public class DeleteTableProcedure
       }
     } catch (HBaseException|IOException e) {
       LOG.warn("Retriable error trying to delete table=" + getTableName() + " state=" + state, e);
-    } catch (InterruptedException e) {
-      // if the interrupt is real, the executor will be stopped.
-      LOG.warn("Interrupted trying to delete table=" + getTableName() + " state=" + state, e);
     }
     return Flow.HAS_MORE_STATE;
   }
@@ -198,12 +196,12 @@ public class DeleteTableProcedure
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
     if (!env.isInitialized()) return false;
-    return env.getProcedureQueue().tryAcquireTableWrite(getTableName(), "delete table");
+    return env.getProcedureQueue().tryAcquireTableExclusiveLock(getTableName(), "delete table");
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseTableWrite(getTableName());
+    env.getProcedureQueue().releaseTableExclusiveLock(getTableName());
   }
 
   @Override
@@ -425,6 +423,8 @@ public class DeleteTableProcedure
 
   protected static void deleteTableStates(final MasterProcedureEnv env, final TableName tableName)
       throws IOException {
-    ProcedureSyncWait.getMasterQuotaManager(env).removeTableFromNamespaceQuota(tableName);
+    if (!tableName.isSystemTable()) {
+      ProcedureSyncWait.getMasterQuotaManager(env).removeTableFromNamespaceQuota(tableName);
+    }
   }
 }
