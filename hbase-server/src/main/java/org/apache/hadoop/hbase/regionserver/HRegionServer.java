@@ -44,6 +44,10 @@ import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -129,10 +133,7 @@ import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.Repor
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionProgress;
 import org.apache.hadoop.hbase.regionserver.handler.CloseMetaHandler;
 import org.apache.hadoop.hbase.regionserver.handler.CloseRegionHandler;
-import org.apache.hadoop.hbase.wal.DefaultWALProvider;
 import org.apache.hadoop.hbase.regionserver.wal.MetricsWAL;
-import org.apache.hadoop.hbase.wal.WAL;
-import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.regionserver.wal.WALActionsListener;
 import org.apache.hadoop.hbase.replication.regionserver.ReplicationLoad;
 import org.apache.hadoop.hbase.security.UserProvider;
@@ -151,6 +152,9 @@ import org.apache.hadoop.hbase.util.JvmPauseMonitor;
 import org.apache.hadoop.hbase.util.Sleeper;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.hbase.util.VersionInfo;
+import org.apache.hadoop.hbase.wal.DefaultWALProvider;
+import org.apache.hadoop.hbase.wal.WAL;
+import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.zookeeper.ClusterStatusTracker;
 import org.apache.hadoop.hbase.zookeeper.MasterAddressTracker;
 import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
@@ -334,6 +338,8 @@ public class HRegionServer extends HasThread implements
 
   protected volatile WALFactory walFactory;
 
+  private java.util.concurrent.ExecutorService logMovePool;
+
   // WAL roller. log is protected rather than private to avoid
   // eclipse warning when accessed by inner classes
   final LogRoller walRoller;
@@ -489,6 +495,20 @@ public class HRegionServer extends HasThread implements
 
     this.abortRequested = false;
     this.stopped = false;
+
+    logMovePool = new ThreadPoolExecutor(15, 15, 60, TimeUnit.SECONDS,
+      new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
+
+        @Override
+        public Thread newThread(Runnable r) {
+          Thread t = new Thread(r);
+          t.setDaemon(true);
+          t.setName(Thread.currentThread().getName() + "-HRegionServerHFileMove-"
+            + EnvironmentEdgeManager.currentTime());
+          return t;
+        }
+      });
+    ((ThreadPoolExecutor) this.logMovePool).allowCoreThreadTimeOut(true);
 
     rpcServices = createRpcServices();
     this.startcode = System.currentTimeMillis();
@@ -3158,5 +3178,10 @@ public class HRegionServer extends HasThread implements
   @Override
   public HeapMemoryManager getHeapMemoryManager() {
     return hMemManager;
+  }
+
+  @Override
+  public java.util.concurrent.ExecutorService getLogMovePool() {
+    return logMovePool;
   }
 }

@@ -26,14 +26,16 @@ import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.ScanType;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
+import org.apache.hadoop.hdfs.StorageType;
 
 /**
  * Compact passed set of files. Create an instance and then call {@link #compact(CompactionRequest)}
@@ -41,9 +43,14 @@ import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 @InterfaceAudience.Private
 public class DefaultCompactor extends Compactor {
   private static final Log LOG = LogFactory.getLog(DefaultCompactor.class);
+  private long hsmCrThreshold, hsmSsdThreshold;
 
   public DefaultCompactor(final Configuration conf, final Store store) {
     super(conf, store);
+    hsmCrThreshold = conf.getLong(HConstants.HSM_CR_THRESHOLD_KEY,
+      HConstants.DEFAULT_HSM_CR_THRESHOLD);
+    hsmSsdThreshold = conf.getLong(HConstants.HSM_SSD_THRESHOLD_KEY,
+      HConstants.DEFAULT_HSM_SSD_THRESHOLD);
   }
 
   /**
@@ -99,8 +106,16 @@ public class DefaultCompactor extends Compactor {
 
         // When all MVCC readpoints are 0, don't write them.
         // See HBASE-8166, HBASE-12600, and HBASE-13389.
-        writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
-          fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0);
+        if (fd.fileLength <= hsmCrThreshold) {
+          writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
+            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, StorageType.CR);
+        } else if (fd.fileLength > hsmCrThreshold && fd.fileLength <= hsmSsdThreshold) {
+          writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
+            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, StorageType.SSD);
+        } else {
+          writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
+            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0);
+        }
         boolean finished = performCompaction(scanner, writer, smallestReadPoint, cleanSeqId);
         if (!finished) {
           writer.close();

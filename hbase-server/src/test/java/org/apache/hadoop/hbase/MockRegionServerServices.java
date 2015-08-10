@@ -283,4 +283,10 @@ public class MockRegionServerServices implements RegionServerServices {
   public HeapMemoryManager getHeapMemoryManager() {
     return null;
   }
+
+  @Override
+  public java.util.concurrent.ExecutorService getLogMovePool() {
+    // TODO Auto-generated method stub
+    return null;
+  }
 }

@@ -208,4 +208,6 @@ public interface RegionServerServices
    * @return heap memory manager instance
    */
   HeapMemoryManager getHeapMemoryManager();
+
+  java.util.concurrent.ExecutorService getLogMovePool();
 }
