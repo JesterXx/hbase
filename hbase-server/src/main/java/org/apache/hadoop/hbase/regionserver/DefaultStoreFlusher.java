@@ -37,6 +37,7 @@ import org.apache.hadoop.util.StringUtils;
 public class DefaultStoreFlusher extends StoreFlusher {
   private static final Log LOG = LogFactory.getLog(DefaultStoreFlusher.class);
   private final Object flushLock = new Object();
+  private final short replica = 1;
 
   public DefaultStoreFlusher(Configuration conf, Store store) {
     super(conf, store);
@@ -64,7 +65,7 @@ public class DefaultStoreFlusher extends StoreFlusher {
         status.setStatus("Flushing " + store + ": creating writer");
         // Write the map out to the disk
         writer = store.createWriterInTmp(
-            cellsCount, store.getFamily().getCompression(), false, true, true);
+            cellsCount, store.getFamily().getCompression(), false, true, true, replica);
         writer.setTimeRangeTracker(snapshot.getTimeRangeTracker());
         IOException e = null;
         try {

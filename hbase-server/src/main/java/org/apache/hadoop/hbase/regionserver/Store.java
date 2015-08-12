@@ -170,6 +170,15 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
     boolean includeMVCCReadpoint,
     boolean includesTags
   ) throws IOException;
+  
+  StoreFile.Writer createWriterInTmp(
+    long maxKeyCount,
+    Compression.Algorithm compression,
+    boolean isCompaction,
+    boolean includeMVCCReadpoint,
+    boolean includesTags,
+    short replica
+  ) throws IOException;
 
   // Compaction oriented methods
 

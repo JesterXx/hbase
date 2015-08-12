@@ -330,6 +330,38 @@ public abstract class FSUtils {
     return create(fs, path, perm, true);
   }
 
+  public static FSDataOutputStream create(FileSystem fs, Path path, FsPermission perm,
+    InetSocketAddress[] favoredNodes, short replica) throws IOException {
+    if (fs instanceof HFileSystem) {
+      FileSystem backingFs = ((HFileSystem) fs).getBackingFs();
+      if (backingFs instanceof DistributedFileSystem) {
+        // Try to use the favoredNodes version via reflection to allow backwards-
+        // compatibility.
+        try {
+          return (FSDataOutputStream) (DistributedFileSystem.class.getDeclaredMethod("create",
+            Path.class, FsPermission.class, boolean.class, int.class, short.class, long.class,
+            Progressable.class, InetSocketAddress[].class).invoke(backingFs, path, perm, true,
+            getDefaultBufferSize(backingFs), replica, getDefaultBlockSize(backingFs, path), null,
+            favoredNodes));
+        } catch (InvocationTargetException ite) {
+          // Function was properly called, but threw it's own exception.
+          throw new IOException(ite.getCause());
+        } catch (NoSuchMethodException e) {
+          LOG.debug("DFS Client does not support most favored nodes create; using default create");
+          if (LOG.isTraceEnabled())
+            LOG.trace("Ignoring; use default create", e);
+        } catch (IllegalArgumentException e) {
+          LOG.debug("Ignoring (most likely Reflection related exception) " + e);
+        } catch (SecurityException e) {
+          LOG.debug("Ignoring (most likely Reflection related exception) " + e);
+        } catch (IllegalAccessException e) {
+          LOG.debug("Ignoring (most likely Reflection related exception) " + e);
+        }
+      }
+    }
+    return create(fs, path, perm, true);
+  }
+
   /**
    * Create the specified file on the filesystem. By default, this will:
    * <ol>

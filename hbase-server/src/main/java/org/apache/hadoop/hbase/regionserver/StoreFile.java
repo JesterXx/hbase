@@ -548,6 +548,7 @@ public class StoreFile {
     private Path filePath;
     private InetSocketAddress[] favoredNodes;
     private HFileContext fileContext;
+    private short replica = -1;
     public WriterBuilder(Configuration conf, CacheConfig cacheConf,
         FileSystem fs) {
       this.conf = conf;
@@ -613,6 +614,12 @@ public class StoreFile {
       this.fileContext = fileContext;
       return this;
     }
+
+    public WriterBuilder withReplica(short replica) {
+      this.replica = replica;
+      return this;
+    }
+
     /**
      * Create a store file writer. Client is responsible for closing file when
      * done. If metadata, add BEFORE closing using
@@ -643,7 +650,7 @@ public class StoreFile {
         comparator = KeyValue.COMPARATOR;
       }
       return new Writer(fs, filePath,
-          conf, cacheConf, comparator, bloomType, maxKeyCount, favoredNodes, fileContext);
+          conf, cacheConf, comparator, bloomType, maxKeyCount, favoredNodes, fileContext, replica);
     }
   }
 
@@ -782,6 +789,43 @@ public class StoreFile {
       }
       if (deleteFamilyBloomFilterWriter != null) {
         if (LOG.isTraceEnabled()) LOG.trace("Delete Family Bloom filter type for " + path + ": "
+            + deleteFamilyBloomFilterWriter.getClass().getSimpleName());
+      }
+    }
+
+    private Writer(FileSystem fs, Path path, final Configuration conf, CacheConfig cacheConf,
+      final KVComparator comparator, BloomType bloomType, long maxKeys,
+      InetSocketAddress[] favoredNodes, HFileContext fileContext, short replica) throws IOException {
+      writer = HFile.getWriterFactory(conf, cacheConf).withPath(fs, path)
+        .withComparator(comparator).withFavoredNodes(favoredNodes).withFileContext(fileContext)
+        .withReplica(replica).create();
+
+      this.kvComparator = comparator;
+
+      generalBloomFilterWriter = BloomFilterFactory.createGeneralBloomAtWrite(conf, cacheConf,
+        bloomType, (int) Math.min(maxKeys, Integer.MAX_VALUE), writer);
+
+      if (generalBloomFilterWriter != null) {
+        this.bloomType = bloomType;
+        if (LOG.isTraceEnabled())
+          LOG.trace("Bloom filter type for " + path + ": " + this.bloomType + ", "
+            + generalBloomFilterWriter.getClass().getSimpleName());
+      } else {
+        // Not using Bloom filters.
+        this.bloomType = BloomType.NONE;
+      }
+
+      // initialize delete family Bloom filter when there is NO RowCol Bloom
+      // filter
+      if (this.bloomType != BloomType.ROWCOL) {
+        this.deleteFamilyBloomFilterWriter = BloomFilterFactory.createDeleteBloomAtWrite(conf,
+          cacheConf, (int) Math.min(maxKeys, Integer.MAX_VALUE), writer);
+      } else {
+        deleteFamilyBloomFilterWriter = null;
+      }
+      if (deleteFamilyBloomFilterWriter != null) {
+        if (LOG.isTraceEnabled())
+          LOG.trace("Delete Family Bloom filter type for " + path + ": "
             + deleteFamilyBloomFilterWriter.getClass().getSimpleName());
       }
     }

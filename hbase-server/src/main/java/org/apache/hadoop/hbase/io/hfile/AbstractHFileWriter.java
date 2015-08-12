@@ -260,4 +260,10 @@ public abstract class AbstractHFileWriter implements HFile.Writer {
         HConstants.DATA_FILE_UMASK_KEY);
     return FSUtils.create(fs, path, perms, favoredNodes);
   }
+
+  protected static FSDataOutputStream createOutputStream(Configuration conf, FileSystem fs,
+    Path path, InetSocketAddress[] favoredNodes, short replica) throws IOException {
+    FsPermission perms = FSUtils.getFilePermissions(fs, conf, HConstants.DATA_FILE_UMASK_KEY);
+    return FSUtils.create(fs, path, perms, favoredNodes, replica);
+  }
 }

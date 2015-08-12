@@ -250,6 +250,7 @@ public class HFile {
     protected KVComparator comparator = KeyValue.COMPARATOR;
     protected InetSocketAddress[] favoredNodes;
     private HFileContext fileContext;
+    private short replica;
 
     WriterFactory(Configuration conf, CacheConfig cacheConf) {
       this.conf = conf;
@@ -287,13 +288,22 @@ public class HFile {
       return this;
     }
 
+    public WriterFactory withReplica(short replica) {
+      this.replica = replica;
+      return this;
+    }
+
     public Writer create() throws IOException {
       if ((path != null ? 1 : 0) + (ostream != null ? 1 : 0) != 1) {
         throw new AssertionError("Please specify exactly one of " +
             "filesystem/path or path");
       }
       if (path != null) {
-        ostream = AbstractHFileWriter.createOutputStream(conf, fs, path, favoredNodes);
+        if(replica == -1) {
+          ostream = AbstractHFileWriter.createOutputStream(conf, fs, path, favoredNodes); 
+        } else {
+          ostream = AbstractHFileWriter.createOutputStream(conf, fs, path, favoredNodes, replica);
+        }
       }
       return createWriter(fs, path, ostream,
                    comparator, fileContext);

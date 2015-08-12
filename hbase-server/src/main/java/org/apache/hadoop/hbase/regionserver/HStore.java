@@ -975,6 +975,31 @@ public class HStore implements Store {
     return w;
   }
 
+  public StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
+    boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag, short replica)
+    throws IOException {
+    final CacheConfig writerCacheConf;
+    if (isCompaction) {
+      // Don't cache data on write on compactions.
+      writerCacheConf = new CacheConfig(cacheConf);
+      writerCacheConf.setCacheDataOnWrite(false);
+    } else {
+      writerCacheConf = cacheConf;
+    }
+    InetSocketAddress[] favoredNodes = null;
+    if (region.getRegionServerServices() != null) {
+      favoredNodes = region.getRegionServerServices().getFavoredNodesForRegion(
+        region.getRegionInfo().getEncodedName());
+    }
+    HFileContext hFileContext = createFileContext(compression, includeMVCCReadpoint, includesTag,
+      cryptoContext);
+    StoreFile.Writer w = new StoreFile.WriterBuilder(conf, writerCacheConf, this.getFileSystem())
+      .withFilePath(fs.createTempName()).withComparator(comparator)
+      .withBloomType(family.getBloomFilterType()).withMaxKeyCount(maxKeyCount)
+      .withFavoredNodes(favoredNodes).withFileContext(hFileContext).withReplica(replica).build();
+    return w;
+  }
+
   private HFileContext createFileContext(Compression.Algorithm compression,
       boolean includeMVCCReadpoint, boolean includesTag, Encryption.Context cryptoContext) {
     if (compression == null) {
