@@ -23,8 +23,6 @@ import static org.junit.Assert.assertTrue;
 import java.io.IOException;
 import java.util.List;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -43,7 +41,6 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.wal.WALKey;
@@ -52,6 +49,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
+import org.mortbay.log.Log;
 
 /**
  * Tests around replay of recovered.edits content.
@@ -59,7 +57,6 @@ import org.junit.rules.TestName;
 @Category({MediumTests.class})
 public class TestRecoveredEdits {
   private static final HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
-  private static final Log LOG = LogFactory.getLog(TestRecoveredEdits.class);
   @Rule public TestName testName = new TestName();
 
   /**
@@ -69,7 +66,7 @@ public class TestRecoveredEdits {
    * made it in.
    * @throws IOException
    */
-  @Test (timeout=60000)
+  @Test (timeout=30000)
   public void testReplayWorksThoughLotsOfFlushing() throws IOException {
     Configuration conf = new Configuration(TEST_UTIL.getConfiguration());
     // Set it so we flush every 1M or so.  Thats a lot.
@@ -98,14 +95,6 @@ public class TestRecoveredEdits {
       }
     };
     Path hbaseRootDir = TEST_UTIL.getDataTestDir();
-    FileSystem fs = FileSystem.get(TEST_UTIL.getConfiguration());
-    Path tableDir = FSUtils.getTableDir(hbaseRootDir, htd.getTableName());
-    HRegionFileSystem hrfs =
-        new HRegionFileSystem(TEST_UTIL.getConfiguration(), fs, tableDir, hri);
-    if (fs.exists(hrfs.getRegionDir())) {
-      LOG.info("Region directory already exists. Deleting.");
-      fs.delete(hrfs.getRegionDir(), true);
-    }
     HRegion region = HRegion.createHRegion(hri, hbaseRootDir, conf, htd, null);
     assertEquals(encodedRegionName, region.getRegionInfo().getEncodedName());
     List<String> storeFiles = region.getStoreFileList(columnFamilyAsByteArray);
@@ -119,6 +108,7 @@ public class TestRecoveredEdits {
       System.getProperty("project.build.testSourceDirectory", "src" + Path.SEPARATOR + "test"),
       "data"), "0000000000000016310");
     // Copy this file under the region's recovered.edits dir so it is replayed on reopen.
+    FileSystem fs = FileSystem.get(conf);
     Path destination = new Path(recoveredEditsDir, recoveredEditsFile.getName());
     fs.copyToLocalFile(recoveredEditsFile, destination);
     assertTrue(fs.exists(destination));
@@ -132,7 +122,7 @@ public class TestRecoveredEdits {
     assertTrue("Files count=" + storeFiles.size(), storeFiles.size() > 10);
     // Now verify all edits made it into the region.
     int count = verifyAllEditsMadeItIn(fs, conf, recoveredEditsFile, region);
-    LOG.info("Checked " + count + " edits made it in");
+    Log.info("Checked " + count + " edits made it in");
   }
 
   /**

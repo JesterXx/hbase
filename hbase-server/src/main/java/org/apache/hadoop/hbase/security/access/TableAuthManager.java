@@ -295,7 +295,7 @@ public class TableAuthManager {
         }
       }
     } else if (LOG.isDebugEnabled()) {
-      LOG.debug("No permissions found for " + action);
+      LOG.debug("No permissions found");
     }
 
     return false;
@@ -391,7 +391,7 @@ public class TableAuthManager {
 
   public boolean authorize(User user, String namespace, Permission.Action action) {
     // Global authorizations supercede namespace level
-    if (authorize(user, action)) {
+    if (authorizeUser(user, action)) {
       return true;
     }
     // Check namespace permissions
@@ -427,6 +427,14 @@ public class TableAuthManager {
     }
 
     return false;
+  }
+
+  /**
+   * Checks global authorization for a specific action for a user, based on the
+   * stored user permissions.
+   */
+  public boolean authorizeUser(User user, Permission.Action action) {
+    return authorize(globalCache.getUser(user.getShortName()), action);
   }
 
   /**
@@ -480,26 +488,20 @@ public class TableAuthManager {
    * permissions.
    */
   public boolean authorizeGroup(String groupName, Permission.Action action) {
-    List<Permission> perms = globalCache.getGroup(groupName);
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("authorizing " + (perms != null && !perms.isEmpty() ? perms.get(0) : "") +
-        " for " + action);
-    }
-    return authorize(perms, action);
+    return authorize(globalCache.getGroup(groupName), action);
   }
 
   /**
-   * Checks authorization to a given table, column family and column for a group, based
+   * Checks authorization to a given table and column family for a group, based
    * on the stored permissions.
    * @param groupName
    * @param table
    * @param family
-   * @param qualifier
    * @param action
    * @return true if known and authorized, false otherwise
    */
   public boolean authorizeGroup(String groupName, TableName table, byte[] family,
-      byte[] qualifier, Permission.Action action) {
+      Permission.Action action) {
     // Global authorization supercedes table level
     if (authorizeGroup(groupName, action)) {
       return true;
@@ -511,13 +513,7 @@ public class TableAuthManager {
       return true;
     }
     // Check table level
-    List<TablePermission> tblPerms = getTablePermissions(table).getGroup(groupName);
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("authorizing " + (tblPerms != null && !tblPerms.isEmpty() ? tblPerms.get(0) : "") +
-        " for " +groupName + " on " + table + "." + Bytes.toString(family) + "." +
-        Bytes.toString(qualifier) + " with " + action);
-    }
-    return authorize(tblPerms, table, family, qualifier, action);
+    return authorize(getTablePermissions(table).getGroup(groupName), table, family, action);
   }
 
   /**
@@ -552,7 +548,7 @@ public class TableAuthManager {
     String[] groups = user.getGroupNames();
     if (groups != null) {
       for (String group : groups) {
-        if (authorizeGroup(group, table, family, qualifier, action)) {
+        if (authorizeGroup(group, table, family, action)) {
           return true;
         }
       }

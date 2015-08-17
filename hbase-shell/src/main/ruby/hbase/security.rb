@@ -24,14 +24,11 @@ module Hbase
   class SecurityAdmin
     include HBaseConstants
 
-    def initialize(admin, formatter)
-      @admin = admin
-      @config = @admin.getConfiguration()
+    def initialize(configuration, formatter)
+      @config = configuration
+      @connection = org.apache.hadoop.hbase.client.ConnectionFactory.createConnection(@config)
+      @admin = @connection.getAdmin()
       @formatter = formatter
-    end
-
-    def close
-      @admin.close
     end
 
     #----------------------------------------------------------------------------------------------

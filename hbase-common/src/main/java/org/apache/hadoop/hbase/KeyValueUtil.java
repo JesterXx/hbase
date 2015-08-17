@@ -102,15 +102,11 @@ public class KeyValueUtil {
     return kvCell;
   }
 
-  /**
-   * The position will be set to the beginning of the new ByteBuffer
-   * @param cell
-   * @return the Bytebuffer containing the key part of the cell
-   */
   public static ByteBuffer copyKeyToNewByteBuffer(final Cell cell) {
     byte[] bytes = new byte[keyLength(cell)];
     appendKeyTo(cell, bytes, 0);
     ByteBuffer buffer = ByteBuffer.wrap(bytes);
+    buffer.position(buffer.limit());//make it look as if each field were appended
     return buffer;
   }
 
@@ -152,15 +148,11 @@ public class KeyValueUtil {
     return pos;
   }
 
-  /**
-   * The position will be set to the beginning of the new ByteBuffer
-   * @param cell
-   * @return the ByteBuffer containing the cell
-   */
   public static ByteBuffer copyToNewByteBuffer(final Cell cell) {
     byte[] bytes = new byte[length(cell)];
     appendToByteArray(cell, bytes, 0);
     ByteBuffer buffer = ByteBuffer.wrap(bytes);
+    buffer.position(buffer.limit());//make it look as if each field were appended
     return buffer;
   }
 
@@ -582,7 +574,7 @@ public class KeyValueUtil {
       // write value
       out.write(cell.getValueArray(), cell.getValueOffset(), vlen);
       // write tags if we have to
-      if (withTags && tlen > 0) {
+      if (withTags) {
         // 2 bytes tags length followed by tags bytes
         // tags length is serialized with 2 bytes only(short way) even if the type is int. As this
         // is non -ve numbers, we save the sign bit. See HBASE-11437

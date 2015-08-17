@@ -34,7 +34,6 @@ import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.Regio
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.RegionServerAccounting;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
-import org.apache.hadoop.hbase.regionserver.RegionServerServices.PostOpenDeployContext;
 import org.apache.hadoop.hbase.util.CancelableProgressable;
 import org.apache.hadoop.hbase.util.ConfigUtil;
 /**
@@ -50,7 +49,6 @@ public class OpenRegionHandler extends EventHandler {
 
   private final HRegionInfo regionInfo;
   private final HTableDescriptor htd;
-  private final long masterSystemTime;
 
   private OpenRegionCoordination coordination;
   private OpenRegionCoordination.OpenRegionDetails ord;
@@ -59,15 +57,15 @@ public class OpenRegionHandler extends EventHandler {
 
   public OpenRegionHandler(final Server server,
       final RegionServerServices rsServices, HRegionInfo regionInfo,
-      HTableDescriptor htd, long masterSystemTime, OpenRegionCoordination coordination,
+      HTableDescriptor htd, OpenRegionCoordination coordination,
       OpenRegionCoordination.OpenRegionDetails ord) {
     this(server, rsServices, regionInfo, htd, EventType.M_RS_OPEN_REGION,
-        masterSystemTime, coordination, ord);
+        coordination, ord);
   }
 
   protected OpenRegionHandler(final Server server,
       final RegionServerServices rsServices, final HRegionInfo regionInfo,
-      final HTableDescriptor htd, EventType eventType, long masterSystemTime,
+      final HTableDescriptor htd, EventType eventType,
       OpenRegionCoordination coordination, OpenRegionCoordination.OpenRegionDetails ord) {
     super(server, eventType);
     this.rsServices = rsServices;
@@ -76,7 +74,6 @@ public class OpenRegionHandler extends EventHandler {
     this.coordination = coordination;
     this.ord = ord;
     useZKForAssignment = ConfigUtil.useZKForAssignment(server.getConfiguration());
-    this.masterSystemTime = masterSystemTime;
   }
 
   public HRegionInfo getRegionInfo() {
@@ -134,7 +131,7 @@ public class OpenRegionHandler extends EventHandler {
       boolean failed = true;
       if (isRegionStillOpening() && (!useZKForAssignment ||
            coordination.tickleOpening(ord, regionInfo, rsServices, "post_region_open"))) {
-        if (updateMeta(region, masterSystemTime)) {
+        if (updateMeta(region)) {
           failed = false;
         }
       }
@@ -234,7 +231,7 @@ public class OpenRegionHandler extends EventHandler {
    * state meantime so master doesn't timeout our region-in-transition.
    * Caller must cleanup region if this fails.
    */
-  boolean updateMeta(final HRegion r, long masterSystemTime) {
+  boolean updateMeta(final HRegion r) {
     if (this.server.isStopped() || this.rsServices.isStopping()) {
       return false;
     }
@@ -242,7 +239,7 @@ public class OpenRegionHandler extends EventHandler {
     // Else, wait.
     final AtomicBoolean signaller = new AtomicBoolean(false);
     PostOpenDeployTasksThread t = new PostOpenDeployTasksThread(r,
-      this.server, this.rsServices, signaller, masterSystemTime);
+      this.server, this.rsServices, signaller);
     t.start();
     // Post open deploy task:
     //   meta => update meta location in ZK
@@ -308,23 +305,20 @@ public class OpenRegionHandler extends EventHandler {
     private final RegionServerServices services;
     private final HRegion region;
     private final AtomicBoolean signaller;
-    private final long masterSystemTime;
 
     PostOpenDeployTasksThread(final HRegion region, final Server server,
-        final RegionServerServices services, final AtomicBoolean signaller, long masterSystemTime) {
+        final RegionServerServices services, final AtomicBoolean signaller) {
       super("PostOpenDeployTasks:" + region.getRegionInfo().getEncodedName());
       this.setDaemon(true);
       this.server = server;
       this.services = services;
       this.region = region;
       this.signaller = signaller;
-      this.masterSystemTime = masterSystemTime;
     }
 
-    @Override
     public void run() {
       try {
-        this.services.postOpenDeployTasks(new PostOpenDeployContext(region, masterSystemTime));
+        this.services.postOpenDeployTasks(this.region);
       } catch (Throwable e) {
         String msg = "Exception running postOpenDeployTasks; region=" +
           this.region.getRegionInfo().getEncodedName();
@@ -364,7 +358,6 @@ public class OpenRegionHandler extends EventHandler {
         this.server.getConfiguration(),
         this.rsServices,
         new CancelableProgressable() {
-          @Override
           public boolean progress() {
             if (useZKForAssignment) {
               // if tickle failed, we need to cancel opening region.

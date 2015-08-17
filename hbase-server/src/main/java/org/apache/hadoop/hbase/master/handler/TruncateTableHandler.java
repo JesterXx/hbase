@@ -94,7 +94,7 @@ public class TruncateTableHandler extends DeleteTableHandler {
     AssignmentManager assignmentManager = this.masterServices.getAssignmentManager();
 
     // 1. Set table znode
-    CreateTableHandler.checkAndSetEnablingTable(assignmentManager, tableName, false);
+    CreateTableHandler.checkAndSetEnablingTable(assignmentManager, tableName);
     try {
       // 1. Create Table Descriptor
       Path tempTableDir = FSUtils.getTableDir(tempdir, this.tableName);

@@ -111,7 +111,6 @@ import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.CoprocessorServic
 import org.apache.hadoop.hbase.protobuf.generated.ClusterStatusProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ClusterStatusProtos.RegionLoad;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.Coprocessor;
-import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.Coprocessor.Builder;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.NameStringPair;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionServerInfo;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier;
@@ -1043,7 +1042,7 @@ public class HRegionServer extends HasThread implements
    * @return Current write count for all online regions.
    */
   private long getWriteRequestCount() {
-    long writeCount = 0;
+    int writeCount = 0;
     for (Map.Entry<String, HRegion> e: this.onlineRegions.entrySet()) {
       writeCount += e.getValue().getWriteRequestsCount();
     }
@@ -1102,25 +1101,17 @@ public class HRegionServer extends HasThread implements
     serverLoad.setUsedHeapMB((int)(memory.getUsed() / 1024 / 1024));
     serverLoad.setMaxHeapMB((int) (memory.getMax() / 1024 / 1024));
     Set<String> coprocessors = getWAL(null).getCoprocessorHost().getCoprocessors();
-    Builder coprocessorBuilder = Coprocessor.newBuilder();
     for (String coprocessor : coprocessors) {
       serverLoad.addCoprocessors(
-        coprocessorBuilder.setName(coprocessor).build());
+        Coprocessor.newBuilder().setName(coprocessor).build());
     }
     RegionLoad.Builder regionLoadBldr = RegionLoad.newBuilder();
     RegionSpecifier.Builder regionSpecifier = RegionSpecifier.newBuilder();
     for (HRegion region : regions) {
-      if (region.getCoprocessorHost() != null) {
-        Set<String> regionCoprocessors = region.getCoprocessorHost().getCoprocessors();
-        Iterator<String> iterator = regionCoprocessors.iterator();
-        while (iterator.hasNext()) {
-          serverLoad.addCoprocessors(coprocessorBuilder.setName(iterator.next()).build());
-        }
-      }
       serverLoad.addRegionLoads(createRegionLoad(region, regionLoadBldr, regionSpecifier));
       for (String coprocessor :
           getWAL(region.getRegionInfo()).getCoprocessorHost().getCoprocessors()) {
-        serverLoad.addCoprocessors(coprocessorBuilder.setName(coprocessor).build());
+        serverLoad.addCoprocessors(Coprocessor.newBuilder().setName(coprocessor).build());
       }
     }
     serverLoad.setReportStartTime(reportStartTime);
@@ -1680,16 +1671,9 @@ public class HRegionServer extends HasThread implements
   private int putUpWebUI() throws IOException {
     int port = this.conf.getInt(HConstants.REGIONSERVER_INFO_PORT,
       HConstants.DEFAULT_REGIONSERVER_INFOPORT);
-    String addr = this.conf.get("hbase.regionserver.info.bindAddress", "0.0.0.0");
-
-    if(this instanceof HMaster) {
-      port = conf.getInt(HConstants.MASTER_INFO_PORT,
-          HConstants.DEFAULT_MASTER_INFOPORT);
-      addr = this.conf.get("hbase.master.info.bindAddress", "0.0.0.0");
-    }
     // -1 is for disabling info server
     if (port < 0) return port;
-
+    String addr = this.conf.get("hbase.regionserver.info.bindAddress", "0.0.0.0");
     if (!Addressing.isLocalAddress(InetAddress.getByName(addr))) {
       String msg =
           "Failed to start http info server. Address " + addr
@@ -1814,14 +1798,6 @@ public class HRegionServer extends HasThread implements
   @Override
   public void postOpenDeployTasks(final HRegion r)
   throws KeeperException, IOException {
-    postOpenDeployTasks(new PostOpenDeployContext(r, -1));
-  }
-
-  @Override
-  public void postOpenDeployTasks(final PostOpenDeployContext context)
-      throws KeeperException, IOException {
-    HRegion r = context.getRegion();
-    long masterSystemTime = context.getMasterSystemTime();
     rpcServices.checkOpen();
     LOG.info("Post open deploy tasks for " + r.getRegionNameAsString());
     // Do checks to see if we need to compact (references or too many files)
@@ -1845,10 +1821,10 @@ public class HRegionServer extends HasThread implements
       MetaTableLocator.setMetaLocation(getZooKeeper(), serverName, State.OPEN);
     } else if (useZKForAssignment) {
       MetaTableAccessor.updateRegionLocation(getConnection(), r.getRegionInfo(),
-        this.serverName, openSeqNum, masterSystemTime);
+        this.serverName, openSeqNum);
     }
-    if (!useZKForAssignment && !reportRegionStateTransition(new RegionStateTransitionContext(
-        TransitionCode.OPENED, openSeqNum, masterSystemTime, r.getRegionInfo()))) {
+    if (!useZKForAssignment && !reportRegionStateTransition(
+        TransitionCode.OPENED, openSeqNum, r.getRegionInfo())) {
       throw new IOException("Failed to report opened region to master: "
         + r.getRegionNameAsString());
     }
@@ -1864,17 +1840,6 @@ public class HRegionServer extends HasThread implements
   @Override
   public boolean reportRegionStateTransition(
       TransitionCode code, long openSeqNum, HRegionInfo... hris) {
-    return reportRegionStateTransition(
-      new RegionStateTransitionContext(code, HConstants.NO_SEQNUM, -1, hris));
-  }
-
-  @Override
-  public boolean reportRegionStateTransition(final RegionStateTransitionContext context) {
-    TransitionCode code = context.getCode();
-    long openSeqNum = context.getOpenSeqNum();
-    long masterSystemTime = context.getMasterSystemTime();
-    HRegionInfo[] hris = context.getHris();
-
     ReportRegionStateTransitionRequest.Builder builder =
       ReportRegionStateTransitionRequest.newBuilder();
     builder.setServer(ProtobufUtil.toServerName(serverName));
@@ -2065,14 +2030,13 @@ public class HRegionServer extends HasThread implements
 
   /**
    * Get the current master from ZooKeeper and open the RPC connection to it.
-   * To get a fresh connection, the current rssStub must be null.
+   *
    * Method will block until a master is available. You can break from this
    * block by requesting the server stop.
    *
    * @return master + port, or null if server has been stopped
    */
-  @VisibleForTesting
-  protected synchronized ServerName createRegionServerStatusStub() {
+  private synchronized ServerName createRegionServerStatusStub() {
     if (rssStub != null) {
       return masterAddressTracker.getMasterAddress();
     }
@@ -2176,7 +2140,6 @@ public class HRegionServer extends HasThread implements
         LOG.debug("Master is not running yet");
       } else {
         LOG.warn("error telling master we are up", se);
-        rssStub = null;
       }
     }
     return result;

@@ -63,20 +63,6 @@ possible configurations would overwhelm and obscure the important.
     machine restart.</description>
   </property>
   <property >
-    <name>hbase.fs.tmp.dir</name>
-    <value>/user/${user.name}/hbase-staging</value>
-    <description>A staging directory in default file system (HDFS)
-    for keeping temporary data.
-    </description>
-  </property>
-  <property >
-    <name>hbase.bulkload.staging.dir</name>
-    <value>${hbase.fs.tmp.dir}</value>
-    <description>A staging directory in default file system (HDFS)
-    for bulk loading.
-    </description>
-  </property>
-  <property >
     <name>hbase.cluster.distributed</name>
     <value>false</value>
     <description>The mode the cluster will be in. Possible values are
@@ -296,23 +282,19 @@ possible configurations would overwhelm and obscure the important.
   </property>
   <property>
     <name>hbase.regionserver.global.memstore.size</name>
-    <value></value>
+    <value>0.4</value>
     <description>Maximum size of all memstores in a region server before new
-      updates are blocked and flushes are forced. Defaults to 40% of heap (0.4).
+      updates are blocked and flushes are forced. Defaults to 40% of heap.
       Updates are blocked and flushes are forced until size of all memstores
-      in a region server hits hbase.regionserver.global.memstore.size.lower.limit.
-      The default value in this configuration has been intentionally left emtpy in order to
-      honor the old hbase.regionserver.global.memstore.upperLimit property if present.</description>
+      in a region server hits hbase.regionserver.global.memstore.size.lower.limit.</description>
   </property>
   <property>
     <name>hbase.regionserver.global.memstore.size.lower.limit</name>
-    <value></value>
+    <value>0.95</value>
     <description>Maximum size of all memstores in a region server before flushes are forced.
-      Defaults to 95% of hbase.regionserver.global.memstore.size (0.95).
+      Defaults to 95% of hbase.regionserver.global.memstore.size.
       A 100% value for this value causes the minimum possible flushing to occur when updates are 
-      blocked due to memstore limiting.
-      The default value in this configuration has been intentionally left emtpy in order to
-      honor the old hbase.regionserver.global.memstore.lowerLimit property if present.</description>
+      blocked due to memstore limiting.</description>
   </property>
   <property>
     <name>hbase.regionserver.optionalcacheflushinterval</name>
@@ -885,22 +867,6 @@ possible configurations would overwhelm and obscure the important.
       authentication, and will abort the connection.</description>
   </property>
   <property>
-    <name>hbase.coprocessor.enabled</name>
-    <value>true</value>
-    <description>Enables or disables coprocessor loading. If 'false'
-    (disabled), any other coprocessor related configuration will be ignored.
-    </description>
-  </property>
-  <property>
-    <name>hbase.coprocessor.user.enabled</name>
-    <value>true</value>
-    <description>Enables or disables user (aka. table) coprocessor loading.
-    If 'false' (disabled), any table coprocessor attributes in table
-    descriptors will be ignored. If "hbase.coprocessor.enabled" is 'false'
-    this setting has no effect.
-    </description>
-  </property>
-  <property>
     <name>hbase.coprocessor.region.classes</name>
     <value></value>
     <description>A comma-separated list of Coprocessors that are loaded by
@@ -1052,13 +1018,6 @@ possible configurations would overwhelm and obscure the important.
     <description>Use Thrift TCompactProtocol binary serialization protocol.</description>
   </property>
   <property>
-    <name>hbase.rootdir.perms</name>
-    <value>700</value>
-    <description>FS Permissions for the root directory in a secure(kerberos) setup.
-    When master starts, it creates the rootdir with this permissions or sets the permissions
-    if it does not match.</description>
-  </property>
-  <property>
     <name>hbase.data.umask.enable</name>
     <value>false</value>
     <description>Enable, if true, that file permissions should be assigned
@@ -1178,6 +1137,16 @@ possible configurations would overwhelm and obscure the important.
     <description>
       Name of an algorithm that is used to compute checksums. Possible values
       are NULL, CRC32, CRC32C.
+    </description>
+  </property>
+
+  <property>
+    <name>hbase.client.scanner.max.result.size</name>
+    <value>2097152</value>
+    <description>Maximum number of bytes returned when calling a scanner's next method.
+    Note that when a single row is larger than this limit the row is still returned completely.
+    The default value is 2MB, which is good for 1ge networks.
+    With faster and/or high latency networks this value should be increased.
     </description>
   </property>
 

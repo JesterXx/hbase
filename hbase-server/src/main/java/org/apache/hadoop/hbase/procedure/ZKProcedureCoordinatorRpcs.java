@@ -275,10 +275,7 @@ public class ZKProcedureCoordinatorRpcs implements ProcedureCoordinatorRpcs {
     ForeignException ee = null;
     try {
       byte[] data = ZKUtil.getData(zkProc.getWatcher(), abortNode);
-      if (data == null || data.length == 0) {
-        // ignore
-        return;
-      } else if (!ProtobufUtil.isPBMagicPrefix(data)) {
+      if (!ProtobufUtil.isPBMagicPrefix(data)) {
         LOG.warn("Got an error notification for op:" + abortNode
             + " but we can't read the information. Killing the procedure.");
         // we got a remote exception, but we can't describe it

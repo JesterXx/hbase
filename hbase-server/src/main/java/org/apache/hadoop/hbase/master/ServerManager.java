@@ -814,11 +814,6 @@ public class ServerManager {
 
     RetryCounter retryCounter = pingRetryCounterFactory.create();
     while (retryCounter.shouldRetry()) {
-      synchronized (this.onlineServers) {
-        if (this.deadservers.isDeadServer(server)) {
-          return false;
-        }
-      }
       try {
         AdminService.BlockingInterface admin = getRsAdmin(server);
         if (admin != null) {
@@ -827,15 +822,12 @@ public class ServerManager {
             && server.getStartcode() == info.getServerName().getStartCode();
         }
       } catch (IOException ioe) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Couldn't reach " + server + ", try=" + retryCounter.getAttemptTimes() + " of "
-              + retryCounter.getMaxAttempts(), ioe);
-        }
+        LOG.debug("Couldn't reach " + server + ", try=" + retryCounter.getAttemptTimes()
+          + " of " + retryCounter.getMaxAttempts(), ioe);
         try {
           retryCounter.sleepUntilNextRetry();
         } catch(InterruptedException ie) {
           Thread.currentThread().interrupt();
-          break;
         }
       }
     }

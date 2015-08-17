@@ -120,7 +120,6 @@ public class TestHFileOutputFormat2  {
     private int valLength;
     private static final int VALLEN_DEFAULT=10;
     private static final String VALLEN_CONF="randomkv.val.length";
-    private static final byte [] QUALIFIER = Bytes.toBytes("data");
 
     @Override
     protected void setup(Context context) throws IOException,
@@ -155,7 +154,8 @@ public class TestHFileOutputFormat2  {
         ImmutableBytesWritable key = new ImmutableBytesWritable(keyBytes);
 
         for (byte[] family : TestHFileOutputFormat2.FAMILIES) {
-          Cell kv = new KeyValue(keyBytes, family, QUALIFIER, valBytes);
+          Cell kv = new KeyValue(keyBytes, family,
+              PerformanceEvaluation.QUALIFIER_NAME, valBytes);
           context.write(key, kv);
         }
       }
@@ -332,9 +332,7 @@ public class TestHFileOutputFormat2  {
 
   @Test
   public void testJobConfiguration() throws Exception {
-    Configuration conf = new Configuration(this.util.getConfiguration());
-    conf.set("hbase.fs.tmp.dir", util.getDataTestDir("testJobConfiguration").toString());
-    Job job = new Job(conf);
+    Job job = new Job(util.getConfiguration());
     job.setWorkingDirectory(util.getDataTestDir("testJobConfiguration"));
     HTable table = Mockito.mock(HTable.class);
     setupMockStartKeys(table);
@@ -808,7 +806,6 @@ public class TestHFileOutputFormat2  {
       // We turn off the sequence file compression, because DefaultCodec
       // pollutes the GZip codec pool with an incompatible compressor.
       conf.set("io.seqfile.compression.type", "NONE");
-      conf.set("hbase.fs.tmp.dir", dir.toString());
       Job job = new Job(conf, "testLocalMRIncrementalLoad");
       job.setWorkingDirectory(util.getDataTestDirOnTestFS("testColumnFamilySettings"));
       setupRandomGeneratorMapper(job);
@@ -865,7 +862,7 @@ public class TestHFileOutputFormat2  {
 
     int taskId = context.getTaskAttemptID().getTaskID().getId();
     assert taskId < Byte.MAX_VALUE : "Unit tests dont support > 127 tasks!";
-    final byte [] qualifier = Bytes.toBytes("data");
+
     Random random = new Random();
     for (int i = 0; i < numRows; i++) {
 
@@ -874,7 +871,8 @@ public class TestHFileOutputFormat2  {
       ImmutableBytesWritable key = new ImmutableBytesWritable(keyBytes);
 
       for (byte[] family : families) {
-        Cell kv = new KeyValue(keyBytes, family, qualifier, valBytes);
+        Cell kv = new KeyValue(keyBytes, family,
+            PerformanceEvaluation.QUALIFIER_NAME, valBytes);
         writer.write(key, kv);
       }
     }

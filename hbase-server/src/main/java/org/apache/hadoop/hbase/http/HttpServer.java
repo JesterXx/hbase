@@ -21,6 +21,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -1212,11 +1213,11 @@ public class HttpServer implements FilterContainer {
         return;
       }
       response.setContentType("text/plain; charset=UTF-8");
-      try (PrintStream out = new PrintStream(
-        response.getOutputStream(), false, "UTF-8")) {
-        Threads.printThreadInfo(out, "");
-        out.flush();
-      }
+      PrintWriter out = response.getWriter();
+      PrintStream ps = new PrintStream(response.getOutputStream(), false, "UTF-8");
+      Threads.printThreadInfo(ps, "");
+      ps.flush();
+      out.close();
       ReflectionUtils.logThreadInfo(LOG, "jsp requested", 1);
     }
   }

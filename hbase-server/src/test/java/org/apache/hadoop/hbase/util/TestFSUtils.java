@@ -323,18 +323,15 @@ public class TestFSUtils {
     ManualEnvironmentEdge mockEnv = new ManualEnvironmentEdge();
     mockEnv.setValue(expect);
     EnvironmentEdgeManager.injectEdge(mockEnv);
-    try {
-      String dstFile = UUID.randomUUID().toString();
-      Path dst = new Path(testDir , dstFile);
 
-      assertTrue(FSUtils.renameAndSetModifyTime(fs, p, dst));
-      assertFalse("The moved file should not be present", FSUtils.isExists(fs, p));
-      assertTrue("The dst file should be present", FSUtils.isExists(fs, dst));
+    String dstFile = UUID.randomUUID().toString();
+    Path dst = new Path(testDir , dstFile);
 
-      assertEquals(expect, fs.getFileStatus(dst).getModificationTime());
-      cluster.shutdown();
-    } finally {
-      EnvironmentEdgeManager.reset();
-    }
+    assertTrue(FSUtils.renameAndSetModifyTime(fs, p, dst));
+    assertFalse("The moved file should not be present", FSUtils.isExists(fs, p));
+    assertTrue("The dst file should be present", FSUtils.isExists(fs, dst));
+
+    assertEquals(expect, fs.getFileStatus(dst).getModificationTime());
+    cluster.shutdown();
   }
 }

@@ -85,10 +85,6 @@ import org.apache.hadoop.hbase.util.Bytes;
  * <p>
  * Expert: To explicitly disable server-side block caching for this scan,
  * execute {@link #setCacheBlocks(boolean)}.
- * <p><em>Note:</em> Usage alters Scan instances. Internally, attributes are updated as the Scan
- * runs and if enabled, metrics accumulate in the Scan instance. Be aware this is the case when
- * you go to clone a Scan instance or if you go to reuse a created Scan instance; safer is create
- * a Scan instance per usage.
  */
 @InterfaceAudience.Public
 @InterfaceStability.Stable
@@ -111,10 +107,7 @@ public class Scan extends Query {
    * s.setAttribute(Scan.HINT_LOOKAHEAD, Bytes.toBytes(2));
    * }</pre>
    * Default is 0 (always reseek).
-   * @deprecated without replacement
-   *             This is now a no-op, SEEKs and SKIPs are optimizated automatically.
    */
-  @Deprecated
   public static final String HINT_LOOKAHEAD = "_look_ahead_";
 
   private byte [] startRow = HConstants.EMPTY_START_ROW;

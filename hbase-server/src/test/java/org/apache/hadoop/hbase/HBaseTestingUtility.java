@@ -91,7 +91,6 @@ import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.RegionServerStoppedException;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.apache.hadoop.hbase.security.User;
-import org.apache.hadoop.hbase.security.visibility.VisibilityLabelsCache;
 import org.apache.hadoop.hbase.tool.Canary;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSTableDescriptors;
@@ -277,15 +276,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     htu.getConfiguration().set(HConstants.HBASE_DIR, dataTestDir);
     LOG.debug("Setting " + HConstants.HBASE_DIR + " to " + dataTestDir);
     return htu;
-  }
-
-  /**
-   * Close the Region {@code r}. For use in tests.
-   */
-   public static void closeRegion(final HRegion r) throws IOException {
-     if (r != null) {
-       r.close();
-     }
   }
 
   /**
@@ -567,7 +557,8 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
       true, null, null, hosts, null);
 
     // Set this just-started cluster as our filesystem.
-    setFs();
+    FileSystem fs = this.dfsCluster.getFileSystem();
+    FSUtils.setFsDefault(this.conf, new Path(fs.getUri()));
 
     // Wait for the cluster to be totally up
     this.dfsCluster.waitClusterUp();
@@ -578,14 +569,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return this.dfsCluster;
   }
 
-  private void setFs() throws IOException {
-    if(this.dfsCluster == null){
-      LOG.info("Skipping setting fs because dfsCluster is null");
-      return;
-    }
-    FileSystem fs = this.dfsCluster.getFileSystem();
-    FSUtils.setFsDefault(this.conf, new Path(fs.getUri()));
-  }
 
   public MiniDFSCluster startMiniDFSCluster(int servers, final  String racks[], String hosts[])
       throws Exception {
@@ -944,9 +927,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
 
     // Bring up mini dfs cluster. This spews a bunch of warnings about missing
     // scheme. Complaints are 'Scheme is undefined for build/test/data/dfs/name1'.
-    if(this.dfsCluster == null) {
-      dfsCluster = startMiniDFSCluster(numDataNodes, dataNodeHosts);
-    }
+    startMiniDFSCluster(numDataNodes, dataNodeHosts);
 
     // Start up a zk cluster.
     if (this.zkCluster == null) {
@@ -1007,11 +988,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
 
     getHBaseAdmin(); // create immediately the hbaseAdmin
     LOG.info("Minicluster is up");
-
-    // Set the hbase.fs.tmp.dir config to make sure that we have some default value. This is
-    // for tests that do not read hbase-defaults.xml
-    setHBaseFsTmpDir();
-
     return (MiniHBaseCluster)this.hbaseCluster;
   }
 
@@ -1165,17 +1141,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    */
   public Path createRootDir() throws IOException {
     return createRootDir(false);
-  }
-
-
-  private void setHBaseFsTmpDir() throws IOException {
-    String hbaseFsTmpDirInString = this.conf.get("hbase.fs.tmp.dir");
-    if (hbaseFsTmpDirInString == null) {
-      this.conf.set("hbase.fs.tmp.dir",  getDataTestDirOnTestFS("hbase-staging").toString());
-      LOG.info("Setting hbase.fs.tmp.dir to " + this.conf.get("hbase.fs.tmp.dir"));
-    } else {
-      LOG.info("The hbase.fs.tmp.dir is set to " + hbaseFsTmpDirInString);
-    }
   }
 
   /**
@@ -1641,8 +1606,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
       setFirst(0);
       setSecond(0);
     }};
-    int i = 0;
-    do {
+    for (int i = 0; status.getFirst() != 0 && i < 500; i++) { // wait up to 500 seconds
       status = admin.getAlterStatus(desc.getTableName());
       if (status.getSecond() != 0) {
         LOG.debug(status.getSecond() - status.getFirst() + "/" + status.getSecond()
@@ -1652,9 +1616,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
         LOG.debug("All regions updated.");
         break;
       }
-    } while (status.getFirst() != 0 && i++ < 500);
-    if (status.getFirst() != 0) {
-      throw new IOException("Failed to update all regions even after 500 seconds.");
+    }
+    if (status.getSecond() != 0) {
+      throw new IOException("Failed to update replica count after 500 seconds.");
     }
   }
 
@@ -1666,7 +1630,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     admin.disableTable(table);
     HTableDescriptor desc = admin.getTableDescriptor(table);
     desc.setRegionReplication(replicaCount);
-    admin.modifyTable(desc.getTableName(), desc);
+    modifyTableSync(admin, desc);
     admin.enableTable(table);
   }
 
@@ -1748,18 +1712,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   }
 
   /**
-   * Create an HRegion. Be sure to call {@link HBaseTestingUtility#closeRegion(Region)}
-   * when you're finished with it.
-   */
-  public HRegion createHRegion(
-      final HRegionInfo info,
-      final Path rootDir,
-      final Configuration conf,
-      final HTableDescriptor htd) throws IOException {
-    return HRegion.createHRegion(info, rootDir, conf, htd);
-  }
-
-  /**
    * Create an HRegion that writes to the local tmp dirs
    * @param desc
    * @param startKey
@@ -1829,24 +1781,22 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   // ==========================================================================
 
   /**
-   * Provide an existing table name to truncate.
-   * Scans the table and issues a delete for each row read.
+   * Provide an existing table name to truncate
    * @param tableName existing table
    * @return HTable to that new table
    * @throws IOException
    */
-  public HTable deleteTableData(byte[] tableName) throws IOException {
-    return deleteTableData(TableName.valueOf(tableName));
+  public HTable truncateTable(byte[] tableName) throws IOException {
+    return truncateTable(TableName.valueOf(tableName));
   }
 
   /**
-   * Provide an existing table name to truncate.
-   * Scans the table and issues a delete for each row read.
+   * Provide an existing table name to truncate
    * @param tableName existing table
    * @return HTable to that new table
    * @throws IOException
    */
-  public HTable deleteTableData(TableName tableName) throws IOException {
+  public HTable truncateTable(TableName tableName) throws IOException {
     HTable table = new HTable(getConfiguration(), tableName);
     Scan scan = new Scan();
     ResultScanner resScan = table.getScanner(scan);
@@ -1857,58 +1807,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     resScan = table.getScanner(scan);
     resScan.close();
     return table;
-  }
-
-  /**
-   * Truncate a table using the admin command.
-   * Effectively disables, deletes, and recreates the table.
-   * @param tableName table which must exist.
-   * @param preserveRegions keep the existing split points
-   * @return HTable for the new table
-   */
-  public HTable truncateTable(final TableName tableName, final boolean preserveRegions)
-      throws IOException {
-    Admin admin = getHBaseAdmin();
-    admin.truncateTable(tableName, preserveRegions);
-    return new HTable(getConfiguration(), tableName);
-  }
-
-  /**
-   * Truncate a table using the admin command.
-   * Effectively disables, deletes, and recreates the table.
-   * For previous behavior of issuing row deletes, see
-   * deleteTableData.
-   * Expressly does not preserve regions of existing table.
-   * @param tableName table which must exist.
-   * @return HTable for the new table
-   */
-  public HTable truncateTable(final TableName tableName) throws IOException {
-    return truncateTable(tableName, false);
-  }
-
-  /**
-   * Truncate a table using the admin command.
-   * Effectively disables, deletes, and recreates the table.
-   * @param tableName table which must exist.
-   * @param preserveRegions keep the existing split points
-   * @return HTable for the new table
-   */
-  public HTable truncateTable(final byte[] tableName, final boolean preserveRegions)
-      throws IOException {
-    return truncateTable(TableName.valueOf(tableName), preserveRegions);
-  }
-
-  /**
-   * Truncate a table using the admin command.
-   * Effectively disables, deletes, and recreates the table.
-   * For previous behavior of issuing row deletes, see
-   * deleteTableData.
-   * Expressly does not preserve regions of existing table.
-   * @param tableName table which must exist.
-   * @return HTable for the new table
-   */
-  public HTable truncateTable(final byte[] tableName) throws IOException {
-    return truncateTable(tableName, false);
   }
 
   /**
@@ -2854,25 +2752,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return dfsCluster;
   }
 
-  public void setDFSCluster(MiniDFSCluster cluster) throws IllegalStateException, IOException {
-    setDFSCluster(cluster, true);
-  }
-
-  /**
-   * Set the MiniDFSCluster
-   * @param cluster cluster to use
-   * @param requireDown require the that cluster not be "up" (MiniDFSCluster#isClusterUp) before
-   * it is set.
-   * @throws IllegalStateException if the passed cluster is up when it is required to be down
-   * @throws IOException if the FileSystem could not be set from the passed dfs cluster
-   */
-  public void setDFSCluster(MiniDFSCluster cluster, boolean requireDown)
-      throws IllegalStateException, IOException {
-    if (dfsCluster != null && requireDown && dfsCluster.isClusterUp()) {
-      throw new IllegalStateException("DFSCluster is already running! Shut it down first.");
+  public void setDFSCluster(MiniDFSCluster cluster) throws IOException {
+    if (dfsCluster != null && dfsCluster.isClusterUp()) {
+      throw new IOException("DFSCluster is already running! Shut it down first.");
     }
     this.dfsCluster = cluster;
-    this.setFs();
   }
 
   public FileSystem getTestFileSystem() throws IOException {
@@ -3737,37 +3621,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   }
 
   /**
-   * Wait until no regions in transition.
-   * @param timeout How long to wait.
-   * @throws Exception
-   */
-  public void waitUntilNoRegionsInTransition(
-      final long timeout) throws Exception {
-    waitFor(timeout, predicateNoRegionsInTransition());
-  }
-
-  /**
-   * Wait until labels is ready in VisibilityLabelsCache.
-   * @param timeoutMillis
-   * @param labels
-   */
-  public void waitLabelAvailable(long timeoutMillis, final String... labels) {
-    final VisibilityLabelsCache labelsCache = VisibilityLabelsCache.get();
-    waitFor(timeoutMillis, new Waiter.Predicate<RuntimeException>() {
-
-      @Override
-      public boolean evaluate() {
-        for (String label : labels) {
-          if (labelsCache.getLabelOrdinal(label) == 0) {
-            return false;
-          }
-        }
-        return true;
-      }
-    });
-  }
-
-  /**
    * Create a set of column descriptors with the combination of compression,
    * encoding, bloom codecs available.
    * @return the list of column descriptors
@@ -3818,5 +3671,14 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
       }
     }
     return supportedAlgos.toArray(new Algorithm[supportedAlgos.size()]);
+  }
+
+  /**
+   * Wait until no regions in transition.
+   * @param timeout How long to wait.
+   * @throws Exception
+   */
+  public void waitUntilNoRegionsInTransition(final long timeout) throws Exception {
+    waitFor(timeout, predicateNoRegionsInTransition());
   }
 }

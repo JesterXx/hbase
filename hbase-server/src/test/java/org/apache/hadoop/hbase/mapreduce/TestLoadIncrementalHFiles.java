@@ -34,8 +34,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.client.Connection;
-import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
@@ -234,56 +232,47 @@ public class TestLoadIncrementalHFiles {
 
   private void runTest(String testName, HTableDescriptor htd, BloomType bloomType,
       boolean preCreateTable, byte[][] tableSplitKeys, byte[][][] hfileRanges) throws Exception {
+    Path dir = util.getDataTestDirOnTestFS(testName);
+    FileSystem fs = util.getTestFileSystem();
+    dir = dir.makeQualified(fs);
+    Path familyDir = new Path(dir, Bytes.toString(FAMILY));
 
-    for (boolean managed : new boolean[] { true, false }) {
-      Path dir = util.getDataTestDirOnTestFS(testName);
-      FileSystem fs = util.getTestFileSystem();
-      dir = dir.makeQualified(fs);
-      Path familyDir = new Path(dir, Bytes.toString(FAMILY));
-
-      int hfileIdx = 0;
-      for (byte[][] range : hfileRanges) {
-        byte[] from = range[0];
-        byte[] to = range[1];
-        HFileTestUtil.createHFile(util.getConfiguration(), fs, new Path(familyDir, "hfile_"
-            + hfileIdx++), FAMILY, QUALIFIER, from, to, 1000);
-      }
-      int expectedRows = hfileIdx * 1000;
-
-      if (preCreateTable) {
-        util.getHBaseAdmin().createTable(htd, tableSplitKeys);
-      }
-
-      final TableName tableName = htd.getTableName();
-      if (!util.getHBaseAdmin().tableExists(tableName)) {
-        util.getHBaseAdmin().createTable(htd);
-      }
-      LoadIncrementalHFiles loader = new LoadIncrementalHFiles(util.getConfiguration());
-
-      if (managed) {
-        try (HTable table = new HTable(util.getConfiguration(), tableName)) {
-          loader.doBulkLoad(dir, table);
-          assertEquals(expectedRows, util.countRows(table));
-        }
-      } else {
-        try (Connection conn = ConnectionFactory.createConnection(util.getConfiguration());
-            HTable table = (HTable) conn.getTable(tableName)) {
-          loader.doBulkLoad(dir, table);
-        }
-      }
-
-      // verify staging folder has been cleaned up
-      Path stagingBasePath = SecureBulkLoadUtil.getBaseStagingDir(util.getConfiguration());
-      if (fs.exists(stagingBasePath)) {
-        FileStatus[] files = fs.listStatus(stagingBasePath);
-        for (FileStatus file : files) {
-          assertTrue("Folder=" + file.getPath() + " is not cleaned up.",
-              file.getPath().getName() != "DONOTERASE");
-        }
-      }
-
-      util.deleteTable(tableName);
+    int hfileIdx = 0;
+    for (byte[][] range : hfileRanges) {
+      byte[] from = range[0];
+      byte[] to = range[1];
+      HFileTestUtil.createHFile(util.getConfiguration(), fs, new Path(familyDir, "hfile_"
+          + hfileIdx++), FAMILY, QUALIFIER, from, to, 1000);
     }
+    int expectedRows = hfileIdx * 1000;
+
+    if (preCreateTable) {
+      util.getHBaseAdmin().createTable(htd, tableSplitKeys);
+    }
+
+    final TableName tableName = htd.getTableName();
+    LoadIncrementalHFiles loader = new LoadIncrementalHFiles(util.getConfiguration());
+    String [] args= {dir.toString(), tableName.toString()};
+    loader.run(args);
+
+    Table table = new HTable(util.getConfiguration(), tableName);
+    try {
+      assertEquals(expectedRows, util.countRows(table));
+    } finally {
+      table.close();
+    }
+
+    // verify staging folder has been cleaned up
+    Path stagingBasePath = SecureBulkLoadUtil.getBaseStagingDir(util.getConfiguration());
+    if(fs.exists(stagingBasePath)) {
+      FileStatus[] files = fs.listStatus(stagingBasePath);
+      for(FileStatus file : files) {
+        assertTrue("Folder=" + file.getPath() + " is not cleaned up.",
+          file.getPath().getName() != "DONOTERASE");
+      }
+    }
+
+    util.deleteTable(tableName);
   }
 
   /**
@@ -318,46 +307,31 @@ public class TestLoadIncrementalHFiles {
     }
   }
 
+  /**
+   * Write a random data file in a dir with a valid family name but not part of the table families
+   * we should we able to bulkload without getting the unmatched family exception. HBASE-13037
+   */
   @Test(timeout = 60000)
   public void testNonHfileFolderWithUnmatchedFamilyName() throws Exception {
-    testNonHfileFolder("testNonHfileFolderWithUnmatchedFamilyName", true);
-  }
-
-  @Test(timeout = 60000)
-  public void testNonHfileFolder() throws Exception {
-    testNonHfileFolder("testNonHfileFolder", false);
-  }
-
-  /**
-   * Write a random data file and a non-file in a dir with a valid family name
-   * but not part of the table families. we should we able to bulkload without
-   * getting the unmatched family exception. HBASE-13037/HBASE-13227
-   */
-  private void testNonHfileFolder(String tableName, boolean preCreateTable) throws Exception {
-    Path dir = util.getDataTestDirOnTestFS(tableName);
+    Path dir = util.getDataTestDirOnTestFS("testNonHfileFolderWithUnmatchedFamilyName");
     FileSystem fs = util.getTestFileSystem();
     dir = dir.makeQualified(fs);
 
     Path familyDir = new Path(dir, Bytes.toString(FAMILY));
     HFileTestUtil.createHFile(util.getConfiguration(), fs, new Path(familyDir, "hfile_0"),
         FAMILY, QUALIFIER, Bytes.toBytes("begin"), Bytes.toBytes("end"), 500);
-    createRandomDataFile(fs, new Path(familyDir, "012356789"), 16 * 1024);
 
     final String NON_FAMILY_FOLDER = "_logs";
     Path nonFamilyDir = new Path(dir, NON_FAMILY_FOLDER);
     fs.mkdirs(nonFamilyDir);
-    fs.mkdirs(new Path(nonFamilyDir, "non-file"));
     createRandomDataFile(fs, new Path(nonFamilyDir, "012356789"), 16 * 1024);
 
     Table table = null;
     try {
-      if (preCreateTable) {
-        table = util.createTable(TableName.valueOf(tableName), FAMILY);
-      } else {
-        table = util.getConnection().getTable(TableName.valueOf(tableName));
-      }
+      final String TABLE_NAME = "mytable_testNonHfileFolderWithUnmatchedFamilyName";
+      table = util.createTable(TableName.valueOf(TABLE_NAME), FAMILY);
 
-      final String[] args = {dir.toString(), tableName};
+      final String[] args = {dir.toString(), TABLE_NAME};
       new LoadIncrementalHFiles(util.getConfiguration()).run(args);
       assertEquals(500, util.countRows(table));
     } finally {

@@ -42,9 +42,8 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Append;
-import org.apache.hadoop.hbase.client.Connection;
-import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Increment;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
@@ -113,8 +112,9 @@ public abstract class TestVisibilityLabels {
   @Test
   public void testSimpleVisibilityLabels() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = createTableAndWriteDataWithLabels(tableName, SECRET + "|" + CONFIDENTIAL,
-        PRIVATE + "|" + CONFIDENTIAL)) {
+    Table table = createTableAndWriteDataWithLabels(tableName, SECRET + "|" + CONFIDENTIAL,
+        PRIVATE + "|" + CONFIDENTIAL);
+    try {
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations(SECRET, CONFIDENTIAL, PRIVATE));
       ResultScanner scanner = table.getScanner(s);
@@ -131,16 +131,21 @@ public abstract class TestVisibilityLabels {
       current = cellScanner.current();
       assertTrue(Bytes.equals(current.getRowArray(), current.getRowOffset(),
           current.getRowLength(), row2, 0, row2.length));
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
   
   @Test
   public void testSimpleVisibilityLabelsWithUniCodeCharacters() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = createTableAndWriteDataWithLabels(tableName,
-        SECRET + "|" + CellVisibility.quote(COPYRIGHT), "(" + CellVisibility.quote(COPYRIGHT)
-            + "&"  + CellVisibility.quote(ACCENT) + ")|" + CONFIDENTIAL,
-        CellVisibility.quote(UNICODE_VIS_TAG) + "&" + SECRET)) {
+    Table table = createTableAndWriteDataWithLabels(tableName,
+        SECRET + "|" + CellVisibility.quote(COPYRIGHT), "(" + CellVisibility.quote(COPYRIGHT) + "&"
+            + CellVisibility.quote(ACCENT) + ")|" + CONFIDENTIAL,
+        CellVisibility.quote(UNICODE_VIS_TAG) + "&" + SECRET);
+    try {
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations(SECRET, CONFIDENTIAL, PRIVATE, COPYRIGHT, ACCENT,
           UNICODE_VIS_TAG));
@@ -162,15 +167,20 @@ public abstract class TestVisibilityLabels {
       current = cellScanner.current();
       assertTrue(Bytes.equals(current.getRowArray(), current.getRowOffset(),
           current.getRowLength(), row3, 0, row3.length));
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
   @Test
   public void testAuthorizationsWithSpecialUnicodeCharacters() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = createTableAndWriteDataWithLabels(tableName,
+    Table table = createTableAndWriteDataWithLabels(tableName,
         CellVisibility.quote(UC1) + "|" + CellVisibility.quote(UC2), CellVisibility.quote(UC1),
-        CellVisibility.quote(UNICODE_VIS_TAG))) {
+        CellVisibility.quote(UNICODE_VIS_TAG));
+    try {
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations(UC1, UC2, ACCENT,
           UNICODE_VIS_TAG));
@@ -192,16 +202,21 @@ public abstract class TestVisibilityLabels {
       current = cellScanner.current();
       assertTrue(Bytes.equals(current.getRowArray(), current.getRowOffset(),
           current.getRowLength(), row3, 0, row3.length));
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
   @Test
   public void testVisibilityLabelsWithComplexLabels() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|"
-        + CONFIDENTIAL + ")" + "&" + "!" + TOPSECRET, "(" + PRIVATE + "&" + CONFIDENTIAL + "&"
-        + SECRET + ")", "(" + PRIVATE + "&" + CONFIDENTIAL + "&" + SECRET + ")", "(" + PRIVATE
-        + "&" + CONFIDENTIAL + "&" + SECRET + ")")) {
+    Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|" + CONFIDENTIAL
+        + ")" + "&" + "!" + TOPSECRET, "(" + PRIVATE + "&" + CONFIDENTIAL + "&" + SECRET + ")", "("
+        + PRIVATE + "&" + CONFIDENTIAL + "&" + SECRET + ")", "(" + PRIVATE + "&" + CONFIDENTIAL
+        + "&" + SECRET + ")");
+    try {
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations(TOPSECRET, CONFIDENTIAL, PRIVATE, PUBLIC, SECRET));
       ResultScanner scanner = table.getScanner(s);
@@ -222,19 +237,28 @@ public abstract class TestVisibilityLabels {
       current = cellScanner.current();
       assertTrue(Bytes.equals(current.getRowArray(), current.getRowOffset(),
           current.getRowLength(), row4, 0, row4.length));
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
   @Test
   public void testVisibilityLabelsThatDoesNotPassTheCriteria() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = createTableAndWriteDataWithLabels(tableName,
-        "(" + SECRET + "|" + CONFIDENTIAL + ")", PRIVATE)){
+    Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|" + CONFIDENTIAL
+        + ")", PRIVATE);
+    try {
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations(PUBLIC));
       ResultScanner scanner = table.getScanner(s);
       Result[] next = scanner.next(3);
       assertTrue(next.length == 0);
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
@@ -251,21 +275,27 @@ public abstract class TestVisibilityLabels {
   @Test
   public void testVisibilityLabelsInScanThatDoesNotMatchAnyDefinedLabels() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try ( Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|"
-        + CONFIDENTIAL + ")", PRIVATE)){
+    Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|" + CONFIDENTIAL
+        + ")", PRIVATE);
+    try {
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations("SAMPLE"));
       ResultScanner scanner = table.getScanner(s);
       Result[] next = scanner.next(3);
       assertTrue(next.length == 0);
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
   @Test
   public void testVisibilityLabelsWithGet() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = createTableAndWriteDataWithLabels(tableName, SECRET + "&" + CONFIDENTIAL
-        + "&!" + PRIVATE, SECRET + "&" + CONFIDENTIAL + "&" + PRIVATE)) {
+    Table table = createTableAndWriteDataWithLabels(tableName, SECRET + "&" + CONFIDENTIAL + "&!"
+        + PRIVATE, SECRET + "&" + CONFIDENTIAL + "&" + PRIVATE);
+    try {
       Get get = new Get(row1);
       get.setAuthorizations(new Authorizations(SECRET, CONFIDENTIAL));
       Result result = table.get(get);
@@ -273,6 +303,10 @@ public abstract class TestVisibilityLabels {
       Cell cell = result.getColumnLatestCell(fam, qual);
       assertTrue(Bytes.equals(value, 0, value.length, cell.getValueArray(), cell.getValueOffset(),
           cell.getValueLength()));
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
@@ -342,18 +376,26 @@ public abstract class TestVisibilityLabels {
     }
     TEST_UTIL.waitTableEnabled(LABELS_TABLE_NAME.getName(), 50000);
     t.join();
-    try (Table table = TEST_UTIL.getConnection().getTable(tableName)) {
+    Table table = null;
+    try {
+      table = new HTable(TEST_UTIL.getConfiguration(), tableName);
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations(SECRET));
       ResultScanner scanner = table.getScanner(s);
       Result[] next = scanner.next(3);
       assertTrue(next.length == 1);
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
   @Test(timeout = 60 * 1000)
   public void testVisibilityLabelsOnRSRestart() throws Exception {
     final TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
+    Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|" + CONFIDENTIAL
+        + ")", PRIVATE);
     List<RegionServerThread> regionServerThreads = TEST_UTIL.getHBaseCluster()
         .getRegionServerThreads();
     for (RegionServerThread rsThread : regionServerThreads) {
@@ -362,13 +404,16 @@ public abstract class TestVisibilityLabels {
     // Start one new RS
     RegionServerThread rs = TEST_UTIL.getHBaseCluster().startRegionServer();
     waitForLabelsRegionAvailability(rs.getRegionServer());
-    try (Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|" + CONFIDENTIAL
-        + ")", PRIVATE);) {
+    try {
       Scan s = new Scan();
       s.setAuthorizations(new Authorizations(SECRET));
       ResultScanner scanner = table.getScanner(s);
       Result[] next = scanner.next(3);
       assertTrue(next.length == 1);
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
@@ -397,12 +442,17 @@ public abstract class TestVisibilityLabels {
   @Test
   public void testVisibilityLabelsInGetThatDoesNotMatchAnyDefinedLabels() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|" + CONFIDENTIAL
-        + ")", PRIVATE)) {
+    Table table = createTableAndWriteDataWithLabels(tableName, "(" + SECRET + "|" + CONFIDENTIAL
+        + ")", PRIVATE);
+    try {
       Get get = new Get(row1);
       get.setAuthorizations(new Authorizations("SAMPLE"));
       Result result = table.get(get);
       assertTrue(result.isEmpty());
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
@@ -420,7 +470,9 @@ public abstract class TestVisibilityLabels {
       }
     };
     SUPERUSER.runAs(action);
-    try (Table ht = TEST_UTIL.getConnection().getTable(LABELS_TABLE_NAME);) {
+    Table ht = null;
+    try {
+      ht = new HTable(conf, LABELS_TABLE_NAME);
       Scan scan = new Scan();
       scan.setAuthorizations(new Authorizations(VisibilityUtils.SYSTEM_LABEL));
       ResultScanner scanner = ht.getScanner(scan);
@@ -433,6 +485,10 @@ public abstract class TestVisibilityLabels {
       assertTrue(auths.contains(SECRET));
       assertTrue(auths.contains(CONFIDENTIAL));
       assertEquals(2, auths.size());
+    } finally {
+      if (ht != null) {
+        ht.close();
+      }
     }
 
     action = new PrivilegedExceptionAction<Void>() {
@@ -525,8 +581,9 @@ public abstract class TestVisibilityLabels {
                 "org.apache.hadoop.hbase.security.visibility.InvalidLabelException: "
                     + "Label 'public' is not set for the user testUser"));
         assertTrue(resultList.get(2).getException().getValue().isEmpty());
-        try (Connection connection = ConnectionFactory.createConnection(conf);
-             Table ht = connection.getTable(LABELS_TABLE_NAME)) {
+        Table ht = null;
+        try {
+          ht = new HTable(conf, LABELS_TABLE_NAME);
           ResultScanner scanner = ht.getScanner(new Scan());
           Result result = null;
           List<Result> results = new ArrayList<Result>();
@@ -536,6 +593,10 @@ public abstract class TestVisibilityLabels {
           List<String> curAuths = extractAuths(user, results);
           assertTrue(curAuths.contains(PRIVATE));
           assertEquals(1, curAuths.size());
+        } finally {
+          if (ht != null) {
+            ht.close();
+          }
         }
 
         GetAuthsResponse authsResponse = null;
@@ -559,7 +620,9 @@ public abstract class TestVisibilityLabels {
   @Test
   public void testLabelsWithCheckAndPut() throws Throwable {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = TEST_UTIL.createTable(tableName, fam)) {
+    Table table = null;
+    try {
+      table = TEST_UTIL.createTable(tableName, fam);
       byte[] row1 = Bytes.toBytes("row1");
       Put put = new Put(row1);
       put.add(fam, qual, HConstants.LATEST_TIMESTAMP, value);
@@ -579,13 +642,19 @@ public abstract class TestVisibilityLabels {
       assertTrue(Bytes.equals(row2, result.getRow()));
       result = scanner.next();
       assertNull(result);
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
   @Test
   public void testLabelsWithIncrement() throws Throwable {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = TEST_UTIL.createTable(tableName, fam)) {
+    Table table = null;
+    try {
+      table = TEST_UTIL.createTable(tableName, fam);
       byte[] row1 = Bytes.toBytes("row1");
       byte[] val = Bytes.toBytes(1L);
       Put put = new Put(row1);
@@ -605,13 +674,19 @@ public abstract class TestVisibilityLabels {
       table.increment(increment);
       result = table.get(get);
       assertTrue(!result.isEmpty());
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
   @Test
   public void testLabelsWithAppend() throws Throwable {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = TEST_UTIL.createTable(tableName, fam);) {
+    Table table = null;
+    try {
+      table = TEST_UTIL.createTable(tableName, fam);
       byte[] row1 = Bytes.toBytes("row1");
       byte[] val = Bytes.toBytes("a");
       Put put = new Put(row1);
@@ -633,6 +708,10 @@ public abstract class TestVisibilityLabels {
       table.append(append);
       result = table.get(get);
       assertTrue(!result.isEmpty());
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
@@ -693,7 +772,9 @@ public abstract class TestVisibilityLabels {
     col.setMaxVersions(5);
     desc.addFamily(col);
     TEST_UTIL.getHBaseAdmin().createTable(desc);
-    try (Table table = TEST_UTIL.getConnection().getTable(tableName)) {
+    Table table = null;
+    try {
+      table = new HTable(TEST_UTIL.getConfiguration(), tableName);
       Put put = new Put(r1);
       put.add(fam, qual, 3l, v1);
       put.add(fam, qual2, 3l, v1);
@@ -766,6 +847,10 @@ public abstract class TestVisibilityLabels {
       assertNotNull(cell);
       assertTrue(Bytes.equals(v2, 0, v2.length, cell.getValueArray(), cell.getValueOffset(),
           cell.getValueLength()));
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 
@@ -777,7 +862,8 @@ public abstract class TestVisibilityLabels {
     HColumnDescriptor col = new HColumnDescriptor(fam);
     desc.addFamily(col);
     TEST_UTIL.getHBaseAdmin().createTable(desc);
-    try (Table table = TEST_UTIL.getConnection().getTable(tableName)){
+    Table table = new HTable(TEST_UTIL.getConfiguration(), tableName);
+    try {
       Put p1 = new Put(row1);
       p1.add(fam, qual, value);
       p1.setCellVisibility(new CellVisibility(CONFIDENTIAL));
@@ -802,6 +888,8 @@ public abstract class TestVisibilityLabels {
       result = table.get(get);
       assertFalse(result.containsColumn(fam, qual));
       assertTrue(result.containsColumn(fam, qual2));
+    } finally {
+      table.close();
     }
   }
 

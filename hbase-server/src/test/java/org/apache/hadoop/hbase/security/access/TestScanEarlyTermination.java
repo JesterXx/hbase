@@ -31,8 +31,7 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.Connection;
-import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
@@ -155,8 +154,8 @@ public class TestScanEarlyTermination extends SecureTestUtil {
       public Object run() throws Exception {
         // force a new RS connection
         conf.set("testkey", UUID.randomUUID().toString());
-        try (Connection connection = ConnectionFactory.createConnection(conf);
-             Table t = connection.getTable(TEST_TABLE.getTableName())) {
+        Table t = new HTable(conf, TEST_TABLE.getTableName());
+        try {
           Put put = new Put(TEST_ROW).add(TEST_FAMILY1, TEST_Q1, ZERO);
           t.put(put);
           // Set a READ cell ACL for USER_OTHER on this value in FAMILY2
@@ -167,6 +166,8 @@ public class TestScanEarlyTermination extends SecureTestUtil {
           put = new Put(TEST_ROW).add(TEST_FAMILY2, TEST_Q2, ZERO);
           put.setACL(USER_OTHER.getShortName(), new Permission());
           t.put(put);
+        } finally {
+          t.close();
         }
         return null;
       }
@@ -178,8 +179,8 @@ public class TestScanEarlyTermination extends SecureTestUtil {
       public Object run() throws Exception {
         // force a new RS connection
         conf.set("testkey", UUID.randomUUID().toString());
-        try (Connection connection = ConnectionFactory.createConnection(conf);
-             Table t = connection.getTable(TEST_TABLE.getTableName())) {
+        Table t = new HTable(conf, TEST_TABLE.getTableName());
+        try {
           Scan scan = new Scan().addFamily(TEST_FAMILY1);
           Result result = t.getScanner(scan).next();
           if (result != null) {
@@ -188,6 +189,8 @@ public class TestScanEarlyTermination extends SecureTestUtil {
             return result.listCells();
           }
           return null;
+        } finally {
+          t.close();
         }
       }
     }, USER_OTHER);
@@ -200,8 +203,8 @@ public class TestScanEarlyTermination extends SecureTestUtil {
       public Object run() throws Exception {
         // force a new RS connection
         conf.set("testkey", UUID.randomUUID().toString());
-        try (Connection connection = ConnectionFactory.createConnection(conf);
-             Table t = connection.getTable(TEST_TABLE.getTableName())) {
+        Table t = new HTable(conf, TEST_TABLE.getTableName());
+        try {
           Scan scan = new Scan();
           Result result = t.getScanner(scan).next();
           if (result != null) {
@@ -210,24 +213,28 @@ public class TestScanEarlyTermination extends SecureTestUtil {
             return result.listCells();
           }
           return null;
+        } finally {
+          t.close();
         }
       }
     }, USER_OTHER);
 
     // A scan of FAMILY2 will throw an AccessDeniedException
-    verifyDenied(new AccessTestAction() {
+    verifyDeniedWithException(new AccessTestAction() {
       @Override
       public Object run() throws Exception {
         // force a new RS connection
         conf.set("testkey", UUID.randomUUID().toString());
-        try (Connection connection = ConnectionFactory.createConnection(conf);
-             Table t = connection.getTable(TEST_TABLE.getTableName())) {
+        Table t = new HTable(conf, TEST_TABLE.getTableName());
+        try {
           Scan scan = new Scan().addFamily(TEST_FAMILY2);
           Result result = t.getScanner(scan).next();
           if (result != null) {
             return result.listCells();
           }
           return null;
+        } finally {
+          t.close();
         }
       }
     }, USER_OTHER);
@@ -244,8 +251,8 @@ public class TestScanEarlyTermination extends SecureTestUtil {
       public Object run() throws Exception {
         // force a new RS connection
         conf.set("testkey", UUID.randomUUID().toString());
-        try (Connection connection = ConnectionFactory.createConnection(conf);
-             Table t = connection.getTable(TEST_TABLE.getTableName())) {
+        Table t = new HTable(conf, TEST_TABLE.getTableName());
+        try {
           Scan scan = new Scan();
           Result result = t.getScanner(scan).next();
           if (result != null) {
@@ -255,6 +262,8 @@ public class TestScanEarlyTermination extends SecureTestUtil {
             return result.listCells();
           }
           return null;
+        } finally {
+          t.close();
         }
       }
     }, USER_OTHER);

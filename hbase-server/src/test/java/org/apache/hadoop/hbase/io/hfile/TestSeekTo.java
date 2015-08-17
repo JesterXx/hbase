@@ -19,67 +19,26 @@
 package org.apache.hadoop.hbase.io.hfile;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
-import org.junit.Before;
-import org.junit.Test;
-
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
-import org.apache.hadoop.hbase.CellUtil;
-import org.apache.hadoop.hbase.HBaseTestingUtility;
+import org.apache.hadoop.hbase.HBaseTestCase;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
-import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.experimental.categories.Category;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
 
 /**
  * Test {@link HFileScanner#seekTo(byte[])} and its variants.
  */
 @Category(SmallTests.class)
-@RunWith(Parameterized.class)
-public class TestSeekTo {
-
-  private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
-  private final DataBlockEncoding encoding;
-
-  @Parameters
-  public static Collection<Object[]> parameters() {
-    List<Object[]> paramList = new ArrayList<Object[]>();
-    for (DataBlockEncoding encoding : DataBlockEncoding.values()) {
-      paramList.add(new Object[] { encoding });
-    }
-    return paramList;
-  }
+public class TestSeekTo extends HBaseTestCase {
 
   static boolean switchKVs = false;
-
-  public TestSeekTo(DataBlockEncoding encoding) {
-    this.encoding = encoding;
-  }
-   
-   @Before
-   public void setUp() {
-     //reset
-     switchKVs = false;
-   }
 
   static KeyValue toKV(String row, TagUsage tagUsage) {
     if (tagUsage == TagUsage.NO_TAG) {
@@ -95,7 +54,7 @@ public class TestSeekTo {
       if (!switchKVs) {
         switchKVs = true;
         return new KeyValue(Bytes.toBytes(row), Bytes.toBytes("family"),
-            Bytes.toBytes("qualifier"), HConstants.LATEST_TIMESTAMP, Bytes.toBytes("value"));
+            Bytes.toBytes("qualifier"), Bytes.toBytes("value"));
       } else {
         switchKVs = false;
         Tag t = new Tag((byte) 1, "myTag1");
@@ -106,23 +65,20 @@ public class TestSeekTo {
       }
     }
   }
-
   static String toRowStr(Cell kv) {
     return Bytes.toString(KeyValueUtil.ensureKeyValue(kv).getRow());
   }
 
   Path makeNewFile(TagUsage tagUsage) throws IOException {
-    Path ncTFile = new Path(TEST_UTIL.getDataTestDir(), "basic.hfile");
-    FSDataOutputStream fout = TEST_UTIL.getTestFileSystem().create(ncTFile);
-    Configuration conf = TEST_UTIL.getConfiguration();
+    Path ncTFile = new Path(this.testDir, "basic.hfile");
     if (tagUsage != TagUsage.NO_TAG) {
       conf.setInt("hfile.format.version", 3);
     } else {
       conf.setInt("hfile.format.version", 2);
     }
+    FSDataOutputStream fout = this.fs.create(ncTFile);
     int blocksize = toKV("a", tagUsage).getLength() * 3;
     HFileContext context = new HFileContextBuilder().withBlockSize(blocksize)
-        .withDataBlockEncoding(encoding)
         .withIncludesTags(true).build();
     HFile.Writer writer = HFile.getWriterFactoryNoCache(conf).withOutputStream(fout)
         .withFileContext(context)
@@ -140,7 +96,6 @@ public class TestSeekTo {
     return ncTFile;
   }
 
-  @Test
   public void testSeekBefore() throws Exception {
     testSeekBeforeInternals(TagUsage.NO_TAG);
     testSeekBeforeInternals(TagUsage.ONLY_TAG);
@@ -149,8 +104,6 @@ public class TestSeekTo {
 
   protected void testSeekBeforeInternals(TagUsage tagUsage) throws IOException {
     Path p = makeNewFile(tagUsage);
-    FileSystem fs = TEST_UTIL.getTestFileSystem();
-    Configuration conf = TEST_UTIL.getConfiguration();
     HFile.Reader reader = HFile.createReader(fs, p, new CacheConfig(conf), conf);
     reader.loadFileInfo();
     HFileScanner scanner = reader.getScanner(false, true);
@@ -176,25 +129,14 @@ public class TestSeekTo {
     assertEquals("g", toRowStr(scanner.getKeyValue()));
     assertEquals(true, scanner.seekBefore(toKV("j", tagUsage)));
     assertEquals("i", toRowStr(scanner.getKeyValue()));
-    Cell cell = scanner.getKeyValue();
-    if (tagUsage != TagUsage.NO_TAG && cell.getTagsLength() > 0) {
-      Iterator<Tag> tagsIterator = CellUtil.tagsIterator(cell.getTagsArray(), cell.getTagsOffset(),
-          cell.getTagsLength());
-      while (tagsIterator.hasNext()) {
-        Tag next = tagsIterator.next();
-        assertEquals("myTag1", Bytes.toString(next.getValue()));
-      }
-    }
     assertEquals(true, scanner.seekBefore(toKV("k", tagUsage)));
     assertEquals("i", toRowStr(scanner.getKeyValue()));
     assertEquals(true, scanner.seekBefore(toKV("l", tagUsage)));
     assertEquals("k", toRowStr(scanner.getKeyValue()));
 
     reader.close();
-    deleteTestDir(fs);
   }
 
-  @Test
   public void testSeekBeforeWithReSeekTo() throws Exception {
     testSeekBeforeWithReSeekToInternals(TagUsage.NO_TAG);
     testSeekBeforeWithReSeekToInternals(TagUsage.ONLY_TAG);
@@ -203,8 +145,6 @@ public class TestSeekTo {
 
   protected void testSeekBeforeWithReSeekToInternals(TagUsage tagUsage) throws IOException {
     Path p = makeNewFile(tagUsage);
-    FileSystem fs = TEST_UTIL.getTestFileSystem();
-    Configuration conf = TEST_UTIL.getConfiguration();
     HFile.Reader reader = HFile.createReader(fs, p, new CacheConfig(conf), conf);
     reader.loadFileInfo();
     HFileScanner scanner = reader.getScanner(false, true);
@@ -222,7 +162,7 @@ public class TestSeekTo {
     assertEquals("g", toRowStr(scanner.getKeyValue()));
 
     // seekBefore e, so the scanner points to c
-    assertTrue(scanner.seekBefore(toKV("e", tagUsage)));
+    assertEquals(true, scanner.seekBefore(toKV("e", tagUsage)));
     assertEquals("c", toRowStr(scanner.getKeyValue()));
     // reseekTo e and g
     assertEquals(0, scanner.reseekTo(toKV("e", tagUsage)));
@@ -231,7 +171,7 @@ public class TestSeekTo {
     assertEquals("g", toRowStr(scanner.getKeyValue()));
 
     // seekBefore f, so the scanner points to e
-    assertTrue(scanner.seekBefore(toKV("f", tagUsage)));
+    assertEquals(true, scanner.seekBefore(toKV("f", tagUsage)));
     assertEquals("e", toRowStr(scanner.getKeyValue()));
     // reseekTo e and g
     assertEquals(0, scanner.reseekTo(toKV("e", tagUsage)));
@@ -240,7 +180,7 @@ public class TestSeekTo {
     assertEquals("g", toRowStr(scanner.getKeyValue()));
 
     // seekBefore g, so the scanner points to e
-    assertTrue(scanner.seekBefore(toKV("g", tagUsage)));
+    assertEquals(true, scanner.seekBefore(toKV("g", tagUsage)));
     assertEquals("e", toRowStr(scanner.getKeyValue()));
     // reseekTo e and g again
     assertEquals(0, scanner.reseekTo(toKV("e", tagUsage)));
@@ -249,28 +189,28 @@ public class TestSeekTo {
     assertEquals("g", toRowStr(scanner.getKeyValue()));
 
     // seekBefore h, so the scanner points to g
-    assertTrue(scanner.seekBefore(toKV("h", tagUsage)));
+    assertEquals(true, scanner.seekBefore(toKV("h", tagUsage)));
     assertEquals("g", toRowStr(scanner.getKeyValue()));
     // reseekTo g
     assertEquals(0, scanner.reseekTo(toKV("g", tagUsage)));
     assertEquals("g", toRowStr(scanner.getKeyValue()));
 
     // seekBefore i, so the scanner points to g
-    assertTrue(scanner.seekBefore(toKV("i", tagUsage)));
+    assertEquals(true, scanner.seekBefore(toKV("i", tagUsage)));
     assertEquals("g", toRowStr(scanner.getKeyValue()));
     // reseekTo g
     assertEquals(0, scanner.reseekTo(toKV("g", tagUsage)));
     assertEquals("g", toRowStr(scanner.getKeyValue()));
 
     // seekBefore j, so the scanner points to i
-    assertTrue(scanner.seekBefore(toKV("j", tagUsage)));
+    assertEquals(true, scanner.seekBefore(toKV("j", tagUsage)));
     assertEquals("i", toRowStr(scanner.getKeyValue()));
     // reseekTo i
     assertEquals(0, scanner.reseekTo(toKV("i", tagUsage)));
     assertEquals("i", toRowStr(scanner.getKeyValue()));
 
     // seekBefore k, so the scanner points to i
-    assertTrue(scanner.seekBefore(toKV("k", tagUsage)));
+    assertEquals(true, scanner.seekBefore(toKV("k", tagUsage)));
     assertEquals("i", toRowStr(scanner.getKeyValue()));
     // reseekTo i and k
     assertEquals(0, scanner.reseekTo(toKV("i", tagUsage)));
@@ -284,10 +224,8 @@ public class TestSeekTo {
     // reseekTo k
     assertEquals(0, scanner.reseekTo(toKV("k", tagUsage)));
     assertEquals("k", toRowStr(scanner.getKeyValue()));
-    deleteTestDir(fs);
   }
 
-  @Test
   public void testSeekTo() throws Exception {
     testSeekToInternals(TagUsage.NO_TAG);
     testSeekToInternals(TagUsage.ONLY_TAG);
@@ -296,8 +234,6 @@ public class TestSeekTo {
 
   protected void testSeekToInternals(TagUsage tagUsage) throws IOException {
     Path p = makeNewFile(tagUsage);
-    FileSystem fs = TEST_UTIL.getTestFileSystem();
-    Configuration conf = TEST_UTIL.getConfiguration();
     HFile.Reader reader = HFile.createReader(fs, p, new CacheConfig(conf), conf);
     reader.loadFileInfo();
     assertEquals(2, reader.getDataBlockIndexReader().getRootBlockCount());
@@ -312,35 +248,20 @@ public class TestSeekTo {
     // 'h' does not exist so we will get a '1' back for not found.
     assertEquals(0, scanner.seekTo(toKV("i", tagUsage)));
     assertEquals("i", toRowStr(scanner.getKeyValue()));
+
     assertEquals(1, scanner.seekTo(toKV("l", tagUsage)));
-    if (encoding == DataBlockEncoding.PREFIX_TREE) {
-      // TODO : Fix this
-      assertEquals(null, scanner.getKeyValue());
-    } else {
-      assertEquals("k", toRowStr(scanner.getKeyValue()));
-    }
+    assertEquals("k", toRowStr(scanner.getKeyValue()));
 
     reader.close();
-    deleteTestDir(fs);
   }
-
-  @Test
   public void testBlockContainingKey() throws Exception {
     testBlockContainingKeyInternals(TagUsage.NO_TAG);
     testBlockContainingKeyInternals(TagUsage.ONLY_TAG);
     testBlockContainingKeyInternals(TagUsage.PARTIAL_TAG);
   }
 
-  protected void deleteTestDir(FileSystem fs) throws IOException {
-    Path dataTestDir = TEST_UTIL.getDataTestDir();
-    if (fs.exists(dataTestDir)) {
-      fs.delete(dataTestDir, true);
-    }
-  }
   protected void testBlockContainingKeyInternals(TagUsage tagUsage) throws IOException {
     Path p = makeNewFile(tagUsage);
-    FileSystem fs = TEST_UTIL.getTestFileSystem();
-    Configuration conf = TEST_UTIL.getConfiguration();
     HFile.Reader reader = HFile.createReader(fs, p, new CacheConfig(conf), conf);
     reader.loadFileInfo();
     HFileBlockIndex.BlockIndexReader blockIndexReader = 
@@ -367,6 +288,5 @@ public class TestSeekTo {
     assertEquals(1, blockIndexReader.rootBlockContainingKey(
         toKV("l", tagUsage)));
     reader.close();
-    deleteTestDir(fs);
   }
 }

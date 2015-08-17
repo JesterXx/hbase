@@ -74,8 +74,6 @@ import org.apache.hadoop.hbase.filter.CompareFilter;
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
 import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.filter.FilterList;
-import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter;
-import org.apache.hadoop.hbase.filter.InclusiveStopFilter;
 import org.apache.hadoop.hbase.filter.KeyOnlyFilter;
 import org.apache.hadoop.hbase.filter.LongComparator;
 import org.apache.hadoop.hbase.filter.PrefixFilter;
@@ -4437,17 +4435,6 @@ public class TestFromClientSide {
     r = t.get(g);
     assertEquals(0, Bytes.compareTo(VALUE, r.getValue(FAMILY, QUALIFIERS[1])));
     assertNull(r.getValue(FAMILY, QUALIFIERS[0]));
-
-    //Test that we get a region level exception
-    try {
-      arm = new RowMutations(ROW);
-      p = new Put(ROW);
-      p.add(new byte[]{'b', 'o', 'g', 'u', 's'}, QUALIFIERS[0], VALUE);
-      arm.add(p);
-      t.mutateRow(arm);
-      fail("Expected NoSuchColumnFamilyException");
-    } catch(NoSuchColumnFamilyException e) {
-    }
   }
 
   @Test
@@ -4620,49 +4607,6 @@ public class TestFromClientSide {
     assertIncrementKey(kvs[0], ROW, FAMILY, QUALIFIERS[1], 2);
     assertIncrementKey(kvs[1], ROW, FAMILY, QUALIFIERS[0], 2);
     assertIncrementKey(kvs[2], ROW, FAMILY, QUALIFIERS[2], 2);
-  }
-
-  @Test
-  public void testIncrementOnSameColumn() throws Exception {
-    LOG.info("Starting testIncrementOnSameColumn");
-    final byte[] TABLENAME = Bytes.toBytes("testIncrementOnSameColumn");
-    HTable ht = TEST_UTIL.createTable(TABLENAME, FAMILY);
-
-    byte[][] QUALIFIERS =
-        new byte[][] { Bytes.toBytes("A"), Bytes.toBytes("B"), Bytes.toBytes("C") };
-
-    Increment inc = new Increment(ROW);
-    for (int i = 0; i < QUALIFIERS.length; i++) {
-      inc.addColumn(FAMILY, QUALIFIERS[i], 1);
-      inc.addColumn(FAMILY, QUALIFIERS[i], 1);
-    }
-    ht.increment(inc);
-
-    // Verify expected results
-    Result r = ht.get(new Get(ROW));
-    Cell[] kvs = r.rawCells();
-    assertEquals(3, kvs.length);
-    assertIncrementKey(kvs[0], ROW, FAMILY, QUALIFIERS[0], 1);
-    assertIncrementKey(kvs[1], ROW, FAMILY, QUALIFIERS[1], 1);
-    assertIncrementKey(kvs[2], ROW, FAMILY, QUALIFIERS[2], 1);
-
-    // Now try multiple columns again
-    inc = new Increment(ROW);
-    for (int i = 0; i < QUALIFIERS.length; i++) {
-      inc.addColumn(FAMILY, QUALIFIERS[i], 1);
-      inc.addColumn(FAMILY, QUALIFIERS[i], 1);
-    }
-    ht.increment(inc);
-
-    // Verify
-    r = ht.get(new Get(ROW));
-    kvs = r.rawCells();
-    assertEquals(3, kvs.length);
-    assertIncrementKey(kvs[0], ROW, FAMILY, QUALIFIERS[0], 2);
-    assertIncrementKey(kvs[1], ROW, FAMILY, QUALIFIERS[1], 2);
-    assertIncrementKey(kvs[2], ROW, FAMILY, QUALIFIERS[2], 2);
-    
-    ht.close();
   }
 
   @Test
@@ -5100,39 +5044,6 @@ public class TestFromClientSide {
     assertEquals("Did not access all the regions in the table", numOfRegions,
         scanMetrics.countOfRegions.get());
 
-    // check byte counters
-    scan2 = new Scan();
-    scan2.setScanMetricsEnabled(true);
-    scan2.setCaching(1);
-    scanner = ht.getScanner(scan2);
-    int numBytes = 0;
-    for (Result result : scanner.next(1)) {
-      for (Cell cell: result.listCells()) {
-        numBytes += CellUtil.estimatedSerializedSizeOf(cell);
-      }
-    }
-    scanner.close();
-    scanMetrics = scan2.getScanMetrics();
-    assertEquals("Did not count the result bytes", numBytes,
-      scanMetrics.countOfBytesInResults.get());
-
-    // check byte counters on a small scan
-    scan2 = new Scan();
-    scan2.setScanMetricsEnabled(true);
-    scan2.setCaching(1);
-    scan2.setSmall(true);
-    scanner = ht.getScanner(scan2);
-    numBytes = 0;
-    for (Result result : scanner.next(1)) {
-      for (Cell cell: result.listCells()) {
-        numBytes += CellUtil.estimatedSerializedSizeOf(cell);
-      }
-    }
-    scanner.close();
-    scanMetrics = scan2.getScanMetrics();
-    assertEquals("Did not count the result bytes", numBytes,
-      scanMetrics.countOfBytesInResults.get());
-
     // now, test that the metrics are still collected even if you don't call close, but do
     // run past the end of all the records
     /** There seems to be a timing issue here.  Comment out for now. Fix when time.
@@ -5560,14 +5471,6 @@ public class TestFromClientSide {
       hcd.setMaxVersions(10);
     }
     checkTableIsLegal(htd);
-
-    // HBASE-13776 Setting illegal versions for HColumnDescriptor
-    //  does not throw IllegalArgumentException
-    // finally, minVersions must be less than or equal to maxVersions
-    hcd.setMaxVersions(4);
-    hcd.setMinVersions(5);
-    checkTableIsIllegal(htd);
-    hcd.setMinVersions(3);
 
     hcd.setScope(-1);
     checkTableIsIllegal(htd);
@@ -6377,17 +6280,4 @@ public class TestFromClientSide {
     }
   }
 
-  @Test
-  public void testFilterAllRecords() throws IOException {
-    Scan scan = new Scan();
-    scan.setBatch(1);
-    scan.setCaching(1);
-    // Filter out any records
-    scan.setFilter(new FilterList(new FirstKeyOnlyFilter(), new InclusiveStopFilter(new byte[0])));
-    try (Table table = TEST_UTIL.getConnection().getTable(TableName.NAMESPACE_TABLE_NAME)) {
-      try (ResultScanner s = table.getScanner(scan)) {
-        assertNull(s.next());
-      }
-    }
-  }
 }

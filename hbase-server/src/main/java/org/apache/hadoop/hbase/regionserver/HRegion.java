@@ -160,8 +160,6 @@ import org.apache.hadoop.hbase.util.ServerRegionReplicaUtil;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.io.MultipleIOException;
 import org.apache.hadoop.util.StringUtils;
-import org.apache.htrace.Trace;
-import org.apache.htrace.TraceScope;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
@@ -1150,9 +1148,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
    * vector if already closed and null if judged that it should not close.
    *
    * @throws IOException e
-   * @throws DroppedSnapshotException Thrown when replay of wal is required
-   * because a Snapshot was not properly persisted. The region is put in closing mode, and the
-   * caller MUST abort after this.
    */
   public Map<byte[], List<StoreFile>> close() throws IOException {
     return close(false);
@@ -1189,9 +1184,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
    * we are not to close at this time or we are already closed.
    *
    * @throws IOException e
-   * @throws DroppedSnapshotException Thrown when replay of wal is required
-   * because a Snapshot was not properly persisted. The region is put in closing mode, and the
-   * caller MUST abort after this.
    */
   public Map<byte[], List<StoreFile>> close(final boolean abort) throws IOException {
     // Only allow one thread to close at a time. Serialize them so dual
@@ -1208,14 +1200,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
     } finally {
       status.cleanup();
     }
-  }
-
-  /**
-   * Exposed for some very specific unit tests.
-   */
-  @VisibleForTesting
-  public void setClosing(boolean closing) {
-    this.closing.set(closing);
   }
 
   private Map<byte[], List<StoreFile>> doClose(final boolean abort, MonitoredTask status)
@@ -1670,8 +1654,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
    *
    * @throws IOException general io exceptions
    * @throws DroppedSnapshotException Thrown when replay of wal is required
-   * because a Snapshot was not properly persisted. The region is put in closing mode, and the
-   * caller MUST abort after this.
+   * because a Snapshot was not properly persisted.
    */
   public FlushResult flushcache() throws IOException {
     // fail-fast instead of waiting on the lock
@@ -2017,18 +2000,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
           Bytes.toStringBinary(getRegionName()));
       dse.initCause(t);
       status.abort("Flush failed: " + StringUtils.stringifyException(t));
-
-      // Callers for flushcache() should catch DroppedSnapshotException and abort the region server.
-      // However, since we may have the region read lock, we cannot call close(true) here since
-      // we cannot promote to a write lock. Instead we are setting closing so that all other region
-      // operations except for close will be rejected.
-      this.closing.set(true);
-
-      if (rsServices != null) {
-        // This is a safeguard against the case where the caller fails to explicitly handle aborting
-        rsServices.abort("Replay of WAL required. Forcing server shutdown", dse);
-      }
-
       throw dse;
     }
 
@@ -2619,7 +2590,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
           } else {
             prepareDelete((Delete) mutation);
           }
-          checkRow(mutation.getRow(), "doMiniBatchMutation");
         } catch (NoSuchColumnFamilyException nscf) {
           LOG.warn("No such column family in batch mutation", nscf);
           batchOp.retCodeDetails[lastIndexExclusive] = new OperationStatus(
@@ -2630,12 +2600,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
           LOG.warn("Batch Mutation did not pass sanity check", fsce);
           batchOp.retCodeDetails[lastIndexExclusive] = new OperationStatus(
               OperationStatusCode.SANITY_CHECK_FAILURE, fsce.getMessage());
-          lastIndexExclusive++;
-          continue;
-        } catch (WrongRegionException we) {
-          LOG.warn("Batch mutation had a row that does not belong to this region", we);
-          batchOp.retCodeDetails[lastIndexExclusive] = new OperationStatus(
-              OperationStatusCode.SANITY_CHECK_FAILURE, we.getMessage());
           lastIndexExclusive++;
           continue;
         }
@@ -3264,13 +3228,13 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
    */
   protected void checkReadOnly() throws IOException {
     if (this.writestate.isReadOnly()) {
-      throw new DoNotRetryIOException("region is read only");
+      throw new IOException("region is read only");
     }
   }
 
   protected void checkReadsEnabled() throws IOException {
     if (!this.writestate.readsEnabled) {
-      throw new IOException("The region's reads are disabled. Cannot serve the request");
+      throw new IOException ("The region's reads are disabled. Cannot serve the request");
     }
   }
 
@@ -3915,6 +3879,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
    * started (the calling thread has already acquired the region-close-guard lock).
    */
   protected RowLock getRowLockInternal(byte[] row, boolean waitForLock) throws IOException {
+    checkRow(row, "row lock");
     HashedBytes rowKey = new HashedBytes(row);
     RowLockContext rowLockContext = new RowLockContext(rowKey);
 
@@ -3932,27 +3897,16 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
         if (!waitForLock) {
           return null;
         }
-        TraceScope traceScope = null;
         try {
-          if (Trace.isTracing()) {
-            traceScope = Trace.startSpan("HRegion.getRowLockInternal");
-          }
           // Row is already locked by some other thread, give up or wait for it
           if (!existingContext.latch.await(this.rowLockWaitDuration, TimeUnit.MILLISECONDS)) {
-            if(traceScope != null) {
-              traceScope.getSpan().addTimelineAnnotation("Failed to get row lock");
-            }
             throw new IOException("Timed out waiting for lock for row: " + rowKey);
           }
-          if (traceScope != null) traceScope.close();
-          traceScope = null;
         } catch (InterruptedException ie) {
           LOG.warn("Thread interrupted waiting for lock on row: " + rowKey);
           InterruptedIOException iie = new InterruptedIOException();
           iie.initCause(ie);
           throw iie;
-        } finally {
-          if (traceScope != null) traceScope.close();
         }
       }
     }
@@ -5876,19 +5830,17 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
             // Iterate the input columns and update existing values if they were
             // found, otherwise add new column initialized to the increment amount
             int idx = 0;
-            List<Cell> edits = family.getValue();
-            for (int i = 0; i < edits.size(); i++) {
-              Cell cell = edits.get(i);
+            for (Cell cell: family.getValue()) {
               long amount = Bytes.toLong(CellUtil.cloneValue(cell));
               boolean noWriteBack = (amount == 0);
               List<Tag> newTags = new ArrayList<Tag>();
 
               // Carry forward any tags that might have been added by a coprocessor
               if (cell.getTagsLength() > 0) {
-                Iterator<Tag> itr = CellUtil.tagsIterator(cell.getTagsArray(),
+                Iterator<Tag> i = CellUtil.tagsIterator(cell.getTagsArray(),
                   cell.getTagsOffset(), cell.getTagsLength());
-                while (itr.hasNext()) {
-                  newTags.add(itr.next());
+                while (i.hasNext()) {
+                  newTags.add(i.next());
                 }
               }
 
@@ -5906,14 +5858,13 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
                 }
                 // Carry tags forward from previous version
                 if (c.getTagsLength() > 0) {
-                  Iterator<Tag> itr = CellUtil.tagsIterator(c.getTagsArray(),
+                  Iterator<Tag> i = CellUtil.tagsIterator(c.getTagsArray(),
                     c.getTagsOffset(), c.getTagsLength());
-                  while (itr.hasNext()) {
-                    newTags.add(itr.next());
+                  while (i.hasNext()) {
+                    newTags.add(i.next());
                   }
                 }
-                if (i < ( edits.size() - 1) && !CellUtil.matchingQualifier(cell, edits.get(i + 1)))
-                  idx++;
+                idx++;
               }
 
               // Append new incremented KeyValue to list
@@ -6057,7 +6008,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
       ClassSize.ARRAY +
       42 * ClassSize.REFERENCE + 2 * Bytes.SIZEOF_INT +
       (12 * Bytes.SIZEOF_LONG) +
-      5 * Bytes.SIZEOF_BOOLEAN);
+      4 * Bytes.SIZEOF_BOOLEAN);
 
   // woefully out of date - currently missing:
   // 1 x HashMap - coprocessorServiceHandlers

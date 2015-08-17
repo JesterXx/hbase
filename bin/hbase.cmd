@@ -28,9 +28,8 @@
 @rem
 @rem   HBASE_CLASSPATH  Extra Java CLASSPATH entries.
 @rem
-@rem   HBASE_HEAPSIZE   The maximum amount of heap to use.
-@rem                    Default is unset and uses the JVMs default setting
-@rem                    (usually 1/4th of the available memory).
+@rem   HBASE_HEAPSIZE   The maximum amount of heap to use, in MB. 
+@rem                    Default is 1000.
 @rem
 @rem   HBASE_OPTS       Extra Java runtime options.
 @rem
@@ -88,8 +87,8 @@ if "%hbase-command%"=="" (
   goto :eof
 )
 
-set JAVA_HEAP_MAX=
-set JAVA_OFFHEAP_MAX=
+set JAVA_HEAP_MAX=-Xmx1000m
+set JAVA_OFFHEAP_MAX=""
 
 rem check envvars which might override default args
 if defined HBASE_HEAPSIZE (
@@ -118,8 +117,8 @@ if "%in_dev_env%"=="true" (
   )
 
   if not exist "%cached_classpath_filename%" (
-    echo "As this is a development environment, we need %cached_classpath_filename% to be generated from maven (command: mvn install -DskipTests)"
-    goto :eof
+      echo "As this is a development environment, we need %cached_classpath_filename% to be generated from maven (command: mvn install -DskipTests)"
+	  goto :eof
   )
 
   for /f "delims=" %%i in ('type "%cached_classpath_filename%"') do set CLASSPATH=%CLASSPATH%;%%i
@@ -251,7 +250,7 @@ if defined service_entry (
   set HBASE_LOG_PREFIX=hbase-%hbase-command%-%COMPUTERNAME%
   set HBASE_LOGFILE=!HBASE_LOG_PREFIX!.log
   if not defined HBASE_ROOT_LOGGER (
-    set HBASE_ROOT_LOGGER=INFO,DRFA
+	set HBASE_ROOT_LOGGER=INFO,DRFA
   )
   set HBASE_SECURITY_LOGGER=INFO,DRFAS
   set loggc=!HBASE_LOG_DIR!\!HBASE_LOG_PREFIX!.gc
@@ -294,7 +293,7 @@ if not defined HBASE_SECURITY_LOGGER (
 )
 set HBASE_OPTS=%HBASE_OPTS% -Dhbase.security.logger="%HBASE_SECURITY_LOGGER%"
 
-set HEAP_SETTINGS=%JAVA_HEAP_MAX% %JAVA_OFFHEAP_MAX%
+set HEAP_SETTINGS="%JAVA_HEAP_MAX% %JAVA_OFFHEAP_MAX%"
 set java_arguments=%HEAP_SETTINGS% %HBASE_OPTS% -classpath "%CLASSPATH%" %CLASS% %hbase-command-arguments%
 
 if defined service_entry (

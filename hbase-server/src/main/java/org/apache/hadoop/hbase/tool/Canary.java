@@ -54,7 +54,6 @@ import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
-import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
@@ -231,9 +230,6 @@ public final class Canary implements Tool {
         index = i;
       }
     }
-
-    // launches chore for refreshing kerberos ticket if security is enabled.
-    AuthUtil.launchAuthChore(conf);
 
     // Start to prepare the stuffs
     Monitor monitor = null;
@@ -540,15 +536,10 @@ public final class Canary implements Tool {
       // Can't do a get on empty start row so do a Scan of first element if any instead.
       if (startKey.length > 0) {
         get = new Get(startKey);
-        get.setCacheBlocks(false);
-        get.setFilter(new FirstKeyOnlyFilter());
         get.addFamily(column.getName());
       } else {
         scan = new Scan();
-        scan.setRaw(true);
         scan.setCaching(1);
-        scan.setCacheBlocks(false);
-        scan.setFilter(new FirstKeyOnlyFilter());
         scan.addFamily(column.getName());
         scan.setMaxResultSize(1L);
       }
@@ -782,6 +773,7 @@ public final class Canary implements Tool {
 
   public static void main(String[] args) throws Exception {
     final Configuration conf = HBaseConfiguration.create();
+    AuthUtil.launchAuthChore(conf);
     int exitCode = ToolRunner.run(conf, new Canary(), args);
     System.exit(exitCode);
   }

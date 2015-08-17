@@ -331,12 +331,6 @@ ClientProtos.ClientService.BlockingInterface, RegionServerServices {
   }
 
   @Override
-  public void postOpenDeployTasks(PostOpenDeployContext context) throws KeeperException,
-      IOException {
-    // TODO Auto-generated method stub
-  }
-
-  @Override
   public RpcServerInterface getRpcServer() {
     // TODO Auto-generated method stub
     return null;
@@ -587,11 +581,6 @@ ClientProtos.ClientService.BlockingInterface, RegionServerServices {
   @Override
   public boolean reportRegionStateTransition(TransitionCode code, long openSeqNum,
       HRegionInfo... hris) {
-    return false;
-  }
-
-  @Override
-  public boolean reportRegionStateTransition(RegionStateTransitionContext context) {
     return false;
   }
 

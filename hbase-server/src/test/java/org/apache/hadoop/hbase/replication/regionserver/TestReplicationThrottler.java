@@ -65,15 +65,8 @@ public class TestReplicationThrottler {
     //    sleep 1000/100 = 10 cycles = 1s and make throttler2 sleep 1000/10
     //    = 100 cycles = 10s before the second push occurs -- amortize case
     //    after amortizing, both cycleStartTick and cyclePushSize are reset
-    //
-    // Note: in a slow machine, the sleep interval might be less than ideal ticks.
-    // If it is 75% of expected value, its is still acceptable.
-    if (ticks1 != 1000 && ticks1 != 999) {
-      assertTrue(ticks1 >= 750 && ticks1 <=1000);
-    }
-    if (ticks2 != 10000 && ticks2 != 9999) {
-      assertTrue(ticks1 >= 7500 && ticks1 <=10000);
-    }
+    assertTrue(ticks1 == 1000 || ticks1 == 999);
+    assertTrue(ticks2 == 10000 || ticks2 == 9999);
 
     throttler1.resetStartTick();
     throttler2.resetStartTick();
@@ -90,9 +83,7 @@ public class TestReplicationThrottler {
     // note: in real case, sleep time should cover time elapses during push
     //       operation
     assertTrue(ticks1 == 0);
-    if (ticks2 != 100 && ticks2 != 99) {
-      assertTrue(ticks1 >= 75 && ticks1 <=100);
-    }
+    assertTrue(ticks2 == 100 || ticks2 == 99);
 
     throttler2.resetStartTick();
 
@@ -105,13 +96,9 @@ public class TestReplicationThrottler {
     // 4. when the fourth push(60) arrives and throttling(60) is called, throttler1
     //    delay to next cycle since 45+60 == 105; and throttler2 should firstly sleep
     //    ceiling(45/10)= 5 cycles = 500ms to amortize previous push
-    //
-    // Note: in real case, sleep time should cover time elapses during push operation
-    if (ticks1 != 100 && ticks1 != 99) {
-      assertTrue(ticks1 >= 75 && ticks1 <=100);
-    }
-    if (ticks2 != 500 && ticks2 != 499) {
-      assertTrue(ticks1 >= 375 && ticks1 <=500);
-    }
+    // note: in real case, sleep time should cover time elapses during push
+    //       operation
+    assertTrue(ticks1 == 100 || ticks1 == 99);
+    assertTrue(ticks2 == 500 || ticks2 == 499);
   }
 }

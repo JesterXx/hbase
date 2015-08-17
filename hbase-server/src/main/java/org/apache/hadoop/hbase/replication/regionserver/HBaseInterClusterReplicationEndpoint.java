@@ -163,7 +163,6 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
 
         // update metrics
         this.metrics.setAgeOfLastShippedOp(entries.get(entries.size()-1).getKey().getWriteTime());
-        replicationSinkMgr.reportSinkSuccess(sinkPeer);
         return true;
 
       } catch (IOException ioe) {

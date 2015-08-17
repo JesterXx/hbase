@@ -284,7 +284,7 @@ public class TestRegionServerNoMaster {
       // we re-opened meta so some of its data is lost
       ServerName sn = getRS().getServerName();
       MetaTableAccessor.updateRegionLocation(getRS().getConnection(),
-        hri, sn, getRS().getRegion(regionName).getOpenSeqNum(), -1);
+        hri, sn, getRS().getRegion(regionName).getOpenSeqNum());
       // fake region to be closing now, need to clear state afterwards
       getRS().regionsInTransitionInRS.put(hri.getEncodedNameAsBytes(), Boolean.FALSE);
       AdminProtos.OpenRegionRequest orr =
@@ -366,7 +366,7 @@ public class TestRegionServerNoMaster {
     zkCrd.setVersionOfOfflineNode(0);
 
     getRS().service.submit(new OpenRegionHandler(getRS(), getRS(), hri, htd,
-      -1, csm.getOpenRegionCoordination(), zkCrd));
+      csm.getOpenRegionCoordination(), zkCrd));
 
     // The open handler should have removed the region from RIT but kept the region closed
     checkRegionIsClosed();
@@ -431,7 +431,7 @@ public class TestRegionServerNoMaster {
     zkCrd.setVersionOfOfflineNode(0);
 
     getRS().service.submit(new OpenRegionHandler(getRS(), getRS(), hri, htd,
-      -1, csm.getOpenRegionCoordination(), zkCrd));
+      csm.getOpenRegionCoordination(), zkCrd));
 
     // The open handler should have removed the region from RIT but kept the region closed
     checkRegionIsClosed();

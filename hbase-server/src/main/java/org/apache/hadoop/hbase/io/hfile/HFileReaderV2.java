@@ -33,7 +33,6 @@ import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.KVComparator;
-import org.apache.hadoop.hbase.NoTagsKeyValue;
 import org.apache.hadoop.hbase.fs.HFileSystem;
 import org.apache.hadoop.hbase.io.FSDataInputStreamWrapper;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoder;
@@ -401,9 +400,6 @@ public class HFileReaderV2 extends AbstractHFileReader {
           HFileBlock cachedBlock = getCachedBlock(cacheKey, cacheBlock, useLock, isCompaction,
             updateCacheMetrics, expectedBlockType, expectedDataBlockEncoding);
           if (cachedBlock != null) {
-            if (Trace.isTracing()) {
-              traceScope.getSpan().addTimelineAnnotation("blockCacheHit");
-            }
             assert cachedBlock.isUnpacked() : "Packed block leak.";
             if (cachedBlock.getBlockType().isData()) {
               if (updateCacheMetrics) {
@@ -541,10 +537,6 @@ public class HFileReaderV2 extends AbstractHFileReader {
       extends AbstractHFileReader.Scanner {
     protected HFileBlock block;
 
-    @Override
-    public Cell getNextIndexedKey() {
-      return nextIndexedKey;
-    }
     /**
      * The next indexed key is to keep track of the indexed key of the next data block.
      * If the nextIndexedKey is HConstants.NO_NEXT_INDEXED_KEY, it means that the
@@ -552,7 +544,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
      *
      * If the nextIndexedKey is null, it means the nextIndexedKey has not been loaded yet.
      */
-    protected Cell nextIndexedKey;
+    protected byte[] nextIndexedKey;
 
     public AbstractScannerV2(HFileReaderV2 r, boolean cacheBlocks,
         final boolean pread, final boolean isCompaction) {
@@ -561,7 +553,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
 
     protected abstract ByteBuffer getFirstKeyInBlock(HFileBlock curBlock);
 
-    protected abstract int loadBlockAndSeekToKey(HFileBlock seekToBlock, Cell nextIndexedKey,
+    protected abstract int loadBlockAndSeekToKey(HFileBlock seekToBlock, byte[] nextIndexedKey,
         boolean rewind, Cell key, boolean seekBefore) throws IOException;
 
     @Override
@@ -595,7 +587,9 @@ public class HFileReaderV2 extends AbstractHFileReader {
           if (this.nextIndexedKey != null &&
               (this.nextIndexedKey == HConstants.NO_NEXT_INDEXED_KEY || reader
               .getComparator()
-                  .compareOnlyKeyPortion(key, nextIndexedKey) < 0)) {
+                  .compareOnlyKeyPortion(key,
+                      new KeyValue.KeyOnlyKeyValue(nextIndexedKey, 0,
+                          nextIndexedKey.length)) < 0)) {
             // The reader shall continue to scan the current data block instead
             // of querying the
             // block index as long as it knows the target key is strictly
@@ -673,7 +667,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
         // TODO shortcut: seek forward in this block to the last key of the
         // block.
       }
-      Cell firstKeyInCurrentBlock = new KeyValue.KeyOnlyKeyValue(Bytes.getBytes(firstKey));
+      byte[] firstKeyInCurrentBlock = Bytes.getBytes(firstKey);
       loadBlockAndSeekToKey(seekToBlock, firstKeyInCurrentBlock, true, key, true);
       return true;
     }
@@ -745,11 +739,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
       if (!isSeeked())
         return null;
 
-      return formNoTagsKeyValue();
-    }
-
-    protected Cell formNoTagsKeyValue() {
-      NoTagsKeyValue ret = new NoTagsKeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
+      KeyValue ret = new KeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
           + blockBuffer.position(), getCellBufSize());
       if (this.reader.shouldIncludeMemstoreTS()) {
         ret.setSequenceId(currMemstoreTS);
@@ -882,7 +872,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
     }
 
     @Override
-    protected int loadBlockAndSeekToKey(HFileBlock seekToBlock, Cell nextIndexedKey,
+    protected int loadBlockAndSeekToKey(HFileBlock seekToBlock, byte[] nextIndexedKey,
         boolean rewind, Cell key, boolean seekBefore) throws IOException {
       if (block == null || block.getOffset() != seekToBlock.getOffset()) {
         updateCurrBlock(seekToBlock);
@@ -1239,7 +1229,7 @@ public class HFileReaderV2 extends AbstractHFileReader {
     }
 
     @Override
-    protected int loadBlockAndSeekToKey(HFileBlock seekToBlock, Cell nextIndexedKey,
+    protected int loadBlockAndSeekToKey(HFileBlock seekToBlock, byte[] nextIndexedKey,
         boolean rewind, Cell key, boolean seekBefore) throws IOException {
       if (block == null || block.getOffset() != seekToBlock.getOffset()) {
         updateCurrentBlock(seekToBlock);

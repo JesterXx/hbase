@@ -170,8 +170,6 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
       nextKvOffset = nextState.nextKvOffset;
       memstoreTS = nextState.memstoreTS;
       currentBuffer = nextState.currentBuffer;
-      tagsOffset = nextState.tagsOffset;
-      tagsLength = nextState.tagsLength;
       if (nextState.tagCompressionContext != null) {
         tagCompressionContext = nextState.tagCompressionContext;
       }
@@ -582,7 +580,6 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
     public ByteBuffer getKeyDeepCopy() {
       ByteBuffer keyBuffer = ByteBuffer.allocate(current.keyLength);
       keyBuffer.put(current.keyBuffer, 0, current.keyLength);
-      keyBuffer.rewind();
       return keyBuffer;
     }
 
@@ -617,7 +614,6 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
           kvBuffer.put(current.tagsBuffer, 0, current.tagsLength);
         }
       }
-      kvBuffer.rewind();
       return kvBuffer;
     }
 

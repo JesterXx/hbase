@@ -59,10 +59,8 @@ public class TableLockChecker {
         String msg = "Table lock acquire attempt found:";
         if (data != null) {
            msg = msg +
-              String.format("[tableName=%s:%s, lockOwner=%s, threadId=%s, " +
-              "purpose=%s, isShared=%s, createTime=%s]",
-              data.getTableName().getNamespace().toStringUtf8(),
-              data.getTableName().getQualifier().toStringUtf8(),
+              String.format("[tableName=%s, lockOwner=%s, threadId=%s, " +
+              "purpose=%s, isShared=%s, createTime=%s]", Bytes.toString(data.getTableName().toByteArray()),
               ProtobufUtil.toServerName(data.getLockOwner()), data.getThreadId(),
               data.getPurpose(), data.getIsShared(), data.getCreateTime());
         }

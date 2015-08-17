@@ -39,7 +39,6 @@ import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -110,14 +109,13 @@ public class BucketCache implements BlockCache, HeapSize {
   final static int DEFAULT_WRITER_QUEUE_ITEMS = 64;
 
   // Store/read block data
-  final IOEngine ioEngine;
+  IOEngine ioEngine;
 
   // Store the block in this map before writing it to cache
   @VisibleForTesting
-  final ConcurrentMap<BlockCacheKey, RAMQueueEntry> ramCache;
+  Map<BlockCacheKey, RAMQueueEntry> ramCache;
   // In this map, store the block's meta data like offset, length
-  @VisibleForTesting
-  ConcurrentMap<BlockCacheKey, BucketEntry> backingMap;
+  private Map<BlockCacheKey, BucketEntry> backingMap;
 
   /**
    * Flag if the cache is enabled or not... We shut it off if there are IO
@@ -134,14 +132,14 @@ public class BucketCache implements BlockCache, HeapSize {
    * to the BucketCache.  It then updates the ramCache and backingMap accordingly.
    */
   @VisibleForTesting
-  final ArrayList<BlockingQueue<RAMQueueEntry>> writerQueues =
+  ArrayList<BlockingQueue<RAMQueueEntry>> writerQueues =
       new ArrayList<BlockingQueue<RAMQueueEntry>>();
   @VisibleForTesting
-  final WriterThread[] writerThreads;
+  WriterThread writerThreads[];
 
   /** Volatile boolean to track if free space is in process or not */
   private volatile boolean freeInProgress = false;
-  private final Lock freeSpaceLock = new ReentrantLock();
+  private Lock freeSpaceLock = new ReentrantLock();
 
   private UniqueIndexMap<Integer> deserialiserMap = new UniqueIndexMap<Integer>();
 
@@ -154,16 +152,17 @@ public class BucketCache implements BlockCache, HeapSize {
   /** Cache access count (sequential ID) */
   private final AtomicLong accessCount = new AtomicLong(0);
 
+  private final Object[] cacheWaitSignals;
   private static final int DEFAULT_CACHE_WAIT_TIME = 50;
   // Used in test now. If the flag is false and the cache speed is very fast,
   // bucket cache will skip some blocks when caching. If the flag is true, we
   // will wait blocks flushed to IOEngine for some time when caching
   boolean wait_when_cache = false;
 
-  private final BucketCacheStats cacheStats = new BucketCacheStats();
+  private BucketCacheStats cacheStats = new BucketCacheStats();
 
-  private final String persistencePath;
-  private final long cacheCapacity;
+  private String persistencePath;
+  private long cacheCapacity;
   /** Approximate block size */
   private final long blockSize;
 
@@ -183,8 +182,7 @@ public class BucketCache implements BlockCache, HeapSize {
    *
    * TODO:We could extend the IdLock to IdReadWriteLock for better.
    */
-  @VisibleForTesting
-  final IdLock offsetLock = new IdLock();
+  private IdLock offsetLock = new IdLock();
 
   private final ConcurrentIndex<String, BlockCacheKey> blocksByHFile =
       new ConcurrentIndex<String, BlockCacheKey>(new Comparator<BlockCacheKey>() {
@@ -218,6 +216,7 @@ public class BucketCache implements BlockCache, HeapSize {
       throws FileNotFoundException, IOException {
     this.ioEngine = getIOEngineFromName(ioEngineName, capacity);
     this.writerThreads = new WriterThread[writerThreadNum];
+    this.cacheWaitSignals = new Object[writerThreadNum];
     long blockNumCapacity = capacity / blockSize;
     if (blockNumCapacity >= Integer.MAX_VALUE) {
       // Enough for about 32TB of cache!
@@ -232,6 +231,7 @@ public class BucketCache implements BlockCache, HeapSize {
     bucketAllocator = new BucketAllocator(capacity, bucketSizes);
     for (int i = 0; i < writerThreads.length; ++i) {
       writerQueues.add(new ArrayBlockingQueue<RAMQueueEntry>(writerQLen));
+      this.cacheWaitSignals[i] = new Object();
     }
 
     assert writerQueues.size() == writerThreads.length;
@@ -252,7 +252,7 @@ public class BucketCache implements BlockCache, HeapSize {
     final String threadName = Thread.currentThread().getName();
     this.cacheEnabled = true;
     for (int i = 0; i < writerThreads.length; ++i) {
-      writerThreads[i] = new WriterThread(writerQueues.get(i));
+      writerThreads[i] = new WriterThread(writerQueues.get(i), i);
       writerThreads[i].setName(threadName + "-BucketCacheWriter-" + i);
       writerThreads[i].setDaemon(true);
     }
@@ -344,39 +344,38 @@ public class BucketCache implements BlockCache, HeapSize {
    * @param inMemory if block is in-memory
    * @param wait if true, blocking wait when queue is full
    */
-  public void cacheBlockWithWait(BlockCacheKey cacheKey, Cacheable cachedItem, boolean inMemory,
-      boolean wait) {
-    if (!cacheEnabled) {
+  public void cacheBlockWithWait(BlockCacheKey cacheKey, Cacheable cachedItem,
+      boolean inMemory, boolean wait) {
+    if (!cacheEnabled)
       return;
-    }
 
-    if (backingMap.containsKey(cacheKey)) {
+    if (backingMap.containsKey(cacheKey) || ramCache.containsKey(cacheKey))
       return;
-    }
 
     /*
-     * Stuff the entry into the RAM cache so it can get drained to the persistent store
+     * Stuff the entry into the RAM cache so it can get drained to the
+     * persistent store
      */
-    RAMQueueEntry re =
-        new RAMQueueEntry(cacheKey, cachedItem, accessCount.incrementAndGet(), inMemory);
-    if (ramCache.putIfAbsent(cacheKey, re) != null) {
-      return;
-    }
+    RAMQueueEntry re = new RAMQueueEntry(cacheKey, cachedItem,
+        accessCount.incrementAndGet(), inMemory);
+    ramCache.put(cacheKey, re);
     int queueNum = (cacheKey.hashCode() & 0x7FFFFFFF) % writerQueues.size();
     BlockingQueue<RAMQueueEntry> bq = writerQueues.get(queueNum);
-    boolean successfulAddition = false;
-    if (wait) {
-      try {
-        successfulAddition = bq.offer(re, DEFAULT_CACHE_WAIT_TIME, TimeUnit.MILLISECONDS);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
+    boolean successfulAddition = bq.offer(re);
+    if (!successfulAddition && wait) {
+      synchronized (cacheWaitSignals[queueNum]) {
+        try {
+          successfulAddition = bq.offer(re);
+          if (!successfulAddition) cacheWaitSignals[queueNum].wait(DEFAULT_CACHE_WAIT_TIME);
+        } catch (InterruptedException ie) {
+          Thread.currentThread().interrupt();
+        }
       }
-    } else {
       successfulAddition = bq.offer(re);
     }
     if (!successfulAddition) {
-      ramCache.remove(cacheKey);
-      failedBlockAdditions.incrementAndGet();
+        ramCache.remove(cacheKey);
+        failedBlockAdditions.incrementAndGet();
     } else {
       this.blockNumber.incrementAndGet();
       this.heapSize.addAndGet(cachedItem.heapSize());
@@ -395,14 +394,11 @@ public class BucketCache implements BlockCache, HeapSize {
   @Override
   public Cacheable getBlock(BlockCacheKey key, boolean caching, boolean repeat,
       boolean updateCacheMetrics) {
-    if (!cacheEnabled) {
+    if (!cacheEnabled)
       return null;
-    }
     RAMQueueEntry re = ramCache.get(key);
     if (re != null) {
-      if (updateCacheMetrics) {
-        cacheStats.hit(caching);
-      }
+      if (updateCacheMetrics) cacheStats.hit(caching);
       re.access(accessCount.incrementAndGet());
       return re.getData();
     }
@@ -412,9 +408,6 @@ public class BucketCache implements BlockCache, HeapSize {
       IdLock.Entry lockEntry = null;
       try {
         lockEntry = offsetLock.getLockEntry(bucketEntry.offset());
-        // We can not read here even if backingMap does contain the given key because its offset
-        // maybe changed. If we lock BlockCacheKey instead of offset, then we can only check
-        // existence here.
         if (bucketEntry.equals(backingMap.get(key))) {
           int len = bucketEntry.getLength();
           ByteBuffer bb = ByteBuffer.allocate(len);
@@ -445,58 +438,43 @@ public class BucketCache implements BlockCache, HeapSize {
         }
       }
     }
-    if (!repeat && updateCacheMetrics) {
-      cacheStats.miss(caching);
-    }
+    if (!repeat && updateCacheMetrics) cacheStats.miss(caching);
     return null;
-  }
-
-  @VisibleForTesting
-  void blockEvicted(BlockCacheKey cacheKey, BucketEntry bucketEntry, boolean decrementBlockNumber) {
-    bucketAllocator.freeBlock(bucketEntry.offset());
-    realCacheSize.addAndGet(-1 * bucketEntry.getLength());
-    blocksByHFile.remove(cacheKey.getHfileName(), cacheKey);
-    if (decrementBlockNumber) {
-      this.blockNumber.decrementAndGet();
-    }
   }
 
   @Override
   public boolean evictBlock(BlockCacheKey cacheKey) {
-    if (!cacheEnabled) {
-      return false;
-    }
+    if (!cacheEnabled) return false;
     RAMQueueEntry removedBlock = ramCache.remove(cacheKey);
     if (removedBlock != null) {
       this.blockNumber.decrementAndGet();
       this.heapSize.addAndGet(-1 * removedBlock.getData().heapSize());
     }
     BucketEntry bucketEntry = backingMap.get(cacheKey);
-    if (bucketEntry == null) {
-      if (removedBlock != null) {
-        cacheStats.evicted(0);
-        return true;
-      } else {
+    if (bucketEntry != null) {
+      IdLock.Entry lockEntry = null;
+      try {
+        lockEntry = offsetLock.getLockEntry(bucketEntry.offset());
+        if (bucketEntry.equals(backingMap.remove(cacheKey))) {
+          bucketAllocator.freeBlock(bucketEntry.offset());
+          realCacheSize.addAndGet(-1 * bucketEntry.getLength());
+          blocksByHFile.remove(cacheKey.getHfileName(), cacheKey);
+          if (removedBlock == null) {
+            this.blockNumber.decrementAndGet();
+          }
+        } else {
+          return false;
+        }
+      } catch (IOException ie) {
+        LOG.warn("Failed evicting block " + cacheKey);
         return false;
+      } finally {
+        if (lockEntry != null) {
+          offsetLock.releaseLockEntry(lockEntry);
+        }
       }
     }
-    IdLock.Entry lockEntry = null;
-    try {
-      lockEntry = offsetLock.getLockEntry(bucketEntry.offset());
-      if (backingMap.remove(cacheKey, bucketEntry)) {
-        blockEvicted(cacheKey, bucketEntry, removedBlock == null);
-      } else {
-        return false;
-      }
-    } catch (IOException ie) {
-      LOG.warn("Failed evicting block " + cacheKey);
-      return false;
-    } finally {
-      if (lockEntry != null) {
-        offsetLock.releaseLockEntry(lockEntry);
-      }
-    }
-    cacheStats.evicted(bucketEntry.getCachedTime());
+    cacheStats.evicted(bucketEntry == null? 0: bucketEntry.getCachedTime());
     return true;
   }
 
@@ -719,10 +697,13 @@ public class BucketCache implements BlockCache, HeapSize {
   @VisibleForTesting
   class WriterThread extends HasThread {
     private final BlockingQueue<RAMQueueEntry> inputQueue;
+    private final int threadNO;
     private volatile boolean writerEnabled = true;
 
-    WriterThread(BlockingQueue<RAMQueueEntry> queue) {
+    WriterThread(BlockingQueue<RAMQueueEntry> queue, int threadNO) {
+      super();
       this.inputQueue = queue;
+      this.threadNO = threadNO;
     }
 
     // Used for test
@@ -739,6 +720,9 @@ public class BucketCache implements BlockCache, HeapSize {
             try {
               // Blocks
               entries = getRAMQueueEntries(inputQueue, entries);
+              synchronized (cacheWaitSignals[threadNO]) {
+                cacheWaitSignals[threadNO].notifyAll();
+              }
             } catch (InterruptedException ie) {
               if (!cacheEnabled) break;
             }
@@ -763,9 +747,7 @@ public class BucketCache implements BlockCache, HeapSize {
      */
     @VisibleForTesting
     void doDrain(final List<RAMQueueEntry> entries) throws InterruptedException {
-      if (entries.isEmpty()) {
-        return;
-      }
+      if (entries.isEmpty()) return;
       // This method is a little hard to follow. We run through the passed in entries and for each
       // successful add, we add a non-null BucketEntry to the below bucketEntries.  Later we must
       // do cleanup making sure we've cleared ramCache of all entries regardless of whether we
@@ -840,21 +822,6 @@ public class BucketCache implements BlockCache, HeapSize {
         RAMQueueEntry ramCacheEntry = ramCache.remove(key);
         if (ramCacheEntry != null) {
           heapSize.addAndGet(-1 * entries.get(i).getData().heapSize());
-        } else if (bucketEntries[i] != null){
-          // Block should have already been evicted. Remove it and free space.
-          IdLock.Entry lockEntry = null;
-          try {
-            lockEntry = offsetLock.getLockEntry(bucketEntries[i].offset());
-            if (backingMap.remove(key, bucketEntries[i])) {
-              blockEvicted(key, bucketEntries[i], false);
-            }
-          } catch (IOException e) {
-            LOG.warn("failed to free space for " + key, e);
-          } finally {
-            if (lockEntry != null) {
-              offsetLock.releaseLockEntry(lockEntry);
-            }
-          }
         }
       }
 
@@ -1080,35 +1047,23 @@ public class BucketCache implements BlockCache, HeapSize {
    * up the long. Doubt we'll see devices this big for ages. Offsets are divided
    * by 256. So 5 bytes gives us 256TB or so.
    */
-  static class BucketEntry implements Serializable {
+  static class BucketEntry implements Serializable, Comparable<BucketEntry> {
     private static final long serialVersionUID = -6741504807982257534L;
-
-    // access counter comparator, descending order
-    static final Comparator<BucketEntry> COMPARATOR = new Comparator<BucketCache.BucketEntry>() {
-
-      @Override
-      public int compare(BucketEntry o1, BucketEntry o2) {
-        long accessCounter1 = o1.accessCounter;
-        long accessCounter2 = o2.accessCounter;
-        return accessCounter1 < accessCounter2 ? 1 : accessCounter1 == accessCounter2 ? 0 : -1;
-      }
-    };
-
     private int offsetBase;
     private int length;
     private byte offset1;
     byte deserialiserIndex;
-    private volatile long accessCounter;
+    private volatile long accessTime;
     private BlockPriority priority;
     /**
      * Time this block was cached.  Presumes we are created just before we are added to the cache.
      */
     private final long cachedTime = System.nanoTime();
 
-    BucketEntry(long offset, int length, long accessCounter, boolean inMemory) {
+    BucketEntry(long offset, int length, long accessTime, boolean inMemory) {
       setOffset(offset);
       this.length = length;
-      this.accessCounter = accessCounter;
+      this.accessTime = accessTime;
       if (inMemory) {
         this.priority = BlockPriority.MEMORY;
       } else {
@@ -1147,10 +1102,10 @@ public class BucketCache implements BlockCache, HeapSize {
     }
 
     /**
-     * Block has been accessed. Update its local access counter.
+     * Block has been accessed. Update its local access time.
      */
-    public void access(long accessCounter) {
-      this.accessCounter = accessCounter;
+    public void access(long accessTime) {
+      this.accessTime = accessTime;
       if (this.priority == BlockPriority.SINGLE) {
         this.priority = BlockPriority.MULTI;
       }
@@ -1158,6 +1113,17 @@ public class BucketCache implements BlockCache, HeapSize {
 
     public BlockPriority getPriority() {
       return this.priority;
+    }
+
+    @Override
+    public int compareTo(BucketEntry that) {
+      if(this.accessTime == that.accessTime) return 0;
+      return this.accessTime < that.accessTime ? 1 : -1;
+    }
+
+    @Override
+    public boolean equals(Object that) {
+      return this == that;
     }
 
     public long getCachedTime() {
@@ -1230,14 +1196,14 @@ public class BucketCache implements BlockCache, HeapSize {
   static class RAMQueueEntry {
     private BlockCacheKey key;
     private Cacheable data;
-    private long accessCounter;
+    private long accessTime;
     private boolean inMemory;
 
-    public RAMQueueEntry(BlockCacheKey bck, Cacheable data, long accessCounter,
+    public RAMQueueEntry(BlockCacheKey bck, Cacheable data, long accessTime,
         boolean inMemory) {
       this.key = bck;
       this.data = data;
-      this.accessCounter = accessCounter;
+      this.accessTime = accessTime;
       this.inMemory = inMemory;
     }
 
@@ -1249,8 +1215,8 @@ public class BucketCache implements BlockCache, HeapSize {
       return key;
     }
 
-    public void access(long accessCounter) {
-      this.accessCounter = accessCounter;
+    public void access(long accessTime) {
+      this.accessTime = accessTime;
     }
 
     public BucketEntry writeToCache(final IOEngine ioEngine,
@@ -1262,7 +1228,7 @@ public class BucketCache implements BlockCache, HeapSize {
       // This cacheable thing can't be serialized...
       if (len == 0) return null;
       long offset = bucketAllocator.allocateBlock(len);
-      BucketEntry bucketEntry = new BucketEntry(offset, len, accessCounter, inMemory);
+      BucketEntry bucketEntry = new BucketEntry(offset, len, accessTime, inMemory);
       bucketEntry.setDeserialiserReference(data.getDeserializer(), deserialiserMap);
       try {
         if (data instanceof HFileBlock) {

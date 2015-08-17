@@ -23,8 +23,8 @@ module Shell
       def help
         return <<-EOF
 Return a counter cell value at specified table/row/column coordinates.
-A counter cell should be managed with atomic increment functions on HBase
-and the data should be binary encoded (as long value). Example:
+A cell cell should be managed with atomic increment function oh HBase
+and the data should be binary encoded. Example:
 
   hbase> get_counter 'ns1:t1', 'r1', 'c1'
   hbase> get_counter 't1', 'r1', 'c1'
@@ -36,11 +36,11 @@ t to table 't1', the corresponding command would be:
 EOF
       end
 
-      def command(table, row, column, dummy = nil)
-        get_counter(table(table), row, column)
+      def command(table, row, column, value)
+        get_counter(table(table), row, column, value)
       end
 
-      def get_counter(table, row, column, dummy = nil)
+      def get_counter(table, row, column, value = nil)
         if cnt = table._get_counter_internal(row, column)
           puts "COUNTER VALUE = #{cnt}"
         else

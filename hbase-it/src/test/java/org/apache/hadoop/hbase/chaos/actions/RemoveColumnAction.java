@@ -26,7 +26,6 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * Action that removes a column family.
@@ -63,10 +62,9 @@ public class RemoveColumnAction extends Action {
           protectedColumns.contains(columnDescriptors[index].getNameAsString())) {
       index = random.nextInt(columnDescriptors.length);
     }
-    byte[] colDescName = columnDescriptors[index].getName();
-    LOG.debug("Performing action: Removing " + Bytes.toString(colDescName)+ " from "
+    LOG.debug("Performing action: Removing " + columnDescriptors[index].getName() + " from "
         + tableName.getNameAsString());
-    tableDescriptor.removeFamily(colDescName);
+    tableDescriptor.removeFamily(columnDescriptors[index].getName());
 
     admin.modifyTable(tableName, tableDescriptor);
   }

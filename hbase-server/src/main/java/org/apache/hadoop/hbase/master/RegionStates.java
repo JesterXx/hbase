@@ -440,9 +440,7 @@ public class RegionStates {
         if (oldServerName == null) {
           oldServerName = oldAssignments.remove(encodedName);
         }
-        if (oldServerName != null
-            && !oldServerName.equals(serverName)
-            && serverHoldings.containsKey(oldServerName)) {
+        if (oldServerName != null && serverHoldings.containsKey(oldServerName)) {
           LOG.info("Offlined " + hri.getShortNameToLog() + " from " + oldServerName);
           removeFromServerHoldings(oldServerName, hri);
         }
@@ -590,16 +588,14 @@ public class RegionStates {
     // Offline all regions on this server not already in transition.
     List<HRegionInfo> rits = new ArrayList<HRegionInfo>();
     Set<HRegionInfo> regionsToCleanIfNoMetaEntry = new HashSet<HRegionInfo>();
-    // Offline regions outside the loop and synchronized block to avoid
-    // ConcurrentModificationException and deadlock in case of meta anassigned,
-    // but RegionState a blocked.
-    Set<HRegionInfo> regionsToOffline = new HashSet<HRegionInfo>();
     synchronized (this) {
       Set<HRegionInfo> assignedRegions = serverHoldings.get(sn);
       if (assignedRegions == null) {
         assignedRegions = new HashSet<HRegionInfo>();
       }
 
+      // Offline regions outside the loop to avoid ConcurrentModificationException
+      Set<HRegionInfo> regionsToOffline = new HashSet<HRegionInfo>();
       for (HRegionInfo region : assignedRegions) {
         // Offline open regions, no need to offline if SPLIT/MERGED/OFFLINE
         if (isRegionOnline(region)) {
@@ -641,13 +637,13 @@ public class RegionStates {
           }
         }
       }
+
+      for (HRegionInfo hri : regionsToOffline) {
+        regionOffline(hri);
+      }
+
       this.notifyAll();
     }
-
-    for (HRegionInfo hri : regionsToOffline) {
-      regionOffline(hri);
-    }
-
     cleanIfNoMetaEntry(regionsToCleanIfNoMetaEntry);
     return rits;
   }

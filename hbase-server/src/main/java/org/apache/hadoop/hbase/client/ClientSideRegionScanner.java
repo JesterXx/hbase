@@ -110,9 +110,4 @@ public class ClientSideRegionScanner extends AbstractClientScanner {
       }
     }
   }
-
-  @Override
-  public boolean renewLease() {
-    throw new UnsupportedOperationException();
-  }
 }

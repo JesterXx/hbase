@@ -75,10 +75,6 @@ public class TestClassLoading {
       regionServerCoprocessor.getSimpleName()
   };
 
-  private static final String[] masterRegionServerSystemCoprocessors = new String[] {
-      regionCoprocessor1.getSimpleName(), MultiRowMutationEndpoint.class.getSimpleName(),
-      regionServerCoprocessor.getSimpleName() };
-
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
     Configuration conf = TEST_UTIL.getConfiguration();
@@ -455,7 +451,7 @@ public class TestClassLoading {
     // This was a test for HBASE-4070.
     // We are removing coprocessors from region load in HBASE-5258.
     // Therefore, this test now only checks system coprocessors.
-    assertAllRegionServers(null);
+    assertAllRegionServers(regionServerSystemCoprocessors,null);
   }
 
   /**
@@ -486,19 +482,20 @@ public class TestClassLoading {
     return serverLoadHashMap;
   }
 
-  void assertAllRegionServers(String tableName)
+  void assertAllRegionServers(String[] expectedCoprocessors, String tableName)
       throws InterruptedException {
     Map<ServerName, ServerLoad> servers;
     String[] actualCoprocessors = null;
     boolean success = false;
-    String[] expectedCoprocessors = regionServerSystemCoprocessors;
-    if (tableName == null) {
-      // if no tableName specified, use all servers.
-      servers = TEST_UTIL.getMiniHBaseCluster().getMaster().getServerManager().getOnlineServers();
-    } else {
-      servers = serversForTable(tableName);
-    }
-    for (int i = 0; i < 5; i++) {
+    for(int i = 0; i < 5; i++) {
+      if (tableName == null) {
+        //if no tableName specified, use all servers.
+        servers =
+            TEST_UTIL.getMiniHBaseCluster().getMaster().getServerManager().
+                getOnlineServers();
+      } else {
+        servers = serversForTable(tableName);
+      }
       boolean any_failed = false;
       for(Map.Entry<ServerName,ServerLoad> server: servers.entrySet()) {
         actualCoprocessors = server.getValue().getRsCoprocessors();
@@ -507,10 +504,8 @@ public class TestClassLoading {
               Arrays.toString(actualCoprocessors) +
               " ; expected: " + Arrays.toString(expectedCoprocessors));
           any_failed = true;
-          expectedCoprocessors = switchExpectedCoprocessors(expectedCoprocessors);
           break;
         }
-        expectedCoprocessors = switchExpectedCoprocessors(expectedCoprocessors);
       }
       if (any_failed == false) {
         success = true;
@@ -520,15 +515,6 @@ public class TestClassLoading {
       Thread.sleep(1000);
     }
     assertTrue(success);
-  }
-
-  private String[] switchExpectedCoprocessors(String[] expectedCoprocessors) {
-    if (Arrays.equals(regionServerSystemCoprocessors, expectedCoprocessors)) {
-      expectedCoprocessors = masterRegionServerSystemCoprocessors;
-    } else {
-      expectedCoprocessors = regionServerSystemCoprocessors;
-    }
-    return expectedCoprocessors;
   }
 
   @Test

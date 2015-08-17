@@ -28,7 +28,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Test;
@@ -88,10 +87,8 @@ public class TestEncryption {
     LOG.info("checkTransformSymmetry: AES, plaintext length = " + plaintext.length);
 
     Configuration conf = HBaseConfiguration.create();
-    String algorithm =
-        conf.get(HConstants.CRYPTO_KEY_ALGORITHM_CONF_KEY, HConstants.CIPHER_AES);
-    Cipher aes = Encryption.getCipher(conf, algorithm);
-    Key key = new SecretKeySpec(keyBytes, algorithm);
+    Cipher aes = Encryption.getCipher(conf, "AES");
+    Key key = new SecretKeySpec(keyBytes, "AES");
 
     Encryptor e = aes.getEncryptor();
     e.setKey(key);

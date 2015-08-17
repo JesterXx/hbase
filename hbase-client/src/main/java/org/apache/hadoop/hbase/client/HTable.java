@@ -74,7 +74,6 @@ import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.GetTableDescripto
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.GetTableDescriptorsResponse;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
-import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.hadoop.hbase.util.Threads;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -97,19 +96,11 @@ import com.google.protobuf.ServiceException;
  * In the case of reads, some fields used by a Scan are shared among all threads.
  *
  * <p>HTable is no longer a client API. Use {@link Table} instead. It is marked
- * InterfaceAudience.Private as of hbase-1.0.0 indicating that this is an
- * HBase-internal class as defined in
+ * InterfaceAudience.Private indicating that this is an HBase-internal class as defined in
  * <a href="https://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-common/InterfaceClassification.html">Hadoop
- * Interface Classification</a>. There are no guarantees for backwards
- * source / binary compatibility and methods or the class can
+ * Interface Classification</a>
+ * There are no guarantees for backwards source / binary compatibility and methods or class can
  * change or go away without deprecation.
- * <p>Near all methods of this * class made it out to the new {@link Table}
- * Interface or were * instantiations of methods defined in {@link HTableInterface}.
- * A few did not. Namely, the {@link #getStartEndKeys}, {@link #getEndKeys},
- * and {@link #getStartKeys} methods. These three methods are available
- * in {@link RegionLocator} as of 1.0.0 but were NOT marked as
- * deprecated when we released 1.0.0. In spite of this oversight on our
- * part, these methods will be removed in 2.0.0.
  *
  * @see Table
  * @see Admin
@@ -128,7 +119,6 @@ public class HTable implements HTableInterface, RegionLocator {
   private boolean autoFlush = true;
   private boolean closed = false;
   protected int scannerCaching;
-  protected long scannerMaxResultSize;
   private ExecutorService pool;  // For Multi & Scan
   private int operationTimeout;
   private final boolean cleanupPoolOnClose; // shutdown the pool in close()
@@ -362,7 +352,7 @@ public class HTable implements HTableInterface, RegionLocator {
     this.operationTimeout = tableName.isSystemTable() ?
         tableConfiguration.getMetaOperationTimeout() : tableConfiguration.getOperationTimeout();
     this.scannerCaching = tableConfiguration.getScannerCaching();
-    this.scannerMaxResultSize = tableConfiguration.getScannerMaxResultSize();
+
     if (this.rpcCallerFactory == null) {
       this.rpcCallerFactory = connection.getNewRpcRetryingCallerFactory(configuration);
     }
@@ -608,33 +598,24 @@ public class HTable implements HTableInterface, RegionLocator {
 
   /**
    * {@inheritDoc}
-   * To be removed in 2.0.0.
-   * @deprecated Use {@link RegionLocator#getStartKeys()} instead
    */
   @Override
-  @Deprecated
   public byte [][] getStartKeys() throws IOException {
     return getStartEndKeys().getFirst();
   }
 
   /**
    * {@inheritDoc}
-   * To be removed in 2.0.0.
-   * @deprecated Use {@link RegionLocator#getEndKeys()} instead
    */
   @Override
-  @Deprecated
   public byte[][] getEndKeys() throws IOException {
     return getStartEndKeys().getSecond();
   }
 
   /**
    * {@inheritDoc}
-   * To be removed in 2.0.0.
-   * @deprecated Use {@link RegionLocator#getStartEndKeys()} instead
    */
   @Override
-  @Deprecated
   public Pair<byte[][],byte[][]> getStartEndKeys() throws IOException {
 
     List<RegionLocations> regions = listRegionLocations();
@@ -818,12 +799,8 @@ public class HTable implements HTableInterface, RegionLocator {
     if (scan.getBatch() > 0 && scan.isSmall()) {
       throw new IllegalArgumentException("Small scan should not be used with batching");
     }
-
     if (scan.getCaching() <= 0) {
       scan.setCaching(getScannerCaching());
-    }
-    if (scan.getMaxResultSize() <= 0) {
-      scan.setMaxResultSize(scannerMaxResultSize);
     }
 
     if (scan.isReversed()) {
@@ -877,28 +854,18 @@ public class HTable implements HTableInterface, RegionLocator {
    */
   @Override
   public Result get(final Get get) throws IOException {
-    return get(get, get.isCheckExistenceOnly());
-  }
-
-  private Result get(Get get, final boolean checkExistenceOnly) throws IOException {
-    // if we are changing settings to the get, clone it.
-    if (get.isCheckExistenceOnly() != checkExistenceOnly || get.getConsistency() == null) {
-      get = ReflectionUtils.newInstance(get.getClass(), get);
-      get.setCheckExistenceOnly(checkExistenceOnly);
-      if (get.getConsistency() == null){
-        get.setConsistency(defaultConsistency);
-      }
+    if (get.getConsistency() == null){
+      get.setConsistency(defaultConsistency);
     }
 
     if (get.getConsistency() == Consistency.STRONG) {
       // Good old call.
-      final Get getReq = get;
       RegionServerCallable<Result> callable = new RegionServerCallable<Result>(this.connection,
           getName(), get.getRow()) {
         @Override
         public Result call(int callTimeout) throws IOException {
           ClientProtos.GetRequest request =
-            RequestConverter.buildGetRequest(getLocation().getRegionInfo().getRegionName(), getReq);
+              RequestConverter.buildGetRequest(getLocation().getRegionInfo().getRegionName(), get);
           PayloadCarryingRpcController controller = rpcControllerFactory.newController();
           controller.setPriority(tableName);
           controller.setCallTimeout(callTimeout);
@@ -1096,15 +1063,7 @@ public class HTable implements HTableInterface, RegionLocator {
           regionMutationBuilder.setAtomic(true);
           MultiRequest request =
             MultiRequest.newBuilder().addRegionAction(regionMutationBuilder.build()).build();
-          ClientProtos.MultiResponse response = getStub().multi(controller, request);
-          ClientProtos.RegionActionResult res = response.getRegionActionResultList().get(0);
-          if (res.hasException()) {
-            Throwable ex = ProtobufUtil.toException(res.getException());
-            if(ex instanceof IOException) {
-              throw (IOException)ex;
-            }
-            throw new IOException("Failed to mutate row: "+Bytes.toStringBinary(rm.getRow()), ex);
-          }
+          getStub().multi(controller, request);
         } catch (ServiceException se) {
           throw ProtobufUtil.getRemoteException(se);
         }
@@ -1383,15 +1342,6 @@ public class HTable implements HTableInterface, RegionLocator {
                   getLocation().getRegionInfo().getRegionName(), row, family, qualifier,
                   new BinaryComparator(value), compareType, rm);
               ClientProtos.MultiResponse response = getStub().multi(controller, request);
-              ClientProtos.RegionActionResult res = response.getRegionActionResultList().get(0);
-              if (res.hasException()) {
-                Throwable ex = ProtobufUtil.toException(res.getException());
-                if(ex instanceof IOException) {
-                  throw (IOException)ex;
-                }
-                throw new IOException("Failed to checkAndMutate row: "+
-                    Bytes.toStringBinary(rm.getRow()), ex);
-              }
               return Boolean.valueOf(response.getProcessed());
             } catch (ServiceException se) {
               throw ProtobufUtil.getRemoteException(se);
@@ -1406,7 +1356,8 @@ public class HTable implements HTableInterface, RegionLocator {
    */
   @Override
   public boolean exists(final Get get) throws IOException {
-    Result r = get(get, true);
+    get.setCheckExistenceOnly(true);
+    Result r = get(get);
     assert r.getExists() != null;
     return r.getExists();
   }
@@ -1419,16 +1370,13 @@ public class HTable implements HTableInterface, RegionLocator {
     if (gets.isEmpty()) return new boolean[]{};
     if (gets.size() == 1) return new boolean[]{exists(gets.get(0))};
 
-    ArrayList<Get> exists = new ArrayList<Get>(gets.size());
     for (Get g: gets){
-      Get ge = new Get(g);
-      ge.setCheckExistenceOnly(true);
-      exists.add(ge);
+      g.setCheckExistenceOnly(true);
     }
 
     Object[] r1;
     try {
-      r1 = batch(exists);
+      r1 = batch(gets);
     } catch (InterruptedException e) {
       throw (InterruptedIOException)new InterruptedIOException().initCause(e);
     }
@@ -1849,12 +1797,6 @@ public class HTable implements HTableInterface, RegionLocator {
       byte[] startKey, byte[] endKey, final R responsePrototype, final Callback<R> callback)
       throws ServiceException, Throwable {
 
-    if (startKey == null) {
-      startKey = HConstants.EMPTY_START_ROW;
-    }
-    if (endKey == null) {
-      endKey = HConstants.EMPTY_END_ROW;
-    }
     // get regions covered by the row range
     Pair<List<byte[]>, List<HRegionLocation>> keysAndRegions =
         getKeysAndRegionsInRange(startKey, endKey, true);

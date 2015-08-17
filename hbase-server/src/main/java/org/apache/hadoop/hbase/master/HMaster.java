@@ -402,9 +402,6 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     }
 
     RedirectServlet.regionServerInfoPort = infoServer.getPort();
-    if(RedirectServlet.regionServerInfoPort == infoPort) {
-      return infoPort;
-    }
     masterJettyServer = new org.mortbay.jetty.Server();
     Connector connector = new SelectChannelConnector();
     connector.setHost(addr);
@@ -738,11 +735,6 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     // master initialization. See HBASE-5916.
     this.serverManager.clearDeadServersWithSameHostNameAndPortOfOnlineServer();
 
-    // Check and set the znode ACLs if needed in case we are overtaking a non-secure configuration
-    status.setStatus("Checking ZNode ACLs");
-    zooKeeper.checkAndSetZNodeAcls();
-
-    status.setStatus("Calling postStartMaster coprocessors");
     if (this.cpHost != null) {
       // don't let cp initialization errors kill the master
       try {
@@ -1376,15 +1368,6 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
       }
       // max versions already being checked
 
-      // HBASE-13776 Setting illegal versions for HColumnDescriptor
-      //  does not throw IllegalArgumentException
-      // check minVersions <= maxVersions
-      if (hcd.getMinVersions() > hcd.getMaxVersions()) {
-        throw new DoNotRetryIOException("Min versions for column family " + hcd.getNameAsString()
-          + " must be less than the Max versions. Set " + CONF_KEY + " to false at conf or table "
-          + "descriptor if you want to bypass sanity checks");
-      }
-
       // check replication scope
       if (hcd.getScope() < 0) {
         throw new DoNotRetryIOException("Replication scope for column family "
@@ -1710,42 +1693,39 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
         this.zooKeeper.backupMasterAddressesZNode);
     } catch (KeeperException e) {
       LOG.warn(this.zooKeeper.prefix("Unable to list backup servers"), e);
-      backupMasterStrings = null;
+      backupMasterStrings = new ArrayList<String>(0);
     }
-
-    List<ServerName> backupMasters = null;
-    if (backupMasterStrings != null && !backupMasterStrings.isEmpty()) {
-      backupMasters = new ArrayList<ServerName>(backupMasterStrings.size());
-      for (String s: backupMasterStrings) {
+    List<ServerName> backupMasters = new ArrayList<ServerName>(
+                                          backupMasterStrings.size());
+    for (String s: backupMasterStrings) {
+      try {
+        byte [] bytes;
         try {
-          byte [] bytes;
-          try {
-            bytes = ZKUtil.getData(this.zooKeeper, ZKUtil.joinZNode(
-                this.zooKeeper.backupMasterAddressesZNode, s));
-          } catch (InterruptedException e) {
-            throw new InterruptedIOException();
-          }
-          if (bytes != null) {
-            ServerName sn;
-            try {
-              sn = ServerName.parseFrom(bytes);
-            } catch (DeserializationException e) {
-              LOG.warn("Failed parse, skipping registering backup server", e);
-              continue;
-            }
-            backupMasters.add(sn);
-          }
-        } catch (KeeperException e) {
-          LOG.warn(this.zooKeeper.prefix("Unable to get information about " +
-                   "backup servers"), e);
+          bytes = ZKUtil.getData(this.zooKeeper, ZKUtil.joinZNode(
+              this.zooKeeper.backupMasterAddressesZNode, s));
+        } catch (InterruptedException e) {
+          throw new InterruptedIOException();
         }
+        if (bytes != null) {
+          ServerName sn;
+          try {
+            sn = ServerName.parseFrom(bytes);
+          } catch (DeserializationException e) {
+            LOG.warn("Failed parse, skipping registering backup server", e);
+            continue;
+          }
+          backupMasters.add(sn);
+        }
+      } catch (KeeperException e) {
+        LOG.warn(this.zooKeeper.prefix("Unable to get information about " +
+                 "backup servers"), e);
       }
-      Collections.sort(backupMasters, new Comparator<ServerName>() {
-        @Override
-        public int compare(ServerName s1, ServerName s2) {
-          return s1.getServerName().compareTo(s2.getServerName());
-        }});
     }
+    Collections.sort(backupMasters, new Comparator<ServerName>() {
+      @Override
+      public int compare(ServerName s1, ServerName s2) {
+        return s1.getServerName().compareTo(s2.getServerName());
+      }});
 
     String clusterId = fileSystemManager != null ?
       fileSystemManager.getClusterId().toString() : null;

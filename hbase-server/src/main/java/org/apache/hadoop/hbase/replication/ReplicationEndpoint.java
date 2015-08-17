@@ -127,7 +127,7 @@ public interface ReplicationEndpoint extends Service {
    * A context for {@link ReplicationEndpoint#replicate(ReplicateContext)} method.
    */
   @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.REPLICATION)
-  static class ReplicateContext {
+  class ReplicateContext {
     List<Entry> entries;
     int size;
     @InterfaceAudience.Private

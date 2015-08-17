@@ -83,11 +83,7 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
    */
   public int getMasterInfoPort() {
     try {
-      final ZooKeeperProtos.Master master = parse(this.getData(false));
-      if (master == null) {
-        return 0;
-      }
-      return master.getInfoPort();
+      return parse(this.getData(false)).getInfoPort();
     } catch (DeserializationException e) {
       LOG.warn("Failed parse master zk node data", e);
       return 0;
@@ -95,7 +91,7 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
   }
   /**
    * Get the info port of the backup master if it is available.
-   * Return 0 if no backup master or zookeeper is unavailable
+   * Return 0 if no current master or zookeeper is unavailable
    * @param sn server name of backup master
    * @return info port or 0 if timed out or exceptions
    */
@@ -103,11 +99,7 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
     String backupZNode = ZKUtil.joinZNode(watcher.backupMasterAddressesZNode, sn.toString());
     try {
       byte[] data = ZKUtil.getData(watcher, backupZNode);
-      final ZooKeeperProtos.Master backup = parse(data);
-      if (backup == null) {
-        return 0;
-      }
-      return backup.getInfoPort();
+      return parse(data).getInfoPort();
     } catch (Exception e) {
       LOG.warn("Failed to get backup master: " + sn + "'s info port.", e);
       return 0;
@@ -149,7 +141,6 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
     } catch (InterruptedException e) {
       throw new InterruptedIOException();
     }
-    // TODO javadoc claims we return null in this case. :/
     if (data == null){
       throw new IOException("Can't get master address from ZooKeeper; znode data == null");
     }
@@ -169,7 +160,6 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
    * @param zkw ZooKeeperWatcher to use
    * @return master info port in the the master address znode or null if no
    * znode present.
-   * // TODO can't return null for 'int' return type. non-static verison returns 0
    * @throws KeeperException
    * @throws IOException
    */
@@ -181,7 +171,6 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
     } catch (InterruptedException e) {
       throw new InterruptedIOException();
     }
-    // TODO javadoc claims we return null in this case. :/
     if (data == null) {
       throw new IOException("Can't get master address from ZooKeeper; znode data == null");
     }
@@ -201,7 +190,7 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
    * @param zkw The ZooKeeperWatcher to use.
    * @param znode Where to create the znode; could be at the top level or it
    * could be under backup masters
-   * @param master ServerName of the current master must not be null.
+   * @param master ServerName of the current master
    * @return true if node created, false if not; a watch is set in both cases
    * @throws KeeperException
    */
@@ -220,7 +209,7 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
   }
 
   /**
-   * @param sn must not be null
+   * @param sn
    * @return Content of the master znode as a serialized pb with the pb
    * magic as prefix.
    */
@@ -237,14 +226,11 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
   }
 
   /**
-   * @param data zookeeper data. may be null
-   * @return pb object of master, null if no active master
+   * @param data zookeeper data
+   * @return pb object of master
    * @throws DeserializationException
    */
   public static ZooKeeperProtos.Master parse(byte[] data) throws DeserializationException {
-    if (data == null) {
-      return null;
-    }
     int prefixLen = ProtobufUtil.lengthOfPBMagic();
     try {
       return ZooKeeperProtos.Master.PARSER.parseFrom(data, prefixLen, data.length - prefixLen);
@@ -254,8 +240,6 @@ public class MasterAddressTracker extends ZooKeeperNodeTracker {
   }
   /**
    * delete the master znode if its content is same as the parameter
-   * @param zkw must not be null
-   * @param content must not be null
    */
   public static boolean deleteIfEquals(ZooKeeperWatcher zkw, final String content) {
     if (content == null){

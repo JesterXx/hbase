@@ -277,7 +277,6 @@ public class RatioBasedCompactionPolicy extends CompactionPolicy {
    * @param filesToCompact Files to compact. Can be null.
    * @return True if we should run a major compaction.
    */
-  @Override
   public boolean isMajorCompaction(final Collection<StoreFile> filesToCompact)
       throws IOException {
     boolean result = false;
@@ -301,7 +300,7 @@ public class RatioBasedCompactionPolicy extends CompactionPolicy {
         if (sf.isMajorCompaction() &&
             (cfTtl == HConstants.FOREVER || oldest < cfTtl)) {
           float blockLocalityIndex = sf.getHDFSBlockDistribution().getBlockLocalityIndex(
-              RSRpcServices.getHostname(comConf.conf, false)
+              RSRpcServices.getHostname(comConf.conf)
           );
           if (blockLocalityIndex < comConf.getMinLocalityToForceCompact()) {
             if (LOG.isDebugEnabled()) {
@@ -376,7 +375,6 @@ public class RatioBasedCompactionPolicy extends CompactionPolicy {
    * @param compactionSize Total size of some compaction
    * @return whether this should be a large or small compaction
    */
-  @Override
   public boolean throttleCompaction(long compactionSize) {
     return compactionSize > comConf.getThrottlePoint();
   }

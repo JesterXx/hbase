@@ -40,7 +40,6 @@ import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ConfigUtil;
-import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.MultiHConnection;
 import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
 import org.apache.zookeeper.KeeperException;
@@ -210,7 +209,7 @@ public class RegionStateStore {
       if (openSeqNum >= 0) {
         Preconditions.checkArgument(state == State.OPEN
           && serverName != null, "Open region should be on a server");
-        MetaTableAccessor.addLocation(put, serverName, openSeqNum, -1, replicaId);
+        MetaTableAccessor.addLocation(put, serverName, openSeqNum, replicaId);
         info.append("&openSeqNum=").append(openSeqNum);
         info.append("&server=").append(serverName);
       }
@@ -257,7 +256,6 @@ public class RegionStateStore {
 
   void mergeRegions(HRegionInfo p,
       HRegionInfo a, HRegionInfo b, ServerName sn) throws IOException {
-    MetaTableAccessor.mergeRegions(server.getConnection(), p, a, b, sn,
-    		EnvironmentEdgeManager.currentTime());
+    MetaTableAccessor.mergeRegions(server.getConnection(), p, a, b, sn);
   }
 }

@@ -20,13 +20,12 @@ module Shell
     class ClearAuths < Command
       def help
         return <<-EOF
-Clear visibility labels from a user or group
-Syntax : clear_auths 'user',[label1, label2]
+Add a set of visibility labels for an user that has to removed
+Syntax : clear_auths 'user1',[label1, label2]
 
 For example:
 
     hbase> clear_auths 'user1', ['SECRET','PRIVATE']
-    hbase> clear_auths '@group1', ['SECRET','PRIVATE']
 EOF
       end
 

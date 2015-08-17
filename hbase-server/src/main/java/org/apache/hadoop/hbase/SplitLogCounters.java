@@ -88,10 +88,7 @@ public class SplitLogCounters {
   public static void resetCounters() throws Exception {
     Class<?> cl = SplitLogCounters.class;
     for (Field fld : cl.getDeclaredFields()) {
-      /* Guard against source instrumentation. */
-      if ((!fld.isSynthetic()) && (AtomicLong.class.isAssignableFrom(fld.getType()))) {
-        ((AtomicLong)fld.get(null)).set(0);
-      }
+      if (!fld.isSynthetic()) ((AtomicLong)fld.get(null)).set(0);
     }
   }
 }

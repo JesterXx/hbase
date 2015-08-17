@@ -35,9 +35,9 @@ import org.apache.hadoop.hbase.coordination.OpenRegionCoordination;
 public class OpenMetaHandler extends OpenRegionHandler {
   public OpenMetaHandler(final Server server,
       final RegionServerServices rsServices, HRegionInfo regionInfo,
-      final HTableDescriptor htd, long masterSystemTime, OpenRegionCoordination coordination,
+      final HTableDescriptor htd, OpenRegionCoordination coordination,
       OpenRegionCoordination.OpenRegionDetails ord) {
     super(server, rsServices, regionInfo, htd, EventType.M_RS_OPEN_META,
-        masterSystemTime, coordination, ord);
+        coordination, ord);
   }
 }

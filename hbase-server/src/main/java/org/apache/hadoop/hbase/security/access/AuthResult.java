@@ -177,10 +177,10 @@ public class AuthResult {
         .append(user != null ? user.getName() : "UNKNOWN")
         .append(", ");
     sb.append("scope=")
-        .append(namespace != null ? namespace : table == null ? "GLOBAL" : table)
-        .append(", ");
+        .append(namespace != null ? namespace : table == null ? "GLOBAL" : table);
     if(namespace == null) {
-      sb.append("family=")
+      sb.append(", ")
+        .append("family=")
         .append(toFamilyString())
         .append(", ");
     }

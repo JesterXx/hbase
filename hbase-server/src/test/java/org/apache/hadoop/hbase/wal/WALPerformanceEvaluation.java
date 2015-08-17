@@ -307,8 +307,7 @@ public final class WALPerformanceEvaluation extends Configured implements Tool {
     LOG.info("FileSystem: " + fs);
 
     SpanReceiverHost receiverHost = trace ? SpanReceiverHost.getInstance(getConf()) : null;
-    final Sampler<?> sampler = trace ? Sampler.ALWAYS : Sampler.NEVER;
-    TraceScope scope = Trace.startSpan("WALPerfEval", sampler);
+    TraceScope scope = Trace.startSpan("WALPerfEval", trace ? Sampler.ALWAYS : Sampler.NEVER);
 
     try {
       if (rootRegionDir == null) {

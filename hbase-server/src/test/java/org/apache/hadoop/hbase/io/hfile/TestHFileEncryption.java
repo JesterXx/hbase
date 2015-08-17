@@ -69,9 +69,7 @@ public class TestHFileEncryption {
     fs = FileSystem.get(conf);
 
     cryptoContext = Encryption.newContext(conf);
-    String algorithm =
-        conf.get(HConstants.CRYPTO_KEY_ALGORITHM_CONF_KEY, HConstants.CIPHER_AES);
-    Cipher aes = Encryption.getCipher(conf, algorithm);
+    Cipher aes = Encryption.getCipher(conf, "AES");
     assertNotNull(aes);
     cryptoContext.setCipher(aes);
     byte[] key = new byte[aes.getKeyLength()];

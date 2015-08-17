@@ -98,12 +98,7 @@ public class Get extends Query
    * @param get
    */
   public Get(Get get) {
-    this(get.getRow());
-    // from Query
-    this.setFilter(get.getFilter());
-    this.setReplicaId(get.getReplicaId());
-    this.setConsistency(get.getConsistency());
-    // from Get
+    this.filter = get.getFilter();
     this.cacheBlocks = get.getCacheBlocks();
     this.maxVersions = get.getMaxVersions();
     this.storeLimit = get.getMaxResultsPerColumnFamily();
@@ -111,18 +106,7 @@ public class Get extends Query
     this.tr = get.getTimeRange();
     this.checkExistenceOnly = get.isCheckExistenceOnly();
     this.closestRowBefore = get.isClosestRowBefore();
-    Map<byte[], NavigableSet<byte[]>> fams = get.getFamilyMap();
-    for (Map.Entry<byte[],NavigableSet<byte[]>> entry : fams.entrySet()) {
-      byte [] fam = entry.getKey();
-      NavigableSet<byte[]> cols = entry.getValue();
-      if (cols != null && cols.size() > 0) {
-        for (byte[] col : cols) {
-          addColumn(fam, col);
-        }
-      } else {
-        addFamily(fam);
-      }
-    }
+    this.familyMap = get.getFamilyMap();
     for (Map.Entry<String, byte[]> attr : get.getAttributesMap().entrySet()) {
       setAttribute(attr.getKey(), attr.getValue());
     }

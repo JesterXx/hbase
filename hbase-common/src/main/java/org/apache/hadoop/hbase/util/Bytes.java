@@ -1315,45 +1315,24 @@ public class Bytes {
       /**
        * Returns true if x1 is less than x2, when both values are treated as
        * unsigned long.
-       * Both values are passed as is read by Unsafe. When platform is Little Endian, have to
-       * convert to corresponding Big Endian value and then do compare. We do all writes in
-       * Big Endian format.
        */
       static boolean lessThanUnsignedLong(long x1, long x2) {
-        if (littleEndian) {
-          x1 = Long.reverseBytes(x1);
-          x2 = Long.reverseBytes(x2);
-        }
         return (x1 + Long.MIN_VALUE) < (x2 + Long.MIN_VALUE);
       }
 
       /**
        * Returns true if x1 is less than x2, when both values are treated as
        * unsigned int.
-       * Both values are passed as is read by Unsafe. When platform is Little Endian, have to
-       * convert to corresponding Big Endian value and then do compare. We do all writes in
-       * Big Endian format.
        */
       static boolean lessThanUnsignedInt(int x1, int x2) {
-        if (littleEndian) {
-          x1 = Integer.reverseBytes(x1);
-          x2 = Integer.reverseBytes(x2);
-        }
         return (x1 & 0xffffffffL) < (x2 & 0xffffffffL);
       }
 
       /**
        * Returns true if x1 is less than x2, when both values are treated as
        * unsigned short.
-       * Both values are passed as is read by Unsafe. When platform is Little Endian, have to
-       * convert to corresponding Big Endian value and then do compare. We do all writes in
-       * Big Endian format.
        */
       static boolean lessThanUnsignedShort(short x1, short x2) {
-        if (littleEndian) {
-          x1 = Short.reverseBytes(x1);
-          x2 = Short.reverseBytes(x2);
-        }
         return (x1 & 0xffff) < (x2 & 0xffff);
       }
 
@@ -1397,30 +1376,40 @@ public class Bytes {
          * time is no slower than comparing 4 bytes at a time even on 32-bit.
          * On the other hand, it is substantially faster on 64-bit.
          */
-        // This is the end offset of long parts.
-        int j = minWords << 3; // Same as minWords * SIZEOF_LONG
-        for (int i = 0; i < j; i += SIZEOF_LONG) {
+        for (int i = 0; i < minWords * SIZEOF_LONG; i += SIZEOF_LONG) {
           long lw = theUnsafe.getLong(buffer1, offset1Adj + (long) i);
           long rw = theUnsafe.getLong(buffer2, offset2Adj + (long) i);
           long diff = lw ^ rw;
+          if(littleEndian){
+            lw = Long.reverseBytes(lw);
+            rw = Long.reverseBytes(rw);
+          }
           if (diff != 0) {
               return lessThanUnsignedLong(lw, rw) ? -1 : 1;
           }
         }
-        int offset = j;
+        int offset = minWords * SIZEOF_LONG;
 
         if (minLength - offset >= SIZEOF_INT) {
           int il = theUnsafe.getInt(buffer1, offset1Adj + offset);
           int ir = theUnsafe.getInt(buffer2, offset2Adj + offset);
-          if (il != ir) {
+          if(littleEndian){
+            il = Integer.reverseBytes(il);
+            ir = Integer.reverseBytes(ir);
+          }
+          if(il != ir){
             return lessThanUnsignedInt(il, ir) ? -1: 1;
           }
-          offset += SIZEOF_INT;
+           offset += SIZEOF_INT;
         }
         if (minLength - offset >= SIZEOF_SHORT) {
           short sl = theUnsafe.getShort(buffer1, offset1Adj + offset);
           short sr = theUnsafe.getShort(buffer2, offset2Adj + offset);
-          if (sl != sr) {
+          if(littleEndian){
+            sl = Short.reverseBytes(sl);
+            sr = Short.reverseBytes(sr);
+          }
+          if(sl != sr){
             return lessThanUnsignedShort(sl, sr) ? -1: 1;
           }
           offset += SIZEOF_SHORT;
@@ -1576,24 +1565,6 @@ public class Bytes {
     System.arraycopy(a, 0, result, 0, a.length);
     System.arraycopy(b, 0, result, a.length, b.length);
     System.arraycopy(c, 0, result, a.length + b.length, c.length);
-    return result;
-  }
-
-  /**
-   * @param arrays all the arrays to concatenate together.
-   * @return New array made from the concatenation of the given arrays.
-   */
-  public static byte [] add(final byte [][] arrays) {
-    int length = 0;
-    for (int i = 0; i < arrays.length; i++) {
-      length += arrays[i].length;
-    }
-    byte [] result = new byte[length];
-    int index = 0;
-    for (int i = 0; i < arrays.length; i++) {
-      System.arraycopy(arrays[i], 0, result, index, arrays[i].length);
-      index += arrays[i].length;
-    }
     return result;
   }
 

@@ -23,7 +23,6 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.io.FileNotFoundException;
 import java.io.InterruptedIOException;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -77,12 +76,14 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.ScannerCallable;
+import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.mapreduce.TableMapper;
 import org.apache.hadoop.hbase.mapreduce.TableRecordReaderImpl;
 import org.apache.hadoop.hbase.mapreduce.WALPlayer;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
+import org.apache.hadoop.hbase.testclassification.IntegrationTests;
 import org.apache.hadoop.hbase.util.AbstractHBaseTool;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.RegionSplitter;
@@ -216,7 +217,7 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
 
   protected int NUM_SLAVES_BASE = 3; // number of slaves for the cluster
 
-  private static final int MISSING_ROWS_TO_LOG = 10; // YARN complains when too many counters
+  private static final int MISSING_ROWS_TO_LOG = 50;
 
   private static final int WIDTH_DEFAULT = 1000000;
   private static final int WRAP_DEFAULT = 25;
@@ -287,8 +288,7 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
         public void initialize(InputSplit arg0, TaskAttemptContext context)
             throws IOException, InterruptedException {
           numNodes = context.getConfiguration().getLong(GENERATOR_NUM_ROWS_PER_MAP_KEY, 25000000);
-          // Use SecureRandom to avoid issue described in HBASE-13382.
-          rand = new SecureRandom();
+          rand = new Random();
         }
 
         @Override
@@ -626,7 +626,6 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
        */
       public static class WALMapperSearcher extends WALMapper {
         private SortedSet<byte []> keysToFind;
-        private AtomicInteger rows = new AtomicInteger(0);
 
         @Override
         public void setup(Mapper<WALKey, WALEdit, ImmutableBytesWritable, Mutation>.Context context)
@@ -648,15 +647,8 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
           boolean b = this.keysToFind.contains(row);
           if (b) {
             String keyStr = Bytes.toStringBinary(row);
-            try {
-              LOG.info("Found cell=" + cell + " , walKey=" + context.getCurrentKey());
-            } catch (IOException|InterruptedException e) {
-              LOG.warn(e);
-            }
-            if (rows.addAndGet(1) < MISSING_ROWS_TO_LOG) {
-              context.getCounter(FOUND_GROUP_KEY, keyStr).increment(1);
-            }
-            context.getCounter(FOUND_GROUP_KEY, "CELL_WITH_MISSING_ROW").increment(1);
+            LOG.info("Found cell=" + cell);
+            context.getCounter(FOUND_GROUP_KEY, keyStr).increment(1);
           }
           return b;
         }
@@ -1283,7 +1275,7 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
       if (cmd.hasOption('n')) {
         maxQueries = Long.parseLong(cmd.getOptionValue("n"));
       }
-      Random rand = new SecureRandom();
+      Random rand = new Random();
       boolean isSpecificStart = cmd.hasOption('s');
       byte[] startKey = isSpecificStart ? Bytes.toBytesBinary(cmd.getOptionValue('s')) : null;
       int logEvery = cmd.hasOption('l') ? Integer.parseInt(cmd.getOptionValue('l')) : 1;

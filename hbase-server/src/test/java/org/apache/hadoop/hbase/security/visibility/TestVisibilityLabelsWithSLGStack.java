@@ -81,7 +81,9 @@ public class TestVisibilityLabelsWithSLGStack {
   @Test
   public void testWithSAGStack() throws Exception {
     TableName tableName = TableName.valueOf(TEST_NAME.getMethodName());
-    try (Table table = TEST_UTIL.createTable(tableName, CF)) {
+    Table table = null;
+    try {
+      table = TEST_UTIL.createTable(tableName, CF);
       Put put = new Put(ROW_1);
       put.add(CF, Q1, HConstants.LATEST_TIMESTAMP, value);
       put.setCellVisibility(new CellVisibility(SECRET));
@@ -98,6 +100,10 @@ public class TestVisibilityLabelsWithSLGStack {
       Result next = scanner.next();
       assertNotNull(next.getColumnLatestCell(CF, Q1));
       assertNull(next.getColumnLatestCell(CF, Q2));
+    } finally {
+      if (table != null) {
+        table.close();
+      }
     }
   }
 

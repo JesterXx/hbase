@@ -76,8 +76,7 @@ public class TestTableLockManager {
   private static final TableName TABLE_NAME =
       TableName.valueOf("TestTableLevelLocks");
 
-  private static final String FAMILY1 = "f1";
-  private static final byte[] FAMILY = Bytes.toBytes(FAMILY1);
+  private static final byte[] FAMILY = Bytes.toBytes("f1");
 
   private static final byte[] NEW_FAMILY = Bytes.toBytes("f2");
 
@@ -90,7 +89,7 @@ public class TestTableLockManager {
   public void prepareMiniCluster() throws Exception {
     TEST_UTIL.getConfiguration().setBoolean("hbase.online.schema.update.enable", true);
     TEST_UTIL.startMiniCluster(2);
-    TEST_UTIL.createTable(TABLE_NAME, new String[] { FAMILY1, "f3" });
+    TEST_UTIL.createTable(TABLE_NAME, FAMILY);
   }
 
   public void prepareMiniZkCluster() throws Exception {

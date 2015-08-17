@@ -67,8 +67,4 @@ public abstract class NonLazyKeyValueScanner implements KeyValueScanner {
     // Not a file by default.
     return false;
   }
-  @Override
-  public Cell getNextIndexedKey() {
-    return null;
-  }
 }

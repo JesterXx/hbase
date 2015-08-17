@@ -34,7 +34,7 @@ module Hbase
 
     def initialize(admin, formatter)
       @admin = admin
-      @connection = @admin.getConnection()
+      connection = @admin.getConnection()
       @formatter = formatter
     end
 
@@ -84,7 +84,7 @@ module Hbase
     #----------------------------------------------------------------------------------------------
     # Requests a regionserver's WAL roll
     def wal_roll(server_name)
-      @admin.rollWALWriter(ServerName.valueOf(server_name))
+      @admin.rollWALWriter(server_name)
     end
     # TODO remove older hlog_roll version
     alias :hlog_roll :wal_roll
@@ -168,7 +168,7 @@ module Hbase
     #---------------------------------------------------------------------------------------------
     # Throw exception if table doesn't exist
     def tableExists(table_name)
-      raise ArgumentError, "Table #{table_name} does not exist." unless exists?(table_name)
+      raise ArgumentError, "Table #{table_name} does not exist.'" unless exists?(table_name)
     end
 
     #----------------------------------------------------------------------------------------------
@@ -181,7 +181,7 @@ module Hbase
     # Drops a table
     def drop(table_name)
       tableExists(table_name)
-      raise ArgumentError, "Table #{table_name} is enabled. Disable it first." if enabled?(table_name)
+      raise ArgumentError, "Table #{table_name} is enabled. Disable it first.'" if enabled?(table_name)
 
       @admin.deleteTable(org.apache.hadoop.hbase.TableName.valueOf(table_name))
     end
@@ -372,7 +372,7 @@ module Hbase
     # Truncates table (deletes all records by recreating the table)
     def truncate(table_name, conf = @conf)
       table_description = @admin.getTableDescriptor(TableName.valueOf(table_name))
-      raise ArgumentError, "Table #{table_name} is not enabled. Enable it first." unless enabled?(table_name)
+      raise ArgumentError, "Table #{table_name} is not enabled. Enable it first.'" unless enabled?(table_name)
       yield 'Disabling table...' if block_given?
       @admin.disableTable(table_name)
 
@@ -399,14 +399,14 @@ module Hbase
     #----------------------------------------------------------------------------------------------
     # Truncates table while maintaing region boundaries (deletes all records by recreating the table)
     def truncate_preserve(table_name, conf = @conf)
-      h_table = @connection.getTable(TableName.valueOf(table_name))
-      locator = @connection.getRegionLocator(TableName.valueOf(table_name))
+      h_table = @conn.getTable(table_name)      
+      locator = @conn.getRegionLocator(table_name)
       splits = locator.getAllRegionLocations().
           map{|i| Bytes.toString(i.getRegionInfo().getStartKey)}.
           delete_if{|k| k == ""}.to_java :String
       locator.close()
 
-      table_description = @admin.getTableDescriptor(TableName.valueOf(table_name))
+      table_description = @admin.getTableDescriptor(table_name)
       yield 'Disabling table...' if block_given?
       disable(table_name)
 
@@ -511,19 +511,10 @@ module Hbase
           # Unset table attributes
           elsif method == "table_att_unset"
             raise(ArgumentError, "NAME parameter missing for table_att_unset method") unless name
-            if name.kind_of?(Array)
-              name.each do |key|
-                if (htd.getValue(key) == nil)
-                  raise ArgumentError, "Could not find attribute: #{key}"
-                end
-                htd.remove(key)
-              end
-            else
-              if (htd.getValue(name) == nil)
-                raise ArgumentError, "Could not find attribute: #{name}"
-              end
-              htd.remove(name)
+            if (htd.getValue(name) == nil)
+              raise ArgumentError, "Can not find attribute: #{name}"
             end
+            htd.remove(name)
             @admin.modifyTable(table_name.to_java_bytes, htd)
           # Unknown method
           else
@@ -793,7 +784,7 @@ module Hbase
     # Enables/disables a region by name
     def online(region_name, on_off)
       # Open meta table
-      meta = @connection.getTable(org.apache.hadoop.hbase.TableName::META_TABLE_NAME)
+      meta = connection.getTable(org.apache.hadoop.hbase.TableName::META_TABLE_NAME)
 
       # Read region info
       # FIXME: fail gracefully if can't find the region

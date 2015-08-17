@@ -58,9 +58,9 @@ public class TestReplicationChangingPeerRegionservers extends TestReplicationBas
                           utility1.getHBaseCluster().getRegionServerThreads()) {
       utility1.getHBaseAdmin().rollWALWriter(r.getRegionServer().getServerName());
     }
-    utility1.deleteTableData(tableName);
+    utility1.truncateTable(tableName);
     // truncating the table will send one Delete per row to the slave cluster
-    // in an async fashion, which is why we cannot just call deleteTableData on
+    // in an async fashion, which is why we cannot just call truncateTable on
     // utility2 since late writes could make it to the slave in some way.
     // Instead, we truncate the first table and wait for all the Deletes to
     // make it to the slave.

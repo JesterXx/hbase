@@ -202,10 +202,6 @@ public final class HConstants {
   public static final String ZOOKEEPER_DATA_DIR =
       ZK_CFG_PROPERTY_PREFIX + "dataDir";
 
-  /** Parameter name for the ZK tick time */
-  public static final String ZOOKEEPER_TICK_TIME =
-      ZK_CFG_PROPERTY_PREFIX + "tickTime";
-
   /** Default limit on concurrent client-side zookeeper connections */
   public static final int DEFAULT_ZOOKEPER_MAX_CLIENT_CNXNS = 300;
 
@@ -280,7 +276,7 @@ public final class HConstants {
     "hbase.client.meta.operation.timeout";
 
   /** Default HBase client operation timeout, which is tantamount to a blocking call */
-  public static final int DEFAULT_HBASE_CLIENT_OPERATION_TIMEOUT = 1200000;
+  public static final int DEFAULT_HBASE_CLIENT_OPERATION_TIMEOUT = Integer.MAX_VALUE;
 
   /** Used to construct the name of the log directory for a region server */
   public static final String HREGION_LOGDIR_NAME = "WALs";
@@ -603,13 +599,6 @@ public final class HConstants {
       "hbase.client.scanner.max.result.size";
 
   /**
-   * Parameter name for maximum number of bytes returned when calling a scanner's next method.
-   * Controlled by the server.
-   */
-  public static final String HBASE_SERVER_SCANNER_MAX_RESULT_SIZE_KEY =
-      "hbase.server.scanner.max.result.size";
-
-  /**
    * Maximum number of bytes returned when calling a scanner's next method.
    * Note that when a single row is larger than this limit the row is still
    * returned completely.
@@ -617,16 +606,6 @@ public final class HConstants {
    * The default value is 2MB.
    */
   public static final long DEFAULT_HBASE_CLIENT_SCANNER_MAX_RESULT_SIZE = 2 * 1024 * 1024;
-
-  /**
-   * Maximum number of bytes returned when calling a scanner's next method.
-   * Note that when a single row is larger than this limit the row is still
-   * returned completely.
-   * Safety setting to protect the region server.
-   *
-   * The default value unlimited for backwards compatibility
-   */
-  public static final long DEFAULT_HBASE_SERVER_SCANNER_MAX_RESULT_SIZE = Long.MAX_VALUE;
 
   /**
    * Parameter name for client pause value, used mostly as value to wait
@@ -940,7 +919,7 @@ public final class HConstants {
    * The byte array represents for NO_NEXT_INDEXED_KEY;
    * The actual value is irrelevant because this is always compared by reference.
    */
-  public static final Cell NO_NEXT_INDEXED_KEY = new KeyValue();
+  public static final byte [] NO_NEXT_INDEXED_KEY = Bytes.toBytes("NO_NEXT_INDEXED_KEY");
   /** delimiter used between portions of a region name */
   public static final int DELIMITER = ',';
   public static final String HBASE_CONFIG_READ_ZOOKEEPER_CONFIG =
@@ -1038,9 +1017,6 @@ public final class HConstants {
 
   public static final long NO_NONCE = 0;
 
-  /** Default cipher for encryption */
-  public static final String CIPHER_AES = "AES";
-
   /** Configuration key for the crypto algorithm provider, a class name */
   public static final String CRYPTO_CIPHERPROVIDER_CONF_KEY = "hbase.crypto.cipherprovider";
 
@@ -1063,13 +1039,6 @@ public final class HConstants {
 
   /** Configuration key for the name of the master WAL encryption key for the cluster, a string */
   public static final String CRYPTO_WAL_KEY_NAME_CONF_KEY = "hbase.crypto.wal.key.name";
-
-  /** Configuration key for the algorithm used for creating jks key, a string */
-  public static final String CRYPTO_KEY_ALGORITHM_CONF_KEY = "hbase.crypto.key.algorithm";
-
-  /** Configuration key for the name of the alternate cipher algorithm for the cluster, a string */
-  public static final String CRYPTO_ALTERNATE_KEY_ALGORITHM_CONF_KEY =
-      "hbase.crypto.alternate.key.algorithm";
 
   /** Configuration key for enabling WAL encryption, a boolean */
   public static final String ENABLE_WAL_ENCRYPTION = "hbase.regionserver.wal.encryption";
@@ -1147,13 +1116,6 @@ public final class HConstants {
   public static final String HEAP_OCCUPANCY_HIGH_WATERMARK_KEY =
       "hbase.heap.occupancy.high_water_mark";
   public static final float DEFAULT_HEAP_OCCUPANCY_HIGH_WATERMARK = 0.98f;
-
-  /**
-   * The max number of threads used for splitting storefiles in parallel during
-   * the region split process.
-   */
-  public static final String REGION_SPLIT_THREADS_MAX =
-    "hbase.regionserver.region.split.threads.max";
 
   private HConstants() {
     // Can't be instantiated with this ctor.

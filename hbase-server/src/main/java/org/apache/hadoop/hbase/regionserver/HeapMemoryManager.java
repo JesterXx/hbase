@@ -108,7 +108,6 @@ public class HeapMemoryManager {
   }
 
   private boolean doInit(Configuration conf) {
-    boolean tuningEnabled = true;
     globalMemStorePercent = HeapMemorySizeUtil.getGlobalMemStorePercent(conf, false);
     blockCachePercent = conf.getFloat(HFILE_BLOCK_CACHE_SIZE_KEY,
         HConstants.HFILE_BLOCK_CACHE_SIZE_DEFAULT);
@@ -134,7 +133,7 @@ public class HeapMemoryManager {
     }
     if (globalMemStorePercent == globalMemStorePercentMinRange
         && globalMemStorePercent == globalMemStorePercentMaxRange) {
-      tuningEnabled = false;
+      return false;
     }
     // Initialize max and min range for block cache
     blockCachePercentMinRange = conf.getFloat(BLOCK_CACHE_SIZE_MIN_RANGE_KEY, blockCachePercent);
@@ -153,9 +152,9 @@ public class HeapMemoryManager {
       blockCachePercentMaxRange = blockCachePercent;
       conf.setFloat(BLOCK_CACHE_SIZE_MAX_RANGE_KEY, blockCachePercentMaxRange);
     }
-    if (tuningEnabled && blockCachePercent == blockCachePercentMinRange
+    if (blockCachePercent == blockCachePercentMinRange
         && blockCachePercent == blockCachePercentMaxRange) {
-      tuningEnabled = false;
+      return false;
     }
 
     int gml = (int) (globalMemStorePercentMaxRange * CONVERT_TO_PERCENTAGE);
@@ -181,7 +180,7 @@ public class HeapMemoryManager {
           + globalMemStorePercentMinRange + " and " + BLOCK_CACHE_SIZE_MAX_RANGE_KEY + " is "
           + blockCachePercentMaxRange);
     }
-    return tuningEnabled;
+    return true;
   }
 
   public void start() {
@@ -270,11 +269,10 @@ public class HeapMemoryManager {
     }
 
     private void tune() {
-      long curEvictCount = blockCache.getStats().getEvictedCount();
-      tunerContext.setEvictCount(curEvictCount - evictCount);
-      evictCount = curEvictCount;
+      evictCount = blockCache.getStats().getEvictedCount() - evictCount;
       tunerContext.setBlockedFlushCount(blockedFlushCount.getAndSet(0));
       tunerContext.setUnblockedFlushCount(unblockedFlushCount.getAndSet(0));
+      tunerContext.setEvictCount(evictCount);
       tunerContext.setCurBlockCacheSize(blockCachePercent);
       tunerContext.setCurMemStoreSize(globalMemStorePercent);
       TunerResult result = null;

@@ -143,7 +143,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       }
     } catch (KeeperException e) {
       member.controllerConnectionFailure("Failed to list children for abort node:"
-          + zkController.getAbortZnode(), e, null);
+          + zkController.getAbortZnode(), new IOException(e));
     }
   }
 
@@ -160,7 +160,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       }
     } catch (KeeperException e) {
       member.controllerConnectionFailure("General failure when watching for new procedures",
-        e, null);
+        new IOException(e));
     }
     if (runningProcedures == null) {
       LOG.debug("No running procedures.");
@@ -192,7 +192,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       }
     } catch (KeeperException e) {
       member.controllerConnectionFailure("Failed to get the abort znode (" + abortZNode
-          + ") for procedure :" + opName, e, opName);
+          + ") for procedure :" + opName, new IOException(e));
       return;
     }
 
@@ -200,6 +200,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
     Subprocedure subproc = null;
     try {
       byte[] data = ZKUtil.getData(zkController.getWatcher(), path);
+      LOG.debug("start proc data length is " + data.length);
       if (!ProtobufUtil.isPBMagicPrefix(data)) {
         String msg = "Data in for starting procuedure " + opName +
           " is illegally formatted (no pb magic). " +
@@ -207,7 +208,6 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
         LOG.error(msg);
         throw new IllegalArgumentException(msg);
       }
-      LOG.debug("start proc data length is " + data.length);
       data = Arrays.copyOfRange(data, ProtobufUtil.lengthOfPBMagic(), data.length);
       LOG.debug("Found data for znode:" + path);
       subproc = member.createSubprocedure(opName, data);
@@ -220,10 +220,10 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       sendMemberAborted(subproc, new ForeignException(getMemberName(), ise));
     } catch (KeeperException e) {
       member.controllerConnectionFailure("Failed to get data for new procedure:" + opName,
-        e, opName);
+        new IOException(e));
     } catch (InterruptedException e) {
       member.controllerConnectionFailure("Failed to get data for new procedure:" + opName,
-        e, opName);
+          new IOException(e));
       Thread.currentThread().interrupt();
     }
   }
@@ -252,7 +252,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       }
     } catch (KeeperException e) {
       member.controllerConnectionFailure("Failed to acquire barrier for procedure: "
-          + procName + " and member: " + memberName, e, procName);
+          + procName + " and member: " + memberName, new IOException(e));
     }
   }
 
@@ -274,7 +274,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
         ProtobufUtil.prependPBMagic(data));
     } catch (KeeperException e) {
       member.controllerConnectionFailure("Failed to post zk node:" + joinPath
-          + " to join procedure barrier.", e, procName);
+          + " to join procedure barrier.", new IOException(e));
     }
   }
 
@@ -301,7 +301,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       // that case we should still get an error for that procedure anyways
       zkController.logZKTree(zkController.getBaseZnode());
       member.controllerConnectionFailure("Failed to post zk node:" + procAbortZNode
-          + " to abort procedure", e, procName);
+          + " to abort procedure", new IOException(e));
     }
   }
 
@@ -318,10 +318,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       // figure out the data we need to pass
       ForeignException ee;
       try {
-        if (data == null || data.length == 0) {
-          // ignore
-          return;
-        } else if (!ProtobufUtil.isPBMagicPrefix(data)) {
+        if (!ProtobufUtil.isPBMagicPrefix(data)) {
           String msg = "Illegally formatted data in abort node for proc " + opName
               + ".  Killing the procedure.";
           LOG.error(msg);
@@ -341,7 +338,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
       this.member.receiveAbortProcedure(opName, ee);
     } catch (KeeperException e) {
       member.controllerConnectionFailure("Failed to get data for abort znode:" + abortZNode
-          + zkController.getAbortZnode(), e, opName);
+          + zkController.getAbortZnode(), new IOException(e));
     } catch (InterruptedException e) {
       LOG.warn("abort already in progress", e);
       Thread.currentThread().interrupt();
