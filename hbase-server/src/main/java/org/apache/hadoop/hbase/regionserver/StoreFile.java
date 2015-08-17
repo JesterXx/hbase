@@ -58,6 +58,7 @@ import org.apache.hadoop.hbase.util.BloomFilterFactory;
 import org.apache.hadoop.hbase.util.BloomFilterWriter;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Writables;
+import org.apache.hadoop.hdfs.StorageType;
 import org.apache.hadoop.io.WritableUtils;
 
 import com.google.common.base.Function;
@@ -548,11 +549,18 @@ public class StoreFile {
     private Path filePath;
     private InetSocketAddress[] favoredNodes;
     private HFileContext fileContext;
+    private StorageType storageType;
     public WriterBuilder(Configuration conf, CacheConfig cacheConf,
         FileSystem fs) {
       this.conf = conf;
       this.cacheConf = cacheConf;
       this.fs = fs;
+    }
+
+    public WriterBuilder withStorageType(StorageType storageType) {
+      Preconditions.checkNotNull(storageType);
+      this.storageType = storageType;
+      return this;
     }
 
     /**
@@ -642,8 +650,8 @@ public class StoreFile {
       if (comparator == null) {
         comparator = KeyValue.COMPARATOR;
       }
-      return new Writer(fs, filePath,
-          conf, cacheConf, comparator, bloomType, maxKeyCount, favoredNodes, fileContext);
+      return new Writer(fs, filePath, conf, cacheConf, comparator, bloomType, maxKeyCount,
+        favoredNodes, fileContext, storageType);
     }
   }
 
@@ -747,13 +755,14 @@ public class StoreFile {
         final Configuration conf,
         CacheConfig cacheConf,
         final KVComparator comparator, BloomType bloomType, long maxKeys,
-        InetSocketAddress[] favoredNodes, HFileContext fileContext)
+        InetSocketAddress[] favoredNodes, HFileContext fileContext, StorageType storageType)
             throws IOException {
       writer = HFile.getWriterFactory(conf, cacheConf)
           .withPath(fs, path)
           .withComparator(comparator)
           .withFavoredNodes(favoredNodes)
           .withFileContext(fileContext)
+          .withStorageType(storageType)
           .create();
 
       this.kvComparator = comparator;

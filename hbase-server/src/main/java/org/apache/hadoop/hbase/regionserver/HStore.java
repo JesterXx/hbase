@@ -90,6 +90,7 @@ import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
+import org.apache.hadoop.hdfs.StorageType;
 import org.apache.hadoop.util.StringUtils;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -946,7 +947,7 @@ public class HStore implements Store {
    */
   @Override
   public StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
-      boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag)
+      boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag, StorageType storageType)
   throws IOException {
     final CacheConfig writerCacheConf;
     if (isCompaction) {
@@ -971,6 +972,7 @@ public class HStore implements Store {
             .withMaxKeyCount(maxKeyCount)
             .withFavoredNodes(favoredNodes)
             .withFileContext(hFileContext)
+            .withStorageType(storageType)
             .build();
     return w;
   }
@@ -1191,6 +1193,16 @@ public class HStore implements Store {
       }
       // At this point the store will use new files for all new scanners.
       completeCompaction(filesToCompact, true); // Archive old files & update store size.
+
+      if (region.getRegionServerServices().getLogMovePool() != null) {
+        LOG.info("Now start to archive " + filesToCompact.size() + " store files to disk");
+        Collection<Path> pathsToCompact = new ArrayList<Path>();
+        for (StoreFile fileToCompact : filesToCompact) {
+          pathsToCompact.add(fileToCompact.getPath());
+        }
+        region.getRegionServerServices().getLogMovePool()
+          .submit(new LogMoveTask(fs.getFileSystem(), pathsToCompact, StorageType.DISK));
+      }
 
       logCompactionEndMessage(cr, sfs, compactionStartTime);
       return sfs;
@@ -2289,5 +2301,12 @@ public class HStore implements Store {
   @Override
   public void deregisterChildren(ConfigurationManager manager) {
     // No children to deregister
+  }
+
+  @Override
+  public StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
+    boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag) throws IOException {
+    return createWriterInTmp(maxKeyCount, compression, isCompaction, includeMVCCReadpoint,
+      includesTag, StorageType.DEFAULT);
   }
 }

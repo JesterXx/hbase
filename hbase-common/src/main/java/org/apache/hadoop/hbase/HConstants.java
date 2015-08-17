@@ -1117,6 +1117,11 @@ public final class HConstants {
       "hbase.heap.occupancy.high_water_mark";
   public static final float DEFAULT_HEAP_OCCUPANCY_HIGH_WATERMARK = 0.98f;
 
+  public static final String HSM_CR_THRESHOLD_KEY = "hsm.cr.threshold";
+  public static final String HSM_SSD_THRESHOLD_KEY = "hsm.ssd.threshold";
+  public static final long DEFAULT_HSM_CR_THRESHOLD = 200 * 1024 * 1024; // 200MB
+  public static final long DEFAULT_HSM_SSD_THRESHOLD = 8 * 1024 * 1024 * 1024; // 8GB
+
   private HConstants() {
     // Can't be instantiated with this ctor.
   }

@@ -97,6 +97,7 @@ public abstract class Compactor {
     public int maxTagsLength = 0;
     /** Min SeqId to keep during a major compaction **/
     public long minSeqIdToKeep = 0;
+    public long fileLength = 0;
   }
 
   /**
@@ -119,6 +120,7 @@ public abstract class Compactor {
           fd.minSeqIdToKeep = file.getMaxMemstoreTS();
         }
       }
+      fd.fileLength += file.getFileInfo().getFileStatus().getLen();
       long seqNum = file.getMaxSequenceId();
       fd.maxSeqId = Math.max(fd.maxSeqId, seqNum);
       StoreFile.Reader r = file.getReader();
