@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.chaos.actions;
 
 import org.apache.commons.lang.math.RandomUtils;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
+import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 
@@ -28,6 +29,7 @@ import org.apache.hadoop.hbase.client.Admin;
  */
 public class CompactMobAction extends Action {
   private final TableName tableName;
+  private final byte[] regionName;
   private final int majorRatio;
   private final long sleepTime;
 
@@ -38,6 +40,7 @@ public class CompactMobAction extends Action {
   public CompactMobAction(
           int sleepTime, TableName tableName, float majorRatio) {
     this.tableName = tableName;
+    this.regionName = HRegionInfo.getMobRegionName(tableName);
     this.majorRatio = (int) (100 * majorRatio);
     this.sleepTime = sleepTime;
   }
@@ -51,9 +54,9 @@ public class CompactMobAction extends Action {
     LOG.info("Performing action: Compact mob of table " + tableName + ", major=" + major);
     try {
       if (major) {
-        admin.majorCompactMobs(tableName);
+        admin.majorCompactRegion(regionName);
       } else {
-        admin.compactMobs(tableName);
+        admin.compactRegion(regionName);
       }
     } catch (Exception ex) {
       LOG.warn("Mob Compaction failed, might be caused by other chaos: " + ex.getMessage());

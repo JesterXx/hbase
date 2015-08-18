@@ -1763,7 +1763,12 @@ public class HBaseAdmin implements Admin {
   @Override
   public void compactRegion(final byte[] regionName)
     throws IOException {
-    compactRegion(regionName, null, false);
+    TableName tableName = HRegionInfo.getTable(regionName);
+    if (!isMobRegionName(tableName, regionName)) {
+      compactRegion(regionName, null, false);
+    } else {
+      compactMob(tableName, null, false);
+    }
   }
 
   /**
@@ -1805,7 +1810,12 @@ public class HBaseAdmin implements Admin {
   @Override
   public void compactRegion(final byte[] regionName, final byte[] columnFamily)
     throws IOException {
-    compactRegion(regionName, columnFamily, false);
+    TableName tableName = HRegionInfo.getTable(regionName);
+    if (!isMobRegionName(tableName, regionName)) {
+      compactRegion(regionName, columnFamily, false);
+    } else {
+      compactMob(tableName, columnFamily, false);
+    }
   }
 
   /**
@@ -1859,7 +1869,12 @@ public class HBaseAdmin implements Admin {
   @Override
   public void majorCompactRegion(final byte[] regionName)
   throws IOException {
-    compactRegion(regionName, null, true);
+    TableName tableName = HRegionInfo.getTable(regionName);
+    if (!isMobRegionName(tableName, regionName)) {
+      compactRegion(regionName, null, true);
+    } else {
+      compactMob(tableName, null, true);
+    }
   }
 
   /**
@@ -1902,7 +1917,12 @@ public class HBaseAdmin implements Admin {
   @Override
   public void majorCompactRegion(final byte[] regionName, final byte[] columnFamily)
   throws IOException {
-    compactRegion(regionName, columnFamily, true);
+    TableName tableName = HRegionInfo.getTable(regionName);
+    if (!isMobRegionName(tableName, regionName)) {
+      compactRegion(regionName, columnFamily, true);
+    } else {
+      compactMob(tableName, columnFamily, true);
+    }
   }
 
   /**
@@ -3046,6 +3066,10 @@ public class HBaseAdmin implements Admin {
   @Override
   public CompactionState getCompactionStateForRegion(final byte[] regionName)
   throws IOException {
+    TableName tableName = HRegionInfo.getTable(regionName);
+    if (isMobRegionName(tableName, regionName)) {
+      return getMobCompactionState(regionName);
+    }
     try {
       Pair<HRegionInfo, ServerName> regionServerPair = getRegion(regionName);
       if (regionServerPair == null) {
@@ -4123,105 +4147,20 @@ public class HBaseAdmin implements Admin {
   }
 
   /**
-   * {@inheritDoc}
-   */
-  @Override
-  public void compactMob(final TableName tableName, final byte[] columnFamily)
-    throws IOException, InterruptedException {
-    checkTableNameNotNull(tableName);
-    checkFamilyNameNotNull(columnFamily);
-    validateMobColumnFamily(tableName, columnFamily);
-    compactMob(tableName, columnFamily, false);
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public void compactMobs(final TableName tableName) throws IOException, InterruptedException {
-    checkTableNameNotNull(tableName);
-    compactMob(tableName, null, false);
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public void majorCompactMob(final TableName tableName, final byte[] columnFamily)
-    throws IOException, InterruptedException {
-    checkTableNameNotNull(tableName);
-    checkFamilyNameNotNull(columnFamily);
-    validateMobColumnFamily(tableName, columnFamily);
-    compactMob(tableName, columnFamily, true);
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public void majorCompactMobs(final TableName tableName) throws IOException, InterruptedException {
-    checkTableNameNotNull(tableName);
-    compactMob(tableName, null, true);
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public CompactionState getMobCompactionState(TableName tableName) throws IOException {
-    checkTableNameNotNull(tableName);
-    try {
-      ServerName master = getClusterStatus().getMaster();
-      HRegionInfo info = new HRegionInfo(tableName, Bytes.toBytes(".mob"),
-        HConstants.EMPTY_END_ROW, false, 0);
-      GetRegionInfoRequest request = RequestConverter.buildGetRegionInfoRequest(
-        info.getRegionName(), true);
-      GetRegionInfoResponse response = this.connection.getAdmin(master)
-        .getRegionInfo(null, request);
-      return response.getCompactionState();
-    } catch (ServiceException se) {
-      throw ProtobufUtil.getRemoteException(se);
-    }
-  }
-
-  /**
    * Compacts the mob files in a mob-enabled column family. Asynchronous operation.
    * @param tableName The table to compact.
    * @param columnFamily The column family to compact. If it is null, all the mob-enabled
    *        column families in this table will be compacted.
    * @param major Whether to select all the mob files in the compaction.
    * @throws IOException
-   * @throws InterruptedException
    */
   private void compactMob(final TableName tableName, final byte[] columnFamily, boolean major)
-    throws IOException, InterruptedException {
+    throws IOException {
     // get the mob region info, this is a dummy region.
     HRegionInfo info = new HRegionInfo(tableName, Bytes.toBytes(".mob"), HConstants.EMPTY_END_ROW,
       false, 0);
     ServerName master = getClusterStatus().getMaster();
     compact(master, info, major, columnFamily);
-  }
-
-  private void checkTableNameNotNull(TableName tableName) {
-    if (tableName == null) {
-      throw new IllegalArgumentException("TableName cannot be null");
-    }
-  }
-
-  private void checkFamilyNameNotNull(byte[] columnFamily) {
-    if (columnFamily == null) {
-      throw new IllegalArgumentException("The column family name cannot be null");
-    }
-  }
-
-  private void validateMobColumnFamily(TableName tableName, byte[] columnFamily)
-    throws IOException {
-    HTableDescriptor htd = getTableDescriptor(tableName);
-    HColumnDescriptor family = htd.getFamily(columnFamily);
-    if (family == null || !family.isMobEnabled()) {
-      throw new IllegalArgumentException("Column family " + Bytes.toString(columnFamily)
-        + " is not a mob column family");
-    }
   }
 
   /**
@@ -4642,6 +4581,34 @@ public class HBaseAdmin implements Admin {
         e = ((RemoteException)e).unwrapRemoteException();
       }
       throw e;
+    }
+  }
+
+  /**
+   * Checks whether the given region name is a mob regino name.
+   * @param tableName The current table name.
+   * @param regionName The current region name.
+   * @return true if the given region name is a mob region name.
+   */
+  private boolean isMobRegionName(TableName tableName, byte[] regionName) {
+    return Bytes.equals(regionName, HRegionInfo.getMobRegionName(tableName));
+  }
+
+  /**
+   * Gets the mob compaction state.
+   * @param regionName The current region name.
+   * @return the compaction state.
+   * @throws IOException
+   */
+  private CompactionState getMobCompactionState(byte[] regionName) throws IOException {
+    try {
+      ServerName master = getClusterStatus().getMaster();
+      GetRegionInfoRequest request = RequestConverter.buildGetRegionInfoRequest(regionName, true);
+      GetRegionInfoResponse response = this.connection.getAdmin(master)
+        .getRegionInfo(null, request);
+      return response.getCompactionState();
+    } catch (ServiceException se) {
+      throw ProtobufUtil.getRemoteException(se);
     }
   }
 }

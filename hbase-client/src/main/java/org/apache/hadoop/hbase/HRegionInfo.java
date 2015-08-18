@@ -1310,4 +1310,14 @@ public class HRegionInfo implements Comparable<HRegionInfo> {
     }
     return false;
   }
+
+  /**
+   * Gets mob region name.
+   * @param tableName The current table name.
+   * @return the mob region name.
+   */
+  public static byte[] getMobRegionName(TableName tableName) {
+    return new HRegionInfo(tableName, Bytes.toBytes(".mob"), HConstants.EMPTY_END_ROW, false, 0)
+      .getRegionName();
+  }
 }
