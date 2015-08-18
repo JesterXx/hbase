@@ -1312,7 +1312,7 @@ public class HRegionInfo implements Comparable<HRegionInfo> {
   }
 
   /**
-   * Gets mob region name.
+   * Gets mob region name by the given table name.
    * @param tableName The current table name.
    * @return the mob region name.
    */
