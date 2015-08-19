@@ -252,7 +252,7 @@ public class HFile {
     protected KVComparator comparator = KeyValue.COMPARATOR;
     protected InetSocketAddress[] favoredNodes;
     private HFileContext fileContext;
-    private StorageType storageType;
+    private String storagePolicy;
 
     WriterFactory(Configuration conf, CacheConfig cacheConf) {
       this.conf = conf;
@@ -290,8 +290,8 @@ public class HFile {
       return this;
     }
 
-    public WriterFactory withStorageType(StorageType storageType) {
-      this.storageType = storageType;
+    public WriterFactory withStoragePolicy(String storagePolicy) {
+      this.storagePolicy = storagePolicy;
       return this;
     }
 
@@ -302,7 +302,7 @@ public class HFile {
       }
       if (path != null) {
         ostream = AbstractHFileWriter.createOutputStream(conf, fs, path, favoredNodes);
-        ((DistributedFileSystem) fs).setStoragePolicy(path, this.storageType.name());
+        ((DistributedFileSystem) fs).setStoragePolicy(path, this.storagePolicy);
       }
       return createWriter(fs, path, ostream,
                    comparator, fileContext);

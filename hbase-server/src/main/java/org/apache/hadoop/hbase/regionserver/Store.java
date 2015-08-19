@@ -401,5 +401,5 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
 
   StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
     boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTags,
-    StorageType storageType) throws IOException;
+    String storagePolicy) throws IOException;
 }

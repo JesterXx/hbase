@@ -86,6 +86,7 @@ import org.apache.hadoop.hbase.wal.WALSplitter;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.StorageType;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
+import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.htrace.NullScope;
 import org.apache.htrace.Span;
@@ -494,7 +495,7 @@ public class FSHLog implements WAL {
       throw new IOException("Unable to mkdir " + fullPathLogDir);
     }
 
-    ((DistributedFileSystem) fs).setStoragePolicy(fullPathLogDir, StorageType.CR.name());
+    ((DistributedFileSystem) fs).setStoragePolicy(fullPathLogDir, HdfsConstants.ALL_CR_STORAGE_POLICY_NAME);
     if (!fs.exists(this.fullPathArchiveDir)) {
       if (!fs.mkdirs(this.fullPathArchiveDir)) {
         throw new IOException("Unable to mkdir " + this.fullPathArchiveDir);
@@ -799,7 +800,7 @@ public class FSHLog implements WAL {
     LOG.info("Now there are " + logMoveEvents.size()
       + " events in log moving queue. One more which has " + logsToArchive.size()
       + " files is going to be submitted");
-    logMovePool.submit(new LogMoveTask(fs, logsToArchive, StorageType.DISK));
+    logMovePool.submit(new LogMoveTask(fs, logsToArchive, HdfsConstants.HOT_STORAGE_POLICY_NAME));
   }
 
   /**

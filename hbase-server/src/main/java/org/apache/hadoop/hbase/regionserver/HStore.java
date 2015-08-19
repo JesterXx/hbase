@@ -91,6 +91,7 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.hadoop.hdfs.StorageType;
+import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.util.StringUtils;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -947,7 +948,7 @@ public class HStore implements Store {
    */
   @Override
   public StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
-      boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag, StorageType storageType)
+      boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag, String storagePolicy)
   throws IOException {
     final CacheConfig writerCacheConf;
     if (isCompaction) {
@@ -972,7 +973,7 @@ public class HStore implements Store {
             .withMaxKeyCount(maxKeyCount)
             .withFavoredNodes(favoredNodes)
             .withFileContext(hFileContext)
-            .withStorageType(storageType)
+            .withStoragePolicy(storagePolicy)
             .build();
     return w;
   }
@@ -1201,7 +1202,7 @@ public class HStore implements Store {
           pathsToCompact.add(fileToCompact.getPath());
         }
         region.getRegionServerServices().getLogMovePool()
-          .submit(new LogMoveTask(fs.getFileSystem(), pathsToCompact, StorageType.DISK));
+          .submit(new LogMoveTask(fs.getFileSystem(), pathsToCompact, HdfsConstants.HOT_STORAGE_POLICY_NAME));
       }
 
       logCompactionEndMessage(cr, sfs, compactionStartTime);
@@ -2307,6 +2308,6 @@ public class HStore implements Store {
   public StoreFile.Writer createWriterInTmp(long maxKeyCount, Compression.Algorithm compression,
     boolean isCompaction, boolean includeMVCCReadpoint, boolean includesTag) throws IOException {
     return createWriterInTmp(maxKeyCount, compression, isCompaction, includeMVCCReadpoint,
-      includesTag, StorageType.DEFAULT);
+      includesTag, HdfsConstants.HOT_STORAGE_POLICY_NAME);
   }
 }

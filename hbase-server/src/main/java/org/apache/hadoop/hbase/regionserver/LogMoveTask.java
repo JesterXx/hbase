@@ -24,25 +24,24 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.DFSClient;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
-import org.apache.hadoop.hdfs.StorageType;
 
 public class LogMoveTask implements Callable<Void> {
 
   private FileSystem fs;
   private Collection<Path> files;
-  private StorageType storageType;
+  private String storagePolicy;
 
-  public LogMoveTask(FileSystem fs, Collection<Path> files, StorageType storageType) {
+  public LogMoveTask(FileSystem fs, Collection<Path> files, String storagePolicy) {
     this.fs = fs;
     this.files = files;
-    this.storageType = storageType;
+    this.storagePolicy = storagePolicy;
   }
 
   @Override
   public Void call() throws Exception {
     DFSClient client = ((DistributedFileSystem) fs).getClient();
     for (Path file : files) {
-      client.setStoragePolicy(file.toString(), storageType.name());
+      client.setStoragePolicy(file.toString(), storagePolicy);
       client.applyFilePolicy(file.toString());
     }
     return null;

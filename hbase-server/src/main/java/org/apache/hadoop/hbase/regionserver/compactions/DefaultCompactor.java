@@ -36,6 +36,7 @@ import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hdfs.StorageType;
+import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 
 /**
  * Compact passed set of files. Create an instance and then call {@link #compact(CompactionRequest)}
@@ -106,10 +107,10 @@ public class DefaultCompactor extends Compactor {
 
         if (fd.fileLength <= hsmCrThreshold) {
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
-            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, StorageType.CR);
+            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALL_CR_STORAGE_POLICY_NAME);
         } else if (fd.fileLength > hsmCrThreshold && fd.fileLength <= hsmSsdThreshold) {
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
-            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, StorageType.SSD);
+            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALL_PCIE_SSD_STORAGE_POLICY_NAME);
         } else {
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
             fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0);
