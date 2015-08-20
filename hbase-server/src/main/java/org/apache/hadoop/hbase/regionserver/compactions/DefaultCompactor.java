@@ -105,13 +105,17 @@ public class DefaultCompactor extends Compactor {
           cleanSeqId = true;
         }
 
+        LOG.info("Compacting files size is " + fd.fileLength);
         if (fd.fileLength <= hsmCrThreshold) {
+          LOG.info("Compacting files " + fd.fileLength + " are moved to CR");
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
             fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALL_CR_STORAGE_POLICY_NAME);
         } else if (fd.fileLength > hsmCrThreshold && fd.fileLength <= hsmSsdThreshold) {
+          LOG.info("Compacting files " + fd.fileLength + " are moved to SSD");
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
             fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALL_PCIE_SSD_STORAGE_POLICY_NAME);
         } else {
+          LOG.info("Compacting files " + fd.fileLength + " are moved to HDD");
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
             fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0);
         }
