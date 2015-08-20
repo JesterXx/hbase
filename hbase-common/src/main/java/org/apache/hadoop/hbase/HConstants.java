@@ -1120,7 +1120,7 @@ public final class HConstants {
   public static final String HSM_CR_THRESHOLD_KEY = "hsm.cr.threshold";
   public static final String HSM_SSD_THRESHOLD_KEY = "hsm.ssd.threshold";
   public static final long DEFAULT_HSM_CR_THRESHOLD = 200 * 1024 * 1024; // 200MB
-  public static final long DEFAULT_HSM_SSD_THRESHOLD = 10 * 1024 * 1024 * 1024; // 8GB
+  public static final long DEFAULT_HSM_SSD_THRESHOLD = 10 * 1024 * 1024 * 1024; // 10GB
 
   private HConstants() {
     // Can't be instantiated with this ctor.
