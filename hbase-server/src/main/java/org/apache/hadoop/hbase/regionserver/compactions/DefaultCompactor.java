@@ -113,7 +113,7 @@ public class DefaultCompactor extends Compactor {
         } else if (fd.fileLength > hsmCrThreshold && fd.fileLength <= hsmSsdThreshold) {
           LOG.info("Compacting files " + fd.fileLength + " are moved to SSD");
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
-            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALL_PCIE_SSD_STORAGE_POLICY_NAME);
+            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALLSSD_STORAGE_POLICY_NAME);
         } else {
           LOG.info("Compacting files " + fd.fileLength + " are moved to HDD");
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
