@@ -43,12 +43,12 @@ import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 @InterfaceAudience.Private
 public class DefaultCompactor extends Compactor {
   private static final Log LOG = LogFactory.getLog(DefaultCompactor.class);
-  private long hsmCrThreshold, hsmSsdThreshold;
+  private final long hsmCrThreshold, hsmSsdThreshold;
 
   public DefaultCompactor(final Configuration conf, final Store store) {
     super(conf, store);
-    hsmCrThreshold = HConstants.DEFAULT_HSM_CR_THRESHOLD;
-    hsmSsdThreshold = HConstants.DEFAULT_HSM_SSD_THRESHOLD;
+    hsmCrThreshold = 209715200L;
+    hsmSsdThreshold = 8589934592L;
     LOG.info("hsm_cr_threshold=" + hsmCrThreshold);
     LOG.info("hsm_ssd_threshold=" + hsmSsdThreshold);
   }
