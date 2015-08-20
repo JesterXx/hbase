@@ -65,7 +65,6 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ChecksumType;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
-import org.apache.hadoop.hdfs.StorageType;
 import org.apache.hadoop.io.Writable;
 
 import com.google.common.base.Preconditions;
@@ -302,7 +301,13 @@ public class HFile {
       }
       if (path != null) {
         ostream = AbstractHFileWriter.createOutputStream(conf, fs, path, favoredNodes);
-        ((DistributedFileSystem) fs).setStoragePolicy(path, this.storagePolicy);
+        if (fs instanceof DistributedFileSystem) {
+          ((DistributedFileSystem) fs).setStoragePolicy(path, this.storagePolicy);
+        } else if (fs instanceof HFileSystem) {
+          FileSystem backupFs = ((HFileSystem) fs).getBackingFs();
+          ((DistributedFileSystem) backupFs).setStoragePolicy(path, this.storagePolicy);
+        }
+        
       }
       return createWriter(fs, path, ostream,
                    comparator, fileContext);
