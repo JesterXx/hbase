@@ -20,13 +20,17 @@ package org.apache.hadoop.hbase.regionserver;
 import java.util.Collection;
 import java.util.concurrent.Callable;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hdfs.DFSClient;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 
 public class LogMoveTask implements Callable<Void> {
 
+  static final Log LOG = LogFactory.getLog(LogMoveTask.class);
   private FileSystem fs;
   private Collection<Path> files;
   private String storagePolicy;
@@ -39,11 +43,14 @@ public class LogMoveTask implements Callable<Void> {
 
   @Override
   public Void call() throws Exception {
+    long start = EnvironmentEdgeManager.currentTime();
     DFSClient client = ((DistributedFileSystem) fs).getClient();
     for (Path file : files) {
       client.setStoragePolicy(file.toString(), storagePolicy);
       client.applyFilePolicy(file.toString());
     }
+    long duration = EnvironmentEdgeManager.currentTime() - start;
+    LOG.info("log move took " + duration);
     return null;
   }
 }

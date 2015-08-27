@@ -800,7 +800,9 @@ public class FSHLog implements WAL {
     LOG.info("Now there are " + logMoveEvents.size()
       + " events in log moving queue. One more which has " + logsToArchive.size()
       + " files is going to be submitted");
-    logMovePool.submit(new LogMoveTask(fs, logsToArchive, HdfsConstants.HOT_STORAGE_POLICY_NAME));
+    if (!logsToArchive.isEmpty()) {
+      logMovePool.submit(new LogMoveTask(fs, logsToArchive, HdfsConstants.HOT_STORAGE_POLICY_NAME));
+    }
   }
 
   /**

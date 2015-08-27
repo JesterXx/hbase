@@ -90,7 +90,6 @@ import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
-import org.apache.hadoop.hdfs.StorageType;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.util.StringUtils;
 
@@ -1196,13 +1195,19 @@ public class HStore implements Store {
       completeCompaction(filesToCompact, true); // Archive old files & update store size.
 
       if (region.getRegionServerServices().getLogMovePool() != null) {
-        LOG.info("Now start to archive " + filesToCompact.size() + " store files to disk");
+        LOG.info("Now start to archive/move " + filesToCompact.size() + " store files to disk");
         Collection<Path> pathsToCompact = new ArrayList<Path>();
         for (StoreFile fileToCompact : filesToCompact) {
           pathsToCompact.add(fileToCompact.getPath());
         }
-        region.getRegionServerServices().getLogMovePool()
-          .submit(new LogMoveTask(fs.getFileSystem(), pathsToCompact, HdfsConstants.HOT_STORAGE_POLICY_NAME));
+        if (!pathsToCompact.isEmpty()) {
+          region
+            .getRegionServerServices()
+            .getLogMovePool()
+            .submit(
+              new LogMoveTask(fs.getFileSystem(), pathsToCompact,
+                HdfsConstants.HOT_STORAGE_POLICY_NAME));
+        }
       }
 
       logCompactionEndMessage(cr, sfs, compactionStartTime);
