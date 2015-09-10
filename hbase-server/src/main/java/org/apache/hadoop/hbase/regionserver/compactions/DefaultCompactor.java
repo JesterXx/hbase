@@ -28,7 +28,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.ScanType;
@@ -47,8 +46,8 @@ public class DefaultCompactor extends Compactor {
 
   public DefaultCompactor(final Configuration conf, final Store store) {
     super(conf, store);
-    hsmCrThreshold = 209715200L;
-    hsmSsdThreshold = 8589934592L;
+    hsmCrThreshold = 209715200;
+    hsmSsdThreshold = 1610612736;
     LOG.info("hsm_cr_threshold=" + hsmCrThreshold);
     LOG.info("hsm_ssd_threshold=" + hsmSsdThreshold);
   }
@@ -105,11 +104,7 @@ public class DefaultCompactor extends Compactor {
         }
 
         LOG.info("Compacting files size is " + fd.fileLength);
-        if (fd.fileLength <= hsmCrThreshold) {
-          LOG.info("Compacting files " + fd.fileLength + " are moved to CR");
-          writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
-            fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALL_CR_STORAGE_POLICY_NAME);
-        } else if (fd.fileLength <= hsmSsdThreshold) {
+        if (fd.fileLength <= hsmSsdThreshold) {
           LOG.info("Compacting files " + fd.fileLength + " are moved to SSD");
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
             fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALLSSD_STORAGE_POLICY_NAME);
