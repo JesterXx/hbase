@@ -45,24 +45,29 @@ import org.apache.hadoop.hbase.procedure.SubprocedureFactory;
 import org.apache.hadoop.hbase.procedure.ZKProcedureMemberRpcs;
 import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.zookeeper.KeeperException;
 
-public class RegionServerMobCompactionManager extends RegionServerProcedureManager {
-  private static final Log LOG = LogFactory.getLog(RegionServerProcedureManager.class);
+public class RegionServerMobCompactionProcedureManager extends RegionServerProcedureManager {
+  private static final Log LOG = LogFactory.getLog(RegionServerMobCompactionProcedureManager.class);
 
   private RegionServerServices rss;
   private ProcedureMemberRpcs memberRpcs;
   private ProcedureMember member;
-  private static final String CONCURENT_MOB_COMPACTION_TASKS_KEY = "hbase.mob.compaction.procedure.concurrentTasks";
+  private static final String CONCURENT_MOB_COMPACTION_TASKS_KEY =
+    "hbase.mob.compaction.procedure.concurrentTasks";
   private static final int DEFAULT_CONCURRENT_MOB_COMPACTION_TASKS = 10;
-  public static final String MOB_COMPACTION_THREADS_KEY = "hbase.mob.compaction.procedure.pool.threads";
+  public static final String MOB_COMPACTION_THREADS_KEY =
+    "hbase.mob.compaction.procedure.pool.threads";
   public static final int FLUSH_REQUEST_THREADS_DEFAULT = 5;
 
-  public static final String MOB_COMPACTION_TIMEOUT_MILLIS_KEY = "hbase.mob.compaction.procedure.timeout";
+  public static final String MOB_COMPACTION_TIMEOUT_MILLIS_KEY =
+    "hbase.mob.compaction.procedure.timeout";
   public static final long MOB_COMPACTION_TIMEOUT_MILLIS_DEFAULT = 60000;
 
-  public static final String MOB_COMPACTION_WAKE_MILLIS_KEY = "hbase.mob.compaction.procedure.wakefrequency";
+  public static final String MOB_COMPACTION_WAKE_MILLIS_KEY =
+    "hbase.mob.compaction.procedure.wakefrequency";
   private static final long MOB_COMPACTION_WAKE_MILLIS_DEFAULT = 500;
 
   @Override
@@ -126,12 +131,9 @@ public class RegionServerMobCompactionManager extends RegionServerProcedureManag
         "Failed to figure out if there is region for mob compaction.", e1);
     }
 
-    // TODO parse the start keys of regions and if it is a major compaction
-    boolean allFiles = false;
-    String columnName = null;
-    // TODO compare the discovered regions in master and region server.
-    // If they are the same, this mob compaction might be a major one, otherwise it is a minor one
-    boolean allRegionsOnline = true;
+    // parse the column names and if it is a major compaction
+    boolean allFiles = (data[0] != (byte) 0);
+    String columnName = Bytes.toString(data, 1, data.length - 1);
     // We need to run the subprocedure even if we have no relevant regions. The coordinator
     // expects participation in the procedure and without sending message the master procedure
     // will hang and fail.
@@ -147,8 +149,9 @@ public class RegionServerMobCompactionManager extends RegionServerProcedureManag
 
     MobCompactionSubprocedurePool taskManager = new MobCompactionSubprocedurePool(rss
       .getServerName().toString(), conf);
+
     return new MobCompactionSubprocedure(member, exnDispatcher, wakeMillis, timeoutMillis, rss,
-      involvedRegions, tableName, columnName, taskManager, allRegionsOnline, allFiles);
+      involvedRegions, tableName, columnName, taskManager, allFiles);
   }
 
   public class MobCompactionSubprocedureBuilder implements SubprocedureFactory {
@@ -156,7 +159,7 @@ public class RegionServerMobCompactionManager extends RegionServerProcedureManag
     @Override
     public Subprocedure buildSubprocedure(String name, byte[] data) {
       // The name of the procedure instance from the master is the table name.
-      return RegionServerMobCompactionManager.this.buildSubprocedure(TableName.valueOf(name), data);
+      return RegionServerMobCompactionProcedureManager.this.buildSubprocedure(TableName.valueOf(name), data);
     }
 
   }

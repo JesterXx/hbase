@@ -32,7 +32,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
@@ -267,7 +266,7 @@ public class PartitionedMobCompactor2 extends MobCompactor2 {
       return Collections.emptyList();
     }
     List<Path> paths = new ArrayList<Path>();
-    Connection c = ConnectionFactory.createConnection(conf);
+    Connection c = rss.getConnection();
     final Table table = c.getTable(tableName);
     try {
       List<CompactionPartitionId> failedPartitions = new ArrayList<CompactionPartitionId>();

@@ -22,15 +22,15 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -45,6 +45,7 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.Stoppable;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotEnabledException;
 import org.apache.hadoop.hbase.client.Scan;
@@ -55,6 +56,11 @@ import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.procedure.MasterProcedureManager;
+import org.apache.hadoop.hbase.procedure.ProcedureCoordinator;
+import org.apache.hadoop.hbase.procedure.ProcedureCoordinatorRpcs;
+import org.apache.hadoop.hbase.procedure.ZKProcedureCoordinatorRpcs;
+import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ProcedureDescription;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
 import org.apache.hadoop.hbase.regionserver.ScanInfo;
@@ -65,30 +71,50 @@ import org.apache.hadoop.hbase.regionserver.StoreFile.Writer;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.zookeeper.ZKUtil;
+import org.apache.zookeeper.KeeperException;
 
 /**
  * The mob compaction thread used in {@link HMaster}
  */
-public class MasterMobCompactionThreads {
+public class MasterMobCompactionThreads extends MasterProcedureManager implements Stoppable {
 
   static final Log LOG = LogFactory.getLog(MasterMobCompactionThread.class);
-  private final HMaster master;
-  private final Configuration conf;
-  private final ExecutorService mobCompactionPool;
-  private final Set<String> ongoingCompactions;
+  private HMaster master;
+  private Configuration conf;
+  private ThreadPoolExecutor mobCompactionPool;
+  private Set<String> ongoingCompactions;
   private int delFileMaxCount;
   private int compactionBatchSize;
   protected int compactionKVMax;
   private Path tempPath;
   private CacheConfig compactionCacheConfig;
+  private String compactionBaseZNode;
+  private boolean stopped;
+  private FileSystem fs;
+  public static final String MOB_COMPACTION_ZNODE_NAME = "mobCompaction";
 
   public static final String MOB_COMPACTION_PROCEDURE_SIGNATURE = "mob-compaction-proc";
 
-  public MasterMobCompactionThreads(HMaster master, ExecutorService mobCompactionPool) {
+  private static final String MOB_COMPACTION_TIMEOUT_MILLIS_KEY = "hbase.mob.compaction.master.timeoutMillis";
+  private static final int MOB_COMPACTION_TIMEOUT_MILLIS_DEFAULT = 1800000; // 30 min
+  private static final String MOB_COMPACTION_WAKE_MILLIS_KEY = "hbase.mob.compaction.master.wakeMillis";
+  private static final int MOB_COMPACTION_WAKE_MILLIS_DEFAULT = 500;
+
+  private static final String MOB_COMPACTION_PROC_POOL_THREADS_KEY = "hbase.mob.compaction.procedure.master.threads";
+  private static final int MOB_COMPACTION_PROC_POOL_THREADS_DEFAULT = 2;
+
+  private ProcedureCoordinator coordinator;
+  private Map<TableName, Future<Void>> compactions = new HashMap<TableName, Future<Void>>();
+
+  public MasterMobCompactionThreads(HMaster master, ThreadPoolExecutor mobCompactionPool) {
     this.master = master;
+    this.fs = master.getFileSystem();
     this.conf = master.getConfiguration();
     this.ongoingCompactions = new HashSet<String>();
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
@@ -101,45 +127,32 @@ public class MasterMobCompactionThreads {
     Configuration copyOfConf = new Configuration(conf);
     copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
     compactionCacheConfig = new CacheConfig(copyOfConf);
-    final String n = Thread.currentThread().getName();
+    compactionBaseZNode = ZKUtil.joinZNode(master.getZooKeeper().getBaseZNode(),
+      MOB_COMPACTION_ZNODE_NAME);
     // this pool is used to run the mob compaction
     if (mobCompactionPool != null) {
       this.mobCompactionPool = mobCompactionPool;
     } else {
-      this.mobCompactionPool = new ThreadPoolExecutor(1, 2, 60, TimeUnit.SECONDS,
-        new SynchronousQueue<Runnable>(), new ThreadFactory() {
-          @Override
-          public Thread newThread(Runnable r) {
-            Thread t = new Thread(r);
-            t.setName(n + "-MasterMobCompaction-" + EnvironmentEdgeManager.currentTime());
-            return t;
-          }
-        });
-      ((ThreadPoolExecutor) this.mobCompactionPool).allowCoreThreadTimeOut(true);
+      int threads = conf.getInt(MOB_COMPACTION_PROC_POOL_THREADS_KEY,
+        MOB_COMPACTION_PROC_POOL_THREADS_DEFAULT);
+      this.mobCompactionPool = ProcedureCoordinator.defaultPool("MasterMobCompaction", threads);
     }
   }
 
   /**
    * Requests mob compaction
-   * 
-   * @param conf
-   *          The Configuration
-   * @param fs
-   *          The file system
-   * @param tableName
-   *          The table the compact
-   * @param columns
-   *          The column descriptors
-   * @param tableLockManager
-   *          The tableLock manager
-   * @param allFiles
-   *          Whether add all mob files into the compaction.
+   * @param conf The Configuration
+   * @param fs The file system
+   * @param tableName The table the compact
+   * @param columns The column descriptors
+   * @param tableLockManager The tableLock manager
+   * @param allFiles Whether add all mob files into the compaction.
    */
-  public void requestMobCompaction(Configuration conf, FileSystem fs, TableName tableName,
-    List<HColumnDescriptor> columns, TableLockManager tableLockManager, boolean allFiles)
+  public void requestMobCompaction(TableName tableName,
+    List<HColumnDescriptor> columns, boolean allFiles)
     throws IOException {
-    mobCompactionPool.submit(new CompactionRunner(fs, tableName, columns, tableLockManager,
-      allFiles));
+    compactions.put(tableName, mobCompactionPool.submit(new CompactionRunner(fs, tableName,
+      columns, master.getTableLockManager(), allFiles)));
     if (LOG.isDebugEnabled()) {
       LOG.debug("The mob compaction is requested for the columns " + columns + " of the table "
         + tableName.getNameAsString());
@@ -168,7 +181,7 @@ public class MasterMobCompactionThreads {
       // TODO 1. check if there is another compaction is in progress and add it to memory
       // TODO 2. report the compaction start
       // TODO 3. acquire lock to sync with major compaction
-      // TODO 4. collect del files and write the names to a file.
+      // TODO 4. collect del files.
       // TODO 5. send the request to region servers.
       // TODO 6. wait until the procedure is finished.
       // TODO 7. release lock.
@@ -222,11 +235,25 @@ public class MasterMobCompactionThreads {
         Encryption.Context cryptoContext = MobUtils.createEncryptionContext(conf, column);
         Path mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
         Path mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
-        List<Path> delFiles = compactDelFiles(column, selectDelFiles(mobFamilyDir),
+        List<Path> delFilePaths = compactDelFiles(column, selectDelFiles(mobFamilyDir),
           EnvironmentEdgeManager.currentTime(), cryptoContext, mobTableDir, mobFamilyDir);
         // dispatch mob compaction
-        dispatchMobCompaction();
-        // TODO delete the del files if it is a major compaction
+        boolean isAllFiles = dispatchMobCompaction(tableName, column);
+        // delete the del files if it is a major compaction
+        if (isAllFiles && !delFilePaths.isEmpty()) {
+          LOG.info("After a mob compaction with all files selected, archiving the del files "
+            + delFilePaths);
+          List<StoreFile> delFiles = new ArrayList<StoreFile>();
+          for (Path delFilePath : delFilePaths) {
+            StoreFile sf = new StoreFile(fs, delFilePath, conf, compactionCacheConfig, BloomType.NONE);
+            delFiles.add(sf);
+          }
+          try {
+            MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
+          } catch (IOException e) {
+            LOG.error("Failed to archive the del files " + delFilePaths, e);
+          }
+        }
       } catch (Exception e) {
         LOG.error("Failed to compact the mob files for the column " + column.getNameAsString()
           + " in the table " + tableName.getNameAsString(), e);
@@ -240,6 +267,62 @@ public class MasterMobCompactionThreads {
           }
         }
       }
+    }
+
+    private boolean dispatchMobCompaction(TableName tableName, HColumnDescriptor column) throws IOException {
+      // use procedure to dispatch the compaction to region servers.
+      // Find all the online regions
+      boolean allRegionsOnline = true;
+      List<Pair<HRegionInfo, ServerName>> regionsAndLocations = MetaTableAccessor
+        .getTableRegionsAndLocations(master.getConnection(), tableName, false);
+      Map<String, List<String>> regionServers = new HashMap<String, List<String>>();
+      for (Pair<HRegionInfo, ServerName> region : regionsAndLocations) {
+        if (region != null && region.getFirst() != null && region.getSecond() != null) {
+          HRegionInfo hri = region.getFirst();
+          if (hri.isOffline() && (hri.isSplit() || hri.isSplitParent())) {
+            allRegionsOnline = false;
+            continue;
+          }
+          String serverName = region.getSecond().toString();
+          List<String> regionNames = regionServers.get(serverName);
+          if (regionNames != null) {
+            regionNames.add(MD5Hash.getMD5AsHex(hri.getStartKey()));
+          } else {
+            regionNames = new ArrayList<String>();
+            regionNames.add(MD5Hash.getMD5AsHex(hri.getStartKey()));
+            regionServers.put(serverName, regionNames);
+          }
+        }
+      }
+      boolean success = false;
+      if(allRegionsOnline && !regionServers.isEmpty()) {
+        // add the map to zookeeper
+        String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
+        try {
+          // clean the node if it exists
+          ZKUtil.deleteNodeRecursively(master.getZooKeeper(), compactionZNode);
+          ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionZNode, null);
+          for (Entry<String, List<String>> entry : regionServers.entrySet()) {
+            String serverName = entry.getKey();
+            List<String> startKeysOfOnlineRegions = entry.getValue();
+            String compactionServerZNode = ZKUtil.joinZNode(compactionZNode, serverName);
+            ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionServerZNode,
+              Bytes.toBytes(false));
+            for (String startKeyOfOnlineRegion : startKeysOfOnlineRegions) {
+              String compactionStartKeyZNode = ZKUtil.joinZNode(compactionServerZNode,
+                startKeyOfOnlineRegion);
+              ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionStartKeyZNode,
+                null);
+            }
+          }
+        } catch (KeeperException e) {
+          throw new IOException(e);
+        }
+      }
+      // start the procedure
+      
+      // return if all the compactions are finished successfully
+      return allRegionsOnline && success;
     }
 
     private List<Path> selectDelFiles(Path mobFamilyDir) throws IOException {
@@ -267,14 +350,6 @@ public class MasterMobCompactionThreads {
       return allDelFiles;
     }
 
-    private void dispatchMobCompaction() throws IOException {
-      // use procedure to dispatch the compaction to region servers.
-      // TODO 1. Find all the online regions
-      List<Pair<HRegionInfo, ServerName>> regionsAndLocations = MetaTableAccessor
-        .getTableRegionsAndLocations(master.getConnection(), tableName, false);
-
-    }
-
     private FileStatus getLinkedFileStatus(HFileLink link) throws IOException {
       Path[] locations = link.getLocations();
       for (Path location : locations) {
@@ -300,12 +375,10 @@ public class MasterMobCompactionThreads {
 
     /**
      * Compacts the del files in batches which avoids opening too many files.
-     * 
-     * @param request
-     *          The compaction request.
+     * @param request The compaction request.
      * @param delFilePaths
-     * @return The paths of new del files after merging or the original files if no merging is
-     *         necessary.
+     * @return The paths of new del files after merging or the original files if no merging
+     *         is necessary.
      * @throws IOException
      */
     private List<Path> compactDelFiles(HColumnDescriptor column, List<Path> delFilePaths,
@@ -345,11 +418,8 @@ public class MasterMobCompactionThreads {
 
     /**
      * Compacts the del file in a batch.
-     * 
-     * @param request
-     *          The compaction request.
-     * @param delFiles
-     *          The del files.
+     * @param request The compaction request.
+     * @param delFiles The del files.
      * @return The path of new del file after merging.
      * @throws IOException
      */
@@ -400,11 +470,8 @@ public class MasterMobCompactionThreads {
 
     /**
      * Creates a store scanner.
-     * 
-     * @param filesToCompact
-     *          The files to be compacted.
-     * @param scanType
-     *          The scan type.
+     * @param filesToCompact The files to be compacted.
+     * @param scanType The scan type.
      * @return The store scanner.
      * @throws IOException
      */
@@ -420,5 +487,74 @@ public class MasterMobCompactionThreads {
         HConstants.LATEST_TIMESTAMP);
       return scanner;
     }
+  }
+
+  @Override
+  public void stop(String why) {
+    if (this.stopped)
+      return;
+    this.stopped = true;
+    for (Future<Void> compaction : compactions.values()) {
+      if (compaction != null) {
+        compaction.cancel(true);
+      }
+    }
+    try {
+      if (coordinator != null) {
+        coordinator.close();
+      }
+    } catch (IOException e) {
+      LOG.error("stop ProcedureCoordinator error", e);
+    }
+  }
+
+  @Override
+  public boolean isStopped() {
+    return this.stopped;
+  }
+
+  @Override
+  public void initialize(MasterServices master, MetricsMaster metricsMaster)
+    throws KeeperException, IOException, UnsupportedOperationException {
+    // get the configuration for the coordinator
+    Configuration conf = master.getConfiguration();
+    long wakeFrequency = conf.getInt(MOB_COMPACTION_WAKE_MILLIS_KEY,
+      MOB_COMPACTION_WAKE_MILLIS_DEFAULT);
+    long timeoutMillis = conf.getLong(MOB_COMPACTION_TIMEOUT_MILLIS_KEY,
+      MOB_COMPACTION_TIMEOUT_MILLIS_DEFAULT);
+
+    // setup the procedure coordinator
+    String name = master.getServerName().toString();
+    ProcedureCoordinatorRpcs comms = new ZKProcedureCoordinatorRpcs(master.getZooKeeper(),
+      getProcedureSignature(), name);
+
+    this.coordinator = new ProcedureCoordinator(comms, mobCompactionPool, timeoutMillis,
+      wakeFrequency);
+  }
+
+  @Override
+  public synchronized boolean isProcedureDone(ProcedureDescription desc) throws IOException {
+    TableName tableName = TableName.valueOf(desc.getInstance());
+    Future<Void> compaction = compactions.get(tableName);
+    if (compaction != null) {
+      boolean isDone = compaction.isDone();
+      if (isDone) {
+        compactions.remove(tableName);
+      }
+      return isDone;
+    }
+    return true;
+  }
+
+  @Override
+  public String getProcedureSignature() {
+    return MOB_COMPACTION_PROCEDURE_SIGNATURE;
+  }
+
+  @Override
+  public void execProcedure(ProcedureDescription desc) throws IOException {
+
+    TableName tableName = TableName.valueOf(desc.getInstance());
+    
   }
 }
