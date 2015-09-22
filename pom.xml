@@ -67,6 +67,7 @@
     <module>hbase-annotations</module>
     <module>hbase-rest</module>
     <module>hbase-checkstyle</module>
+    <module>hbase-external-blockcache</module>
     <module>hbase-shaded</module>
     <module>hbase-spark</module>
   </modules>
@@ -219,8 +220,8 @@
       <name>Gary Helmling</name>
       <email>garyh@apache.org</email>
       <timezone>-8</timezone>
-      <organization>Cask</organization>
-      <organizationUrl>http://www.cask.co</organizationUrl>
+      <organization>Facebook</organization>
+      <organizationUrl>http://www.facebook.com</organizationUrl>
     </developer>
     <developer>
       <id>gchanan</id>
@@ -1276,7 +1277,7 @@
     <procedure.test.jar>hbase-procedure-${project.version}-tests.jar</procedure.test.jar>
     <it.test.jar>hbase-it-${project.version}-tests.jar</it.test.jar>
     <annotations.test.jar>hbase-annotations-${project.version}-tests.jar</annotations.test.jar>
-    <surefire.version>2.18</surefire.version>
+    <surefire.version>2.18.1</surefire.version>
     <surefire.provider>surefire-junit47</surefire.provider>
     <!-- default: run small & medium, medium with 2 threads -->
     <surefire.skipFirstPart>false</surefire.skipFirstPart>
@@ -1432,6 +1433,11 @@
       <dependency>
         <artifactId>hbase-examples</artifactId>
         <groupId>org.apache.hbase</groupId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.hbase</groupId>
+        <artifactId>hbase-external-blockcache</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

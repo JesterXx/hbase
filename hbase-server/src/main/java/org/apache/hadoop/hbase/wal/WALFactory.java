@@ -75,7 +75,7 @@ public class WALFactory {
   static enum Providers {
     defaultProvider(DefaultWALProvider.class),
     filesystem(DefaultWALProvider.class),
-    multiwal(BoundedRegionGroupingProvider.class);
+    multiwal(RegionGroupingProvider.class);
 
     Class<? extends WALProvider> clazz;
     Providers(Class<? extends WALProvider> clazz) {
@@ -83,7 +83,7 @@ public class WALFactory {
     }
   }
 
-  static final String WAL_PROVIDER = "hbase.wal.provider";
+  public static final String WAL_PROVIDER = "hbase.wal.provider";
   static final String DEFAULT_WAL_PROVIDER = Providers.defaultProvider.name();
 
   static final String META_WAL_PROVIDER = "hbase.wal.meta_provider";
@@ -442,5 +442,13 @@ public class WALFactory {
       final Configuration configuration)
       throws IOException {
     return DefaultWALProvider.createWriter(configuration, fs, path, false);
+  }
+
+  public final WALProvider getWALProvider() {
+    return this.provider;
+  }
+
+  public final WALProvider getMetaWALProvider() {
+    return this.metaProvider.get();
   }
 }
