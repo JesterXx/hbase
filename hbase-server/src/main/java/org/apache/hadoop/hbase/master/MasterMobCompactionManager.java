@@ -167,6 +167,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       throw new TableNotEnabledException(tableName);
     }
     synchronized (this) {
+      // check if there is another mob compaction for the same table
       Future<Void> compaction = compactions.get(tableName);
       if (compaction != null && !compaction.isDone()) {
         String msg = "Another mob compaction on table " + tableName.getNameAsString()
@@ -185,6 +186,9 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
     }
   }
 
+  /**
+   * A callable for mob compaction
+   */
   private class CompactionRunner implements Callable<Void> {
     private FileSystem fs;
     private TableName tableName;
@@ -244,6 +248,14 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       return null;
     }
 
+    /**
+     * Performs mob compaction for a column.
+     * @param conf The current configuration.
+     * @param fs The current file system.
+     * @param tableName The current table name.
+     * @param column The current column descriptor.
+     * @param allFiles If a major compaction is required.
+     */
     private void doCompaction(Configuration conf, FileSystem fs, TableName tableName,
       HColumnDescriptor column, boolean allFiles) {
       try {
@@ -277,6 +289,14 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       }
     }
 
+    /**
+     * Submits the procedure to region servers.
+     * @param tableName The current table name.
+     * @param column The current column descriptor.
+     * @param allFiles If a major compaction is required.
+     * @return True if all the mob files are compacted.
+     * @throws IOException
+     */
     private boolean dispatchMobCompaction(TableName tableName, HColumnDescriptor column,
       boolean allFiles) throws IOException {
       // use procedure to dispatch the compaction to region servers.
@@ -304,7 +324,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         }
       }
       boolean success = false;
-      if(allRegionsOnline && !regionServers.isEmpty()) {
+      if (allRegionsOnline && !regionServers.isEmpty()) {
         // add the map to zookeeper
         String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
         try {
@@ -329,16 +349,17 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         }
       }
       // start the procedure
-      ForeignExceptionDispatcher monitor = new ForeignExceptionDispatcher(tableName.getNameAsString());
+      ForeignExceptionDispatcher monitor = new ForeignExceptionDispatcher(
+        tableName.getNameAsString());
       // the format of data is allFile(one byte) + columnName
       byte[] data = new byte[1 + column.getNameAsString().length()];
       data[0] = (byte) (allFiles ? 1 : 0);
       Bytes.putBytes(data, 1, column.getName(), 0, column.getName().length);
-      Procedure proc = coordinator.startProcedure(monitor, tableName.getNameAsString(),
-        data, Lists.newArrayList(regionServers.keySet()));
+      Procedure proc = coordinator.startProcedure(monitor, tableName.getNameAsString(), data,
+        Lists.newArrayList(regionServers.keySet()));
       if (proc == null) {
         String msg = "Failed to submit distributed procedure for mob compaction '"
-            + tableName.getNameAsString() + "'";
+          + tableName.getNameAsString() + "'";
         LOG.error(msg);
         throw new IOException(msg);
       }
@@ -346,9 +367,10 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         // wait for the mob compaction to complete.
         proc.waitForCompleted();
         LOG.info("Done waiting - mob compaction for " + tableName.getNameAsString());
-        if(allRegionsOnline && !regionServers.isEmpty()) {
+        if (allRegionsOnline && !regionServers.isEmpty()) {
           // check if all the mob compactions is all files
-          String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
+          String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode,
+            tableName.getNameAsString());
           try {
             for (Entry<String, List<String>> entry : regionServers.entrySet()) {
               String serverName = entry.getKey();
@@ -362,8 +384,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           }
         }
       } catch (InterruptedException e) {
-        ForeignException ee =
-            new ForeignException("Interrupted while waiting for snapshot to finish", e);
+        ForeignException ee = new ForeignException(
+          "Interrupted while waiting for snapshot to finish", e);
         monitor.receive(ee);
         Thread.currentThread().interrupt();
       } catch (ForeignException e) {
@@ -373,6 +395,12 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       return allRegionsOnline && success;
     }
 
+    /**
+     * Selects all the del files.
+     * @param mobFamilyDir The directory where the compacted mob files are stored.
+     * @return The paths of selected del files.
+     * @throws IOException
+     */
     private List<Path> selectDelFiles(Path mobFamilyDir) throws IOException {
       // since all the del files are used in mob compaction, they have to be merged in one time
       // together.
@@ -618,9 +646,9 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           throw new DoNotRetryIOException("Column family " + columnName + " does not exist");
         }
         if (!column.isMobEnabled()) {
-          LOG.error("Column family " + column.getNameAsString() + " is not a mob column family");
-          throw new DoNotRetryIOException("Column family " + column.getNameAsString()
-            + " is not a mob column family");
+          String msg = "Column family " + column.getNameAsString() + " is not a mob column family";
+          LOG.error(msg);
+          throw new DoNotRetryIOException(msg);
         }
         compactedColumns.add(column);
       }
