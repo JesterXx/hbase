@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.mob;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.security.Key;
 import java.security.KeyException;
 import java.text.ParseException;
@@ -29,7 +30,6 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.SynchronousQueue;
@@ -63,19 +63,15 @@ import org.apache.hadoop.hbase.io.crypto.Encryption;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
-import org.apache.hadoop.hbase.master.TableLockManager;
-import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
-import org.apache.hadoop.hbase.mob.compactions.MobCompactor;
-import org.apache.hadoop.hbase.mob.compactions.PartitionedMobCompactor;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
+import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
-import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.hadoop.hbase.util.Threads;
 
 /**
@@ -462,15 +458,15 @@ public class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public static StoreFile.Writer createWriter(Configuration conf, FileSystem fs,
-      HColumnDescriptor family, String date, Path basePath, long maxKeyCount,
-      Compression.Algorithm compression, String startKey, CacheConfig cacheConfig,
-      Encryption.Context cryptoContext)
+  public static StoreFile.Writer createWriter(RegionServerServices rss, String regionEncodedName,
+    Configuration conf, FileSystem fs, HColumnDescriptor family, String date, Path basePath,
+    long maxKeyCount, Compression.Algorithm compression, String startKey, CacheConfig cacheConfig,
+    Encryption.Context cryptoContext)
       throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID().toString()
         .replaceAll("-", ""));
-    return createWriter(conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
-      cacheConfig, cryptoContext);
+    return createWriter(rss, regionEncodedName, conf, fs, family, mobFileName, basePath,
+      maxKeyCount, compression, cacheConfig, cryptoContext);
   }
 
   /**
@@ -518,15 +514,15 @@ public class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public static StoreFile.Writer createWriter(Configuration conf, FileSystem fs,
-      HColumnDescriptor family, String date, Path basePath, long maxKeyCount,
-      Compression.Algorithm compression, byte[] startKey, CacheConfig cacheConfig,
-      Encryption.Context cryptoContext)
+  public static StoreFile.Writer createWriter(RegionServerServices rss, String regionEncodedName,
+    Configuration conf, FileSystem fs, HColumnDescriptor family, String date, Path basePath,
+    long maxKeyCount, Compression.Algorithm compression, byte[] startKey, CacheConfig cacheConfig,
+    Encryption.Context cryptoContext)
       throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID().toString()
         .replaceAll("-", ""));
-    return createWriter(conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
-      cacheConfig, cryptoContext);
+    return createWriter(rss, regionEncodedName, conf, fs, family, mobFileName, basePath,
+      maxKeyCount, compression, cacheConfig, cryptoContext);
   }
 
   /**
@@ -552,7 +548,7 @@ public class MobUtils {
     String suffix = UUID
       .randomUUID().toString().replaceAll("-", "") + "_del";
     MobFileName mobFileName = MobFileName.create(startKey, date, suffix);
-    return createWriter(conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
+    return createWriter(null, null, conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
       cacheConfig, cryptoContext);
   }
 
@@ -570,10 +566,10 @@ public class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  private static StoreFile.Writer createWriter(Configuration conf, FileSystem fs,
-    HColumnDescriptor family, MobFileName mobFileName, Path basePath, long maxKeyCount,
-    Compression.Algorithm compression, CacheConfig cacheConfig, Encryption.Context cryptoContext)
-    throws IOException {
+  private static StoreFile.Writer createWriter(RegionServerServices rss, String regionEncodedName,
+    Configuration conf, FileSystem fs, HColumnDescriptor family, MobFileName mobFileName,
+    Path basePath, long maxKeyCount, Compression.Algorithm compression, CacheConfig cacheConfig,
+    Encryption.Context cryptoContext) throws IOException {
     HFileContext hFileContext = new HFileContextBuilder().withCompression(compression)
       .withIncludesMvcc(true).withIncludesTags(true)
       .withCompressTags(family.isCompressTags())
@@ -583,10 +579,15 @@ public class MobUtils {
       .withEncryptionContext(cryptoContext)
       .withCreateTime(EnvironmentEdgeManager.currentTime()).build();
 
+    InetSocketAddress[] favoredNodes = null;
+    if (rss != null) {
+      favoredNodes = rss.getFavoredNodesForRegion(regionEncodedName);
+    }
     StoreFile.Writer w = new StoreFile.WriterBuilder(conf, cacheConfig, fs)
       .withFilePath(new Path(basePath, mobFileName.getFileName()))
       .withComparator(CellComparator.COMPARATOR).withBloomType(BloomType.NONE)
-      .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
+      .withMaxKeyCount(maxKeyCount).withFavoredNodes(favoredNodes).withFileContext(hFileContext)
+      .build();
     return w;
   }
 
@@ -694,64 +695,11 @@ public class MobUtils {
   }
 
   /**
-   * Performs the mob compaction.
-   * @param conf the Configuration
-   * @param fs the file system
-   * @param tableName the table the compact
-   * @param hcd the column descriptor
-   * @param pool the thread pool
-   * @param tableLockManager the tableLock manager
-   * @param allFiles Whether add all mob files into the compaction.
-   */
-  public static void doMobCompaction(Configuration conf, FileSystem fs, TableName tableName,
-    HColumnDescriptor hcd, ExecutorService pool, TableLockManager tableLockManager,
-    boolean allFiles) throws IOException {
-    String className = conf.get(MobConstants.MOB_COMPACTOR_CLASS_KEY,
-      PartitionedMobCompactor.class.getName());
-    // instantiate the mob compactor.
-    MobCompactor compactor = null;
-    try {
-      compactor = ReflectionUtils.instantiateWithCustomCtor(className, new Class[] {
-        Configuration.class, FileSystem.class, TableName.class, HColumnDescriptor.class,
-        ExecutorService.class }, new Object[] { conf, fs, tableName, hcd, pool });
-    } catch (Exception e) {
-      throw new IOException("Unable to load configured mob file compactor '" + className + "'", e);
-    }
-    // compact only for mob-enabled column.
-    // obtain a write table lock before performing compaction to avoid race condition
-    // with major compaction in mob-enabled column.
-    boolean tableLocked = false;
-    TableLock lock = null;
-    try {
-      // the tableLockManager might be null in testing. In that case, it is lock-free.
-      if (tableLockManager != null) {
-        lock = tableLockManager.writeLock(MobUtils.getTableLockName(tableName),
-          "Run MobCompactor");
-        lock.acquire();
-      }
-      tableLocked = true;
-      compactor.compact(allFiles);
-    } catch (Exception e) {
-      LOG.error("Failed to compact the mob files for the column " + hcd.getNameAsString()
-        + " in the table " + tableName.getNameAsString(), e);
-    } finally {
-      if (lock != null && tableLocked) {
-        try {
-          lock.release();
-        } catch (IOException e) {
-          LOG.error(
-            "Failed to release the write lock for the table " + tableName.getNameAsString(), e);
-        }
-      }
-    }
-  }
-
-  /**
    * Creates a thread pool.
    * @param conf the Configuration
    * @return A thread pool.
    */
-  public static ExecutorService createMobCompactorThreadPool(Configuration conf) {
+  public static ThreadPoolExecutor createMobCompactorThreadPool(Configuration conf) {
     int maxThreads = conf.getInt(MobConstants.MOB_COMPACTION_THREADS_MAX,
       MobConstants.DEFAULT_MOB_COMPACTION_THREADS_MAX);
     if (maxThreads == 0) {
@@ -770,7 +718,7 @@ public class MobUtils {
           }
         }
       });
-    ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
+    pool.allowCoreThreadTimeOut(true);
     return pool;
   }
 

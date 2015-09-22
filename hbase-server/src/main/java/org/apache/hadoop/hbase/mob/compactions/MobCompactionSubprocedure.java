@@ -32,7 +32,7 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
-import org.apache.hadoop.hbase.master.MasterMobCompactionThreads;
+import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.compactions.MobCompactionRequest.CompactionType;
 import org.apache.hadoop.hbase.mob.compactions.RegionServerMobCompactionProcedureManager.MobCompactionSubprocedurePool;
@@ -70,7 +70,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
     this.allFiles = allFiles;
     mobFamilyDir = MobUtils.getMobFamilyPath(rss.getConfiguration(), tableName, columnName);
     String compactionBaseZNode = ZKUtil.joinZNode(rss.getZooKeeper().getBaseZNode(),
-      MasterMobCompactionThreads.MOB_COMPACTION_ZNODE_NAME);
+      MasterMobCompactionManager.MOB_COMPACTION_ZNODE_NAME);
     String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
     compactionServerZNode = ZKUtil.joinZNode(compactionZNode, rss.getServerName().toString());
   }
@@ -160,7 +160,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
 
     private boolean mobCompactRegion(Region region, boolean allFiles) throws IOException {
       HColumnDescriptor column = region.getTableDesc().getFamily(Bytes.toBytes(columnName));
-      PartitionedMobCompactor2 compactor = new PartitionedMobCompactor2(rss, region, tableName,
+      PartitionedMobCompactor compactor = new PartitionedMobCompactor(rss, region, tableName,
         column);
       compactor.compact(files, allFiles);
       return compactor.getPartitionedMobCompactionRequest().getCompactionType() ==

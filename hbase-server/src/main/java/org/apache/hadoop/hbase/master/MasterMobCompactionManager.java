@@ -23,11 +23,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -77,7 +75,6 @@ import org.apache.hadoop.hbase.regionserver.StoreFile.Writer;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
-import org.apache.hadoop.hbase.snapshot.HBaseSnapshotException;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -91,9 +88,9 @@ import com.google.common.collect.Lists;
 /**
  * The mob compaction thread used in {@link HMaster}
  */
-public class MasterMobCompactionThreads extends MasterProcedureManager implements Stoppable {
+public class MasterMobCompactionManager extends MasterProcedureManager implements Stoppable {
 
-  static final Log LOG = LogFactory.getLog(MasterMobCompactionThread.class);
+  static final Log LOG = LogFactory.getLog(MasterMobCompactionManager.class);
   private HMaster master;
   private Configuration conf;
   private ThreadPoolExecutor mobCompactionPool;
@@ -106,6 +103,8 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
   private boolean stopped;
   private FileSystem fs;
   public static final String MOB_COMPACTION_ZNODE_NAME = "mobCompaction";
+  public static final String MOB_COMPACTION_PROCEDURE_COLUMN_KEY = "mobCompaction-column";
+  public static final String MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY = "mobCompaction-allFiles";
 
   public static final String MOB_COMPACTION_PROCEDURE_SIGNATURE = "mob-compaction-proc";
 
@@ -120,7 +119,11 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
   private ProcedureCoordinator coordinator;
   private Map<TableName, Future<Void>> compactions = new HashMap<TableName, Future<Void>>();
 
-  public MasterMobCompactionThreads(HMaster master, ThreadPoolExecutor mobCompactionPool) {
+  public MasterMobCompactionManager(HMaster master) {
+    this(master, null);
+  }
+
+  public MasterMobCompactionManager(HMaster master, ThreadPoolExecutor mobCompactionPool) {
     this.master = master;
     this.fs = master.getFileSystem();
     this.conf = master.getConfiguration();
@@ -155,9 +158,8 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
    * @param tableLockManager The tableLock manager
    * @param allFiles Whether add all mob files into the compaction.
    */
-  public void requestMobCompaction(TableName tableName,
-    List<HColumnDescriptor> columns, boolean allFiles)
-    throws IOException {
+  public Future<Void> requestMobCompaction(TableName tableName, List<HColumnDescriptor> columns,
+    boolean allFiles) throws IOException {
     // only compact enabled table
     if (!master.getAssignmentManager().getTableStateManager()
       .isTableState(tableName, TableState.State.ENABLED)) {
@@ -172,15 +174,15 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
         LOG.error(msg);
         throw new IOException(msg);
       }
-      compactions.put(tableName, mobCompactionPool.submit(new CompactionRunner(fs, tableName,
-        columns, master.getTableLockManager(), allFiles)));
+      Future<Void> future = mobCompactionPool.submit(new CompactionRunner(fs, tableName, columns,
+        master.getTableLockManager(), allFiles));
+      compactions.put(tableName, future);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("The mob compaction is requested for the columns " + columns + " of the table "
+          + tableName.getNameAsString());
+      }
+      return future;
     }
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("The mob compaction is requested for the columns " + columns + " of the table "
-        + tableName.getNameAsString());
-    }
-    mobCompactionPool.submit(new CompactionRunner(fs, tableName, columns, master
-      .getTableLockManager(), allFiles));
   }
 
   private class CompactionRunner implements Callable<Void> {
@@ -202,23 +204,36 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
 
     @Override
     public Void call() throws Exception{
-      // TODO 2. report the compaction start
-      // TODO 3. acquire lock to sync with major compaction
-      // TODO 4. collect del files.
-      // TODO 5. send the request to region servers.
       // TODO 6. wait until the procedure is finished.
-      // TODO 7. release lock.
-      // TODO 8. remove this compaction from memory.
-      // TODO 9. report the compaction stop
+      boolean tableLocked = false;
+      TableLock lock = null;
       try {
         master.reportMobCompactionStart(tableName);
+        // acquire lock to sync with major compaction
+        // the tableLockManager might be null in testing. In that case, it is lock-free.
+        if (tableLockManager != null) {
+          lock = tableLockManager.writeLock(MobUtils.getTableLockName(tableName),
+            "Run MobCompactor");
+          lock.acquire();
+        }
+        tableLocked = true;
         for (HColumnDescriptor column : columns) {
-          doCompaction(conf, fs, tableName, column, tableLockManager, allFiles);
+          doCompaction(conf, fs, tableName, column, allFiles);
         }
       } catch (IOException e) {
         LOG.error("Failed to perform the mob compaction", e);
       } finally {
-        synchronized (MasterMobCompactionThreads.this) {
+        // release lock
+        if (lock != null && tableLocked) {
+          try {
+            lock.release();
+          } catch (IOException e) {
+            LOG.error(
+              "Failed to release the write lock for the table " + tableName.getNameAsString(), e);
+          }
+        }
+        // remove this compaction from memory.
+        synchronized (MasterMobCompactionManager.this) {
           compactions.remove(tableName.getNameAsString());
         }
         try {
@@ -231,24 +246,15 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
     }
 
     private void doCompaction(Configuration conf, FileSystem fs, TableName tableName,
-      HColumnDescriptor column, TableLockManager tableLockManager, boolean allFiles) {
-      boolean tableLocked = false;
-      TableLock lock = null;
+      HColumnDescriptor column, boolean allFiles) {
       try {
-        // the tableLockManager might be null in testing. In that case, it is lock-free.
-        if (tableLockManager != null) {
-          lock = tableLockManager.writeLock(MobUtils.getTableLockName(tableName),
-            "Run MobCompactor");
-          lock.acquire();
-        }
-        tableLocked = true;
         // merge del files
         Encryption.Context cryptoContext = MobUtils.createEncryptionContext(conf, column);
         Path mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
         Path mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
         List<Path> delFilePaths = compactDelFiles(column, selectDelFiles(mobFamilyDir),
           EnvironmentEdgeManager.currentTime(), cryptoContext, mobTableDir, mobFamilyDir);
-        // dispatch mob compaction
+        // dispatch mob compaction request to region servers.
         boolean isAllFiles = dispatchMobCompaction(tableName, column, allFiles);
         // delete the del files if it is a major compaction
         if (isAllFiles && !delFilePaths.isEmpty()) {
@@ -256,7 +262,8 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
             + delFilePaths);
           List<StoreFile> delFiles = new ArrayList<StoreFile>();
           for (Path delFilePath : delFilePaths) {
-            StoreFile sf = new StoreFile(fs, delFilePath, conf, compactionCacheConfig, BloomType.NONE);
+            StoreFile sf = new StoreFile(fs, delFilePath, conf, compactionCacheConfig,
+              BloomType.NONE);
             delFiles.add(sf);
           }
           try {
@@ -268,15 +275,6 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
       } catch (Exception e) {
         LOG.error("Failed to compact the mob files for the column " + column.getNameAsString()
           + " in the table " + tableName.getNameAsString(), e);
-      } finally {
-        if (lock != null && tableLocked) {
-          try {
-            lock.release();
-          } catch (IOException e) {
-            LOG.error(
-              "Failed to release the write lock for the table " + tableName.getNameAsString(), e);
-          }
-        }
       }
     }
 
@@ -332,11 +330,9 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
         }
       }
       // start the procedure
-
       ForeignExceptionDispatcher monitor = new ForeignExceptionDispatcher(tableName.getNameAsString());
-      // start the mob compaction on the RS
-      byte[] data = new byte[1 + column.getNameAsString().length()];
       // the format of data is allFile(one byte) + columnName
+      byte[] data = new byte[1 + column.getNameAsString().length()];
       data[0] = (byte) (allFiles ? 1 : 0);
       Bytes.putBytes(data, 1, column.getName(), 0, column.getName().length);
       Procedure proc = coordinator.startProcedure(monitor, tableName.getNameAsString(),
@@ -347,7 +343,6 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
         LOG.error(msg);
         throw new IOException(msg);
       }
-
       try {
         // wait for the mob compaction to complete.
         proc.waitForCompleted();
@@ -608,9 +603,9 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
     List<String> columnNames = new ArrayList<String>();
     boolean allFiles = false;
     for (NameStringPair prop : props) {
-      if ("mobCompaction-column".equalsIgnoreCase(prop.getName())) {
+      if (MOB_COMPACTION_PROCEDURE_COLUMN_KEY.equalsIgnoreCase(prop.getName())) {
         columnNames.add(prop.getValue());
-      } else if ("mobCompaction-allFiles".equalsIgnoreCase(prop.getName())) {
+      } else if (MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY.equalsIgnoreCase(prop.getName())) {
         allFiles = "true".equalsIgnoreCase(prop.getValue());
       }
     }

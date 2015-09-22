@@ -18,8 +18,11 @@
  */
 package org.apache.hadoop.hbase.master;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
@@ -40,14 +43,12 @@ public class MobCompactionChore extends ScheduledChore {
 
   private static final Log LOG = LogFactory.getLog(MobCompactionChore.class);
   private HMaster master;
-  private TableLockManager tableLockManager;
-  private ExecutorService pool;
+  private ThreadPoolExecutor pool;
 
   public MobCompactionChore(HMaster master, int period) {
     // use the period as initial delay.
     super(master.getServerName() + "-MobCompactionChore", master, period, period, TimeUnit.SECONDS);
     this.master = master;
-    this.tableLockManager = master.getTableLockManager();
     this.pool = MobUtils.createMobCompactorThreadPool(master.getConfiguration());
   }
 
@@ -71,8 +72,14 @@ public class MobCompactionChore extends ScheduledChore {
               master.reportMobCompactionStart(htd.getTableName());
               reported = true;
             }
-            MobUtils.doMobCompaction(master.getConfiguration(), master.getFileSystem(),
-              htd.getTableName(), hcd, pool, tableLockManager, false);
+            MasterMobCompactionManager compactionManager = new MasterMobCompactionManager(master,
+              pool);
+            List<HColumnDescriptor> columns = new ArrayList<HColumnDescriptor>(1);
+            columns.add(hcd);
+            Future<Void> future = compactionManager.requestMobCompaction(htd.getTableName(),
+              columns, false);
+            // wait for the end of the mob compaction
+            future.get();
           }
         } finally {
           if (reported) {

@@ -36,7 +36,7 @@ import org.apache.hadoop.hbase.DaemonThreadFactory;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
-import org.apache.hadoop.hbase.master.MasterMobCompactionThreads;
+import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
 import org.apache.hadoop.hbase.procedure.ProcedureMember;
 import org.apache.hadoop.hbase.procedure.ProcedureMemberRpcs;
 import org.apache.hadoop.hbase.procedure.RegionServerProcedureManager;
@@ -75,7 +75,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     this.rss = rss;
     ZooKeeperWatcher zkw = rss.getZooKeeper();
     this.memberRpcs = new ZKProcedureMemberRpcs(zkw,
-      MasterMobCompactionThreads.MOB_COMPACTION_PROCEDURE_SIGNATURE);
+      MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE);
 
     Configuration conf = rss.getConfiguration();
     long keepAlive = conf.getLong(MOB_COMPACTION_TIMEOUT_MILLIS_KEY,
@@ -112,7 +112,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
 
   @Override
   public String getProcedureSignature() {
-    return MasterMobCompactionThreads.MOB_COMPACTION_PROCEDURE_SIGNATURE;
+    return MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE;
   }
 
   public Subprocedure buildSubprocedure(TableName tableName, byte[] data) {

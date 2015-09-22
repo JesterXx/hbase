@@ -23,20 +23,14 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
@@ -48,7 +42,6 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Connection;
-import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
@@ -64,6 +57,8 @@ import org.apache.hadoop.hbase.mob.compactions.PartitionedMobCompactionRequest.C
 import org.apache.hadoop.hbase.mob.compactions.PartitionedMobCompactionRequest.CompactionPartitionId;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
+import org.apache.hadoop.hbase.regionserver.Region;
+import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.ScanInfo;
 import org.apache.hadoop.hbase.regionserver.ScanType;
 import org.apache.hadoop.hbase.regionserver.ScannerContext;
@@ -73,6 +68,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
 
 /**
@@ -93,10 +89,13 @@ public class PartitionedMobCompactor extends MobCompactor {
   private CacheConfig compactionCacheConfig;
   private Tag tableNameTag;
   private Encryption.Context cryptoContext = Encryption.Context.NONE;
+  private String startKeyAsString;
+  private PartitionedMobCompactionRequest request;
 
-  public PartitionedMobCompactor(Configuration conf, FileSystem fs, TableName tableName,
-    HColumnDescriptor column, ExecutorService pool) throws IOException {
-    super(conf, fs, tableName, column, pool);
+  public PartitionedMobCompactor(RegionServerServices rss, Region region, TableName tableName,
+    HColumnDescriptor column) throws IOException {
+    super(rss, region, tableName, column);
+    this.startKeyAsString = MD5Hash.getMD5AsHex(region.getRegionInfo().getStartKey());
     mergeableSize = conf.getLong(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD,
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
@@ -124,9 +123,17 @@ public class PartitionedMobCompactor extends MobCompactor {
     }
     LOG.info("is allFiles: " + allFiles);
     // find the files to compact.
-    PartitionedMobCompactionRequest request = select(files, allFiles);
+    request = select(files, allFiles);
     // compact the files.
     return performCompaction(request);
+  }
+
+  /**
+   * Gets the compaction request.
+   * @return The compaction request.
+   */
+  public PartitionedMobCompactionRequest getPartitionedMobCompactionRequest() {
+    return this.request;
   }
 
   /**
@@ -162,21 +169,27 @@ public class PartitionedMobCompactor extends MobCompactor {
       }
       if (StoreFileInfo.isDelFile(linkedFile.getPath())) {
         allDelFiles.add(file);
-      } else if (allFiles || linkedFile.getLen() < mergeableSize) {
-        // add all files if allFiles is true,
-        // otherwise add the small files to the merge pool
+      } else {
         MobFileName fileName = MobFileName.create(linkedFile.getPath().getName());
-        CompactionPartitionId id = new CompactionPartitionId(fileName.getStartKey(),
-          fileName.getDate());
-        CompactionPartition compactionPartition = filesToCompact.get(id);
-        if (compactionPartition == null) {
-          compactionPartition = new CompactionPartition(id);
-          compactionPartition.addFile(file);
-          filesToCompact.put(id, compactionPartition);
-        } else {
-          compactionPartition.addFile(file);
+        if (!isOwnByRegion(fileName.getStartKey())) {
+          irrelevantFileCount++;
+          continue;
         }
-        selectedFileCount++;
+        if (allFiles || linkedFile.getLen() < mergeableSize) {
+          // add all files if allFiles is true,
+          // otherwise add the small files to the merge pool
+          CompactionPartitionId id = new CompactionPartitionId(fileName.getStartKey(),
+            fileName.getDate());
+          CompactionPartition compactionPartition = filesToCompact.get(id);
+          if (compactionPartition == null) {
+            compactionPartition = new CompactionPartition(id);
+            compactionPartition.addFile(file);
+            filesToCompact.put(id, compactionPartition);
+          } else {
+            compactionPartition.addFile(file);
+          }
+          selectedFileCount++;
+        }
       }
     }
     PartitionedMobCompactionRequest request = new PartitionedMobCompactionRequest(
@@ -189,6 +202,15 @@ public class PartitionedMobCompactor extends MobCompactor {
       + allDelFiles.size() + " del files, " + selectedFileCount + " selected files, and "
       + irrelevantFileCount + " irrelevant files");
     return request;
+  }
+
+  /**
+   * Gets whether the start key is owned by the current region.
+   * @param startKey The current start key.
+   * @return True if the start key is owned by the current region.
+   */
+  private boolean isOwnByRegion(String startKey) {
+    return startKeyAsString.equals(startKey);
   }
 
   /**
@@ -209,33 +231,20 @@ public class PartitionedMobCompactor extends MobCompactor {
     for (FileStatus delFile : request.delFiles) {
       delFilePaths.add(delFile.getPath());
     }
-    List<Path> newDelPaths = compactDelFiles(request, delFilePaths);
-    List<StoreFile> newDelFiles = new ArrayList<StoreFile>();
+    List<StoreFile> delFiles = new ArrayList<StoreFile>();
     List<Path> paths = null;
     try {
-      for (Path newDelPath : newDelPaths) {
-        StoreFile sf = new StoreFile(fs, newDelPath, conf, compactionCacheConfig, BloomType.NONE);
-        // pre-create reader of a del file to avoid race condition when opening the reader in each
-        // partition.
+      for (Path delFilePath : delFilePaths) {
+        StoreFile sf = new StoreFile(fs, delFilePath, conf, compactionCacheConfig, BloomType.NONE);
         sf.createReader();
-        newDelFiles.add(sf);
+        delFiles.add(sf);
       }
-      LOG.info("After merging, there are " + newDelFiles.size() + " del files");
+      LOG.info("After merging, there are " + delFiles.size() + " del files");
       // compact the mob files by partitions.
-      paths = compactMobFiles(request, newDelFiles);
+      paths = compactMobFiles(request, delFiles);
       LOG.info("After compaction, there are " + paths.size() + " mob files");
     } finally {
-      closeStoreFileReaders(newDelFiles);
-    }
-    // archive the del files if all the mob files are selected.
-    if (request.type == CompactionType.ALL_FILES && !newDelPaths.isEmpty()) {
-      LOG.info("After a mob compaction with all files selected, archiving the del files "
-        + newDelPaths);
-      try {
-        MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), newDelFiles);
-      } catch (IOException e) {
-        LOG.error("Failed to archive the del files " + newDelPaths, e);
-      }
+      closeStoreFileReaders(delFiles);
     }
     return paths;
   }
@@ -255,30 +264,18 @@ public class PartitionedMobCompactor extends MobCompactor {
       return Collections.emptyList();
     }
     List<Path> paths = new ArrayList<Path>();
-    Connection c = ConnectionFactory.createConnection(conf);
+    Connection c = rss.getConnection();
     final Table table = c.getTable(tableName);
     try {
-      Map<CompactionPartitionId, Future<List<Path>>> results =
-        new HashMap<CompactionPartitionId, Future<List<Path>>>();
-      // compact the mob files by partitions in parallel.
-      for (final CompactionPartition partition : partitions) {
-        results.put(partition.getPartitionId(), pool.submit(new Callable<List<Path>>() {
-          @Override
-          public List<Path> call() throws Exception {
-            LOG.info("Compacting mob files for partition " + partition.getPartitionId());
-            return compactMobFilePartition(request, partition, delFiles, table);
-          }
-        }));
-      }
-      // compact the partitions in parallel.
       List<CompactionPartitionId> failedPartitions = new ArrayList<CompactionPartitionId>();
-      for (Entry<CompactionPartitionId, Future<List<Path>>> result : results.entrySet()) {
+      for (final CompactionPartition partition : partitions) {
+        LOG.info("Compacting mob files for partition " + partition.getPartitionId());
         try {
-          paths.addAll(result.getValue().get());
+          paths.addAll(compactMobFilePartition(request, partition, delFiles, table));
         } catch (Exception e) {
           // just log the error
-          LOG.error("Failed to compact the partition " + result.getKey(), e);
-          failedPartitions.add(result.getKey());
+          LOG.error("Failed to compact the partition " + partition.getPartitionId(), e);
+          failedPartitions.add(partition.getPartitionId());
         }
       }
       if (!failedPartitions.isEmpty()) {
@@ -389,9 +386,10 @@ public class PartitionedMobCompactor extends MobCompactor {
     Path refFilePath = null;
     long mobCells = 0;
     try {
-      writer = MobUtils.createWriter(conf, fs, column, partition.getPartitionId().getDate(),
-        tempPath, Long.MAX_VALUE, column.getCompactionCompression(), partition.getPartitionId()
-          .getStartKey(), compactionCacheConfig, cryptoContext);
+      writer = MobUtils.createWriter(rss, region.getRegionInfo().getEncodedName(), conf, fs,
+        column, partition.getPartitionId().getDate(), tempPath, Long.MAX_VALUE,
+        column.getCompactionCompression(), partition.getPartitionId().getStartKey(),
+        compactionCacheConfig, cryptoContext);
       filePath = writer.getPath();
       byte[] fileName = Bytes.toBytes(filePath.getName());
       // create a temp file and open a writer for it in the bulkloadPath
@@ -443,98 +441,6 @@ public class PartitionedMobCompactor extends MobCompactor {
     } catch (IOException e) {
       LOG.error("Failed to archive the files " + mobFilesToCompact, e);
     }
-  }
-
-  /**
-   * Compacts the del files in batches which avoids opening too many files.
-   * @param request The compaction request.
-   * @param delFilePaths
-   * @return The paths of new del files after merging or the original files if no merging
-   *         is necessary.
-   * @throws IOException
-   */
-  protected List<Path> compactDelFiles(PartitionedMobCompactionRequest request,
-    List<Path> delFilePaths) throws IOException {
-    if (delFilePaths.size() <= delFileMaxCount) {
-      return delFilePaths;
-    }
-    // when there are more del files than the number that is allowed, merge it firstly.
-    int offset = 0;
-    List<Path> paths = new ArrayList<Path>();
-    while (offset < delFilePaths.size()) {
-      // get the batch
-      int batch = compactionBatchSize;
-      if (delFilePaths.size() - offset < compactionBatchSize) {
-        batch = delFilePaths.size() - offset;
-      }
-      List<StoreFile> batchedDelFiles = new ArrayList<StoreFile>();
-      if (batch == 1) {
-        // only one file left, do not compact it, directly add it to the new files.
-        paths.add(delFilePaths.get(offset));
-        offset++;
-        continue;
-      }
-      for (int i = offset; i < batch + offset; i++) {
-        batchedDelFiles.add(new StoreFile(fs, delFilePaths.get(i), conf, compactionCacheConfig,
-          BloomType.NONE));
-      }
-      // compact the del files in a batch.
-      paths.add(compactDelFilesInBatch(request, batchedDelFiles));
-      // move to the next batch.
-      offset += batch;
-    }
-    return compactDelFiles(request, paths);
-  }
-
-  /**
-   * Compacts the del file in a batch.
-   * @param request The compaction request.
-   * @param delFiles The del files.
-   * @return The path of new del file after merging.
-   * @throws IOException
-   */
-  private Path compactDelFilesInBatch(PartitionedMobCompactionRequest request,
-    List<StoreFile> delFiles) throws IOException {
-    // create a scanner for the del files.
-    StoreScanner scanner = createScanner(delFiles, ScanType.COMPACT_RETAIN_DELETES);
-    Writer writer = null;
-    Path filePath = null;
-    try {
-      writer = MobUtils.createDelFileWriter(conf, fs, column,
-        MobUtils.formatDate(new Date(request.selectionTime)), tempPath, Long.MAX_VALUE,
-        column.getCompactionCompression(), HConstants.EMPTY_START_ROW, compactionCacheConfig,
-        cryptoContext);
-      filePath = writer.getPath();
-      List<Cell> cells = new ArrayList<Cell>();
-      boolean hasMore = false;
-      ScannerContext scannerContext =
-              ScannerContext.newBuilder().setBatchLimit(compactionKVMax).build();
-      do {
-        hasMore = scanner.next(cells, scannerContext);
-        for (Cell cell : cells) {
-          writer.append(cell);
-        }
-        cells.clear();
-      } while (hasMore);
-    } finally {
-      scanner.close();
-      if (writer != null) {
-        try {
-          writer.close();
-        } catch (IOException e) {
-          LOG.error("Failed to close the writer of the file " + filePath, e);
-        }
-      }
-    }
-    // commit the new del file
-    Path path = MobUtils.commitFile(conf, fs, filePath, mobFamilyDir, compactionCacheConfig);
-    // archive the old del files
-    try {
-      MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
-    } catch (IOException e) {
-      LOG.error("Failed to archive the old del files " + delFiles, e);
-    }
-    return path;
   }
 
   /**

@@ -26,9 +26,12 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.SynchronousQueue;
@@ -49,6 +52,7 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.BufferedMutator;
 import org.apache.hadoop.hbase.client.Connection;
@@ -66,10 +70,10 @@ import org.apache.hadoop.hbase.io.crypto.KeyProviderForTesting;
 import org.apache.hadoop.hbase.io.crypto.aes.AES;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
+import org.apache.hadoop.hbase.master.HMaster;
+import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
-import org.apache.hadoop.hbase.mob.compactions.MobCompactor;
-import org.apache.hadoop.hbase.mob.compactions.PartitionedMobCompactor;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoResponse.CompactionState;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HRegion;
@@ -113,7 +117,7 @@ public class TestMobCompactor {
   private static int delCellNum = 6;
   private static int cellNumPerRow = 3;
   private static int rowNumPerFile = 2;
-  private static ExecutorService pool;
+  private static ThreadPoolExecutor pool;
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
@@ -203,8 +207,7 @@ public class TestMobCompactor {
       countFiles(tableName, true, family1));
     assertEquals("Before compaction: del file count", 0, countFiles(tableName, false, family1));
 
-    MobCompactor compactor = new PartitionedMobCompactor(conf, fs, tableName, hcd1, pool);
-    compactor.compact();
+    compact(tableName, hcd1);
 
     assertEquals("After compaction: mob rows count", regionNum * rowNumPerRegion,
       countMobRows(table));
@@ -232,8 +235,7 @@ public class TestMobCompactor {
       countFiles(tableName, true, family1));
     assertEquals("Before compaction: del file count", 0, countFiles(tableName, false, family1));
 
-    MobCompactor compactor = new PartitionedMobCompactor(conf, fs, tableName, hcd1, pool);
-    compactor.compact();
+    compact(tableName, hcd1);
 
     assertEquals("After compaction: mob rows count", regionNum*rowNumPerRegion,
         countMobRows(hTable));
@@ -282,8 +284,7 @@ public class TestMobCompactor {
       countFiles(tableName, true, family1));
     assertEquals("Before compaction: del file count", 0, countFiles(tableName, false, family1));
 
-    MobCompactor compactor = new PartitionedMobCompactor(conf, fs, tableName, hcd, pool);
-    compactor.compact();
+    compact(tableName, hcd);
 
     assertEquals("After compaction: mob rows count", regionNum*rowNumPerRegion,
         countMobRows(hTable));
@@ -326,8 +327,7 @@ public class TestMobCompactor {
         countFiles(tableName, false, family2));
 
     // do the mob file compaction
-    MobCompactor compactor = new PartitionedMobCompactor(conf, fs, tableName, hcd1, pool);
-    compactor.compact();
+    compact(tableName, hcd1);
 
     assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
@@ -380,8 +380,7 @@ public class TestMobCompactor {
         countFiles(tableName, false, family2));
 
     // do the mob file compaction
-    MobCompactor compactor = new PartitionedMobCompactor(conf, fs, tableName, hcd1, pool);
-    compactor.compact();
+    compact(tableName, hcd1);
 
     assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
@@ -432,8 +431,7 @@ public class TestMobCompactor {
         countFiles(tableName, false, family2));
 
     // do the mob compaction
-    MobCompactor compactor = new PartitionedMobCompactor(conf, fs, tableName, hcd1, pool);
-    compactor.compact();
+    compact(tableName, hcd1);
 
     assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
@@ -450,7 +448,8 @@ public class TestMobCompactor {
   }
 
   @Test
-  public void testCompactionWithHFileLink() throws IOException, InterruptedException {
+  public void testCompactionWithHFileLink() throws IOException, InterruptedException,
+    ExecutionException {
     resetConf();
     int count = 4;
     // generate mob files
@@ -478,8 +477,7 @@ public class TestMobCompactor {
         countFiles(tableName, false, family2));
 
     // do the mob compaction
-    MobCompactor compactor = new PartitionedMobCompactor(conf, fs, tableName, hcd1, pool);
-    compactor.compact();
+    compact(tableName, hcd1);
 
     assertEquals("After first compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
         countMobRows(hTable));
@@ -518,7 +516,7 @@ public class TestMobCompactor {
     assertEquals("After restoring snapshot: family2 hfilelink count", 0,
         countHFileLinks(family2));
 
-    compactor.compact();
+    compact(tableName, hcd1);
 
     assertEquals("After second compaction: mob rows count", regionNum*rowNumPerRegion,
         countMobRows(hTable));
@@ -570,7 +568,11 @@ public class TestMobCompactor {
 
     int largeFilesCount = countLargeFiles(5000, family1);
     // do the mob compaction
-    admin.compactMob(tableName, hcd1.getName());
+    Map<String, String> props = new HashMap<String, String>();
+    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
+      hcd1.getNameAsString());
+    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
+      tableName.getNameAsString(), props);
 
     waitUntilMobCompactionFinished(tableName);
     assertEquals("After compaction: mob rows count", regionNum * (rowNumPerRegion - delRowNum),
@@ -618,7 +620,12 @@ public class TestMobCompactor {
         countFiles(tableName, false, family2));
 
     // do the major mob compaction, it will force all files to compaction
-    admin.majorCompactMob(tableName, hcd1.getName());
+    Map<String, String> props = new HashMap<String, String>();
+    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
+      hcd1.getNameAsString());
+    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY, "true");
+    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
+      tableName.getNameAsString(), props);
 
     waitUntilMobCompactionFinished(tableName);
     assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
@@ -657,7 +664,12 @@ public class TestMobCompactor {
     Cell cell = result.getColumnLatestCell(hcd1.getName(), Bytes.toBytes(qf1));
     assertEquals("Before compaction: mob value of k0", newValue0,
       Bytes.toString(CellUtil.cloneValue(cell)));
-    admin.majorCompactMob(tableName, hcd1.getName());
+    Map<String, String> props = new HashMap<String, String>();
+    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
+      hcd1.getNameAsString());
+    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY, "true");
+    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
+      tableName.getNameAsString(), props);
     waitUntilMobCompactionFinished(tableName);
     // read the latest cell of key0, the cell seqId in bulk loaded file is not reset in the
     // scanner. The cell that has "new" value is still visible.
@@ -705,7 +717,12 @@ public class TestMobCompactor {
     loadData(admin, bufMut, tableName, new Put[] { put1 }); // now two mob files
     admin.majorCompact(tableName);
     waitUntilCompactionFinished(tableName);
-    admin.majorCompactMob(tableName, hcd1.getName());
+    Map<String, String> props = new HashMap<String, String>();
+    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
+      hcd1.getNameAsString());
+    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY, "true");
+    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
+      tableName.getNameAsString(), props);
     waitUntilMobCompactionFinished(tableName);
     // read the latest cell of key1.
     Get get = new Get(key1);
@@ -731,12 +748,16 @@ public class TestMobCompactor {
   private void waitUntilMobCompactionFinished(TableName tableName) throws IOException,
     InterruptedException {
     long finished = EnvironmentEdgeManager.currentTime() + 60000;
-    CompactionState state = admin.getMobCompactionState(tableName);
+    boolean state = admin.isProcedureFinished(
+      MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE, tableName.getNameAsString(),
+      null);
     while (EnvironmentEdgeManager.currentTime() < finished) {
-      if (state == CompactionState.NONE) {
+      if (state) {
         break;
       }
-      state = admin.getMobCompactionState(tableName);
+      state = admin.isProcedureFinished(
+        MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE, tableName.getNameAsString(),
+        null);
       Thread.sleep(10);
     }
     assertEquals(CompactionState.NONE, state);
@@ -957,7 +978,7 @@ public class TestMobCompactor {
     return splitKeys;
   }
 
-  private static ExecutorService createThreadPool(Configuration conf) {
+  private static ThreadPoolExecutor createThreadPool(Configuration conf) {
     int maxThreads = 10;
     long keepAliveTime = 60;
     final SynchronousQueue<Runnable> queue = new SynchronousQueue<Runnable>();
@@ -975,7 +996,7 @@ public class TestMobCompactor {
             }
           }
         });
-    ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
+    pool.allowCoreThreadTimeOut(true);
     return pool;
   }
 
@@ -1022,5 +1043,15 @@ public class TestMobCompactor {
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD);
     conf.setInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_COMPACTION_BATCH_SIZE);
+  }
+
+  private void compact(TableName tableName, HColumnDescriptor hcd) throws IOException,
+    InterruptedException, ExecutionException {
+    HMaster master = TEST_UTIL.getMiniHBaseCluster().getMaster();
+    MasterMobCompactionManager mobCompactorManager = new MasterMobCompactionManager(master, pool);
+    List<HColumnDescriptor> columns = new ArrayList<HColumnDescriptor>(1);
+    columns.add(hcd);
+    Future<Void> future = mobCompactorManager.requestMobCompaction(tableName, columns, false);
+    future.get();
   }
 }

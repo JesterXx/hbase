@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.regionserver;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -257,11 +258,16 @@ public class HMobStore extends HStore {
         .withHBaseCheckSum(true).withDataBlockEncoding(getFamily().getDataBlockEncoding())
         .withEncryptionContext(cryptoContext)
         .withCreateTime(EnvironmentEdgeManager.currentTime()).build();
-
+    InetSocketAddress[] favoredNodes = null;
+    if (region.getRegionServerServices() != null) {
+      favoredNodes = region.getRegionServerServices().getFavoredNodesForRegion(
+        region.getRegionInfo().getEncodedName());
+    }
     StoreFile.Writer w = new StoreFile.WriterBuilder(conf, writerCacheConf, region.getFilesystem())
-        .withFilePath(new Path(basePath, mobFileName.getFileName()))
-        .withComparator(CellComparator.COMPARATOR).withBloomType(BloomType.NONE)
-        .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
+      .withFilePath(new Path(basePath, mobFileName.getFileName()))
+      .withComparator(CellComparator.COMPARATOR).withBloomType(BloomType.NONE)
+      .withMaxKeyCount(maxKeyCount).withFavoredNodes(favoredNodes).withFileContext(hFileContext)
+      .build();
     return w;
   }
 

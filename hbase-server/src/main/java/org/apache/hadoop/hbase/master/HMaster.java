@@ -291,7 +291,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   private HFileCleaner hfileCleaner;
   private ExpiredMobFileCleanerChore expiredMobFileCleanerChore;
   private MobCompactionChore mobCompactChore;
-  private MasterMobCompactionThread mobCompactThread;
+  private MasterMobCompactionManager mobCompactionManager;
   // used to synchronize the mobCompactionStates
   private final IdLock mobCompactionLock = new IdLock();
   // save the information of mob compactions in tables.
@@ -600,6 +600,8 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     this.mpmHost = new MasterProcedureManagerHost();
     this.mpmHost.register(this.snapshotManager);
     this.mpmHost.register(new MasterFlushTableProcedureManager());
+    this.mobCompactionManager = new MasterMobCompactionManager(this);
+    this.mpmHost.register(this.mobCompactionManager);
     this.mpmHost.loadProcedures(conf);
     this.mpmHost.initialize(this, this.metricsMaster);
 
@@ -823,7 +825,6 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
       LOG
         .info("The period is " + mobCompactionPeriod + " seconds, MobCompactionChore is disabled");
     }
-    this.mobCompactThread = new MasterMobCompactionThread(this);
 
     if (this.cpHost != null) {
       // don't let cp initialization errors kill the master
@@ -1183,9 +1184,6 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     }
     if (this.clusterStatusPublisherChore != null){
       clusterStatusPublisherChore.cancel(true);
-    }
-    if (this.mobCompactThread != null) {
-      this.mobCompactThread.close();
     }
   }
 
@@ -2695,10 +2693,9 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
    * @param columns The compacted columns.
    * @param allFiles Whether add all mob files into the compaction.
    */
-  public void requestMobCompaction(TableName tableName,
-    List<HColumnDescriptor> columns, boolean allFiles) throws IOException {
-    mobCompactThread.requestMobCompaction(conf, fs, tableName, columns,
-      tableLockManager, allFiles);
+  public void requestMobCompaction(TableName tableName, List<HColumnDescriptor> columns,
+    boolean allFiles) throws IOException {
+    mobCompactionManager.requestMobCompaction(tableName, columns, allFiles);
   }
 
   /**

@@ -21,7 +21,6 @@ package org.apache.hadoop.hbase.mob.compactions;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
@@ -31,6 +30,8 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.regionserver.Region;
+import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.util.FSUtils;
 
 /**
@@ -39,6 +40,8 @@ import org.apache.hadoop.hbase.util.FSUtils;
 @InterfaceAudience.Private
 public abstract class MobCompactor {
 
+  protected RegionServerServices rss;
+  protected Region region;
   protected FileSystem fs;
   protected Configuration conf;
   protected TableName tableName;
@@ -46,15 +49,15 @@ public abstract class MobCompactor {
 
   protected Path mobTableDir;
   protected Path mobFamilyDir;
-  protected ExecutorService pool;
 
-  public MobCompactor(Configuration conf, FileSystem fs, TableName tableName,
-    HColumnDescriptor column, ExecutorService pool) {
-    this.conf = conf;
-    this.fs = fs;
+  public MobCompactor(RegionServerServices rss, Region region, TableName tableName,
+    HColumnDescriptor column) {
+    this.rss = rss;
+    this.region = region;
+    this.conf = rss.getConfiguration();
+    this.fs = rss.getFileSystem();
     this.tableName = tableName;
     this.column = column;
-    this.pool = pool;
     mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
     mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
   }

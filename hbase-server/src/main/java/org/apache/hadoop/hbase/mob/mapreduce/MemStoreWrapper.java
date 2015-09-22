@@ -130,9 +130,9 @@ public class MemStoreWrapper {
     }
     // generate the files into a temp directory.
     String tempPathString = context.getConfiguration().get(SweepJob.WORKING_FILES_DIR_KEY);
-    StoreFile.Writer mobFileWriter = MobUtils.createWriter(conf, fs, hcd, partitionId.getDate(),
-      new Path(tempPathString), snapshot.getCellsCount(), hcd.getCompactionCompression(),
-      partitionId.getStartKey(), cacheConfig, cryptoContext);
+    StoreFile.Writer mobFileWriter = MobUtils.createWriter(null, null, conf, fs, hcd,
+      partitionId.getDate(), new Path(tempPathString), snapshot.getCellsCount(),
+      hcd.getCompactionCompression(), partitionId.getStartKey(), cacheConfig, cryptoContext);
 
     String relativePath = mobFileWriter.getPath().getName();
     LOG.info("Create files under a temp directory " + mobFileWriter.getPath().toString());
