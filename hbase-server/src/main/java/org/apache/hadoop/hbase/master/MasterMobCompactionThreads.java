@@ -40,9 +40,11 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
+import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.Stoppable;
@@ -50,6 +52,8 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotEnabledException;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.TableState;
+import org.apache.hadoop.hbase.errorhandling.ForeignException;
+import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
 import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.io.crypto.Encryption;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
@@ -57,9 +61,11 @@ import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.procedure.MasterProcedureManager;
+import org.apache.hadoop.hbase.procedure.Procedure;
 import org.apache.hadoop.hbase.procedure.ProcedureCoordinator;
 import org.apache.hadoop.hbase.procedure.ProcedureCoordinatorRpcs;
 import org.apache.hadoop.hbase.procedure.ZKProcedureCoordinatorRpcs;
+import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.NameStringPair;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ProcedureDescription;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
@@ -71,6 +77,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFile.Writer;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
+import org.apache.hadoop.hbase.snapshot.HBaseSnapshotException;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -78,6 +85,8 @@ import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.zookeeper.KeeperException;
+
+import com.google.common.collect.Lists;
 
 /**
  * The mob compaction thread used in {@link HMaster}
@@ -88,7 +97,6 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
   private HMaster master;
   private Configuration conf;
   private ThreadPoolExecutor mobCompactionPool;
-  private Set<String> ongoingCompactions;
   private int delFileMaxCount;
   private int compactionBatchSize;
   protected int compactionKVMax;
@@ -116,7 +124,6 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
     this.master = master;
     this.fs = master.getFileSystem();
     this.conf = master.getConfiguration();
-    this.ongoingCompactions = new HashSet<String>();
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
       MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
     compactionBatchSize = conf.getInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
@@ -151,12 +158,29 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
   public void requestMobCompaction(TableName tableName,
     List<HColumnDescriptor> columns, boolean allFiles)
     throws IOException {
-    compactions.put(tableName, mobCompactionPool.submit(new CompactionRunner(fs, tableName,
-      columns, master.getTableLockManager(), allFiles)));
+    // only compact enabled table
+    if (!master.getAssignmentManager().getTableStateManager()
+      .isTableState(tableName, TableState.State.ENABLED)) {
+      LOG.warn("The table " + tableName + " is not enabled");
+      throw new TableNotEnabledException(tableName);
+    }
+    synchronized (this) {
+      Future<Void> compaction = compactions.get(tableName);
+      if (compaction != null && !compaction.isDone()) {
+        String msg = "Another mob compaction on table " + tableName.getNameAsString()
+          + " is in progress";
+        LOG.error(msg);
+        throw new IOException(msg);
+      }
+      compactions.put(tableName, mobCompactionPool.submit(new CompactionRunner(fs, tableName,
+        columns, master.getTableLockManager(), allFiles)));
+    }
     if (LOG.isDebugEnabled()) {
       LOG.debug("The mob compaction is requested for the columns " + columns + " of the table "
         + tableName.getNameAsString());
     }
+    mobCompactionPool.submit(new CompactionRunner(fs, tableName, columns, master
+      .getTableLockManager(), allFiles));
   }
 
   private class CompactionRunner implements Callable<Void> {
@@ -178,7 +202,6 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
 
     @Override
     public Void call() throws Exception{
-      // TODO 1. check if there is another compaction is in progress and add it to memory
       // TODO 2. report the compaction start
       // TODO 3. acquire lock to sync with major compaction
       // TODO 4. collect del files.
@@ -187,20 +210,6 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
       // TODO 7. release lock.
       // TODO 8. remove this compaction from memory.
       // TODO 9. report the compaction stop
-
-      // only compact enabled table
-      if (!master.getAssignmentManager().getTableStateManager()
-        .isTableState(tableName, TableState.State.ENABLED)) {
-        LOG.warn("The table " + tableName + " is not enabled");
-        throw new TableNotEnabledException(tableName);
-      }
-      // TODO consider to add sync here.
-      if (ongoingCompactions.contains(tableName.getNameAsString())) {
-        LOG.warn("Another mob compaction on table " + tableName.getNameAsString()
-          + " is in progress");
-        throw new IOException("Another mob compaction on table " + tableName.getNameAsString()
-          + " is in progress");
-      }
       try {
         master.reportMobCompactionStart(tableName);
         for (HColumnDescriptor column : columns) {
@@ -209,7 +218,9 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
       } catch (IOException e) {
         LOG.error("Failed to perform the mob compaction", e);
       } finally {
-        ongoingCompactions.remove(tableName.getNameAsString());
+        synchronized (MasterMobCompactionThreads.this) {
+          compactions.remove(tableName.getNameAsString());
+        }
         try {
           master.reportMobCompactionEnd(tableName);
         } catch (IOException e) {
@@ -238,7 +249,7 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
         List<Path> delFilePaths = compactDelFiles(column, selectDelFiles(mobFamilyDir),
           EnvironmentEdgeManager.currentTime(), cryptoContext, mobTableDir, mobFamilyDir);
         // dispatch mob compaction
-        boolean isAllFiles = dispatchMobCompaction(tableName, column);
+        boolean isAllFiles = dispatchMobCompaction(tableName, column, allFiles);
         // delete the del files if it is a major compaction
         if (isAllFiles && !delFilePaths.isEmpty()) {
           LOG.info("After a mob compaction with all files selected, archiving the del files "
@@ -269,7 +280,8 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
       }
     }
 
-    private boolean dispatchMobCompaction(TableName tableName, HColumnDescriptor column) throws IOException {
+    private boolean dispatchMobCompaction(TableName tableName, HColumnDescriptor column,
+      boolean allFiles) throws IOException {
       // use procedure to dispatch the compaction to region servers.
       // Find all the online regions
       boolean allRegionsOnline = true;
@@ -320,7 +332,49 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
         }
       }
       // start the procedure
-      
+
+      ForeignExceptionDispatcher monitor = new ForeignExceptionDispatcher(tableName.getNameAsString());
+      // start the mob compaction on the RS
+      byte[] data = new byte[1 + column.getNameAsString().length()];
+      // the format of data is allFile(one byte) + columnName
+      data[0] = (byte) (allFiles ? 1 : 0);
+      Bytes.putBytes(data, 1, column.getName(), 0, column.getName().length);
+      Procedure proc = coordinator.startProcedure(monitor, tableName.getNameAsString(),
+        data, Lists.newArrayList(regionServers.keySet()));
+      if (proc == null) {
+        String msg = "Failed to submit distributed procedure for mob compaction '"
+            + tableName.getNameAsString() + "'";
+        LOG.error(msg);
+        throw new IOException(msg);
+      }
+
+      try {
+        // wait for the mob compaction to complete.
+        proc.waitForCompleted();
+        LOG.info("Done waiting - mob compaction for " + tableName.getNameAsString());
+        if(allRegionsOnline && !regionServers.isEmpty()) {
+          // check if all the mob compactions is all files
+          String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
+          try {
+            for (Entry<String, List<String>> entry : regionServers.entrySet()) {
+              String serverName = entry.getKey();
+              String compactionServerZNode = ZKUtil.joinZNode(compactionZNode, serverName);
+              byte[] result = ZKUtil.getData(master.getZooKeeper(), compactionServerZNode);
+              success = result != null && result.length == 1 && result[0] == 1;
+            }
+          } catch (KeeperException e) {
+            LOG.warn("Exceptions happen after mob compaction", e);
+            success = false;
+          }
+        }
+      } catch (InterruptedException e) {
+        ForeignException ee =
+            new ForeignException("Interrupted while waiting for snapshot to finish", e);
+        monitor.receive(ee);
+        Thread.currentThread().interrupt();
+      } catch (ForeignException e) {
+        monitor.receive(e);
+      }
       // return if all the compactions are finished successfully
       return allRegionsOnline && success;
     }
@@ -533,15 +587,11 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
   }
 
   @Override
-  public synchronized boolean isProcedureDone(ProcedureDescription desc) throws IOException {
+  public boolean isProcedureDone(ProcedureDescription desc) throws IOException {
     TableName tableName = TableName.valueOf(desc.getInstance());
     Future<Void> compaction = compactions.get(tableName);
     if (compaction != null) {
-      boolean isDone = compaction.isDone();
-      if (isDone) {
-        compactions.remove(tableName);
-      }
-      return isDone;
+      return compaction.isDone();
     }
     return true;
   }
@@ -553,8 +603,40 @@ public class MasterMobCompactionThreads extends MasterProcedureManager implement
 
   @Override
   public void execProcedure(ProcedureDescription desc) throws IOException {
-
     TableName tableName = TableName.valueOf(desc.getInstance());
-    
+    List<NameStringPair> props = desc.getConfigurationList();
+    List<String> columnNames = new ArrayList<String>();
+    boolean allFiles = false;
+    for (NameStringPair prop : props) {
+      if ("mobCompaction-column".equalsIgnoreCase(prop.getName())) {
+        columnNames.add(prop.getValue());
+      } else if ("mobCompaction-allFiles".equalsIgnoreCase(prop.getName())) {
+        allFiles = "true".equalsIgnoreCase(prop.getValue());
+      }
+    }
+    HTableDescriptor htd = master.getTableDescriptors().get(tableName);
+    List<HColumnDescriptor> compactedColumns = new ArrayList<HColumnDescriptor>();
+    if (!columnNames.isEmpty()) {
+      for (String columnName : columnNames) {
+        HColumnDescriptor column = htd.getFamily(Bytes.toBytes(columnName));
+        if (column == null) {
+          LOG.error("Column family " + columnName + " does not exist");
+          throw new DoNotRetryIOException("Column family " + columnName + " does not exist");
+        }
+        if (!column.isMobEnabled()) {
+          LOG.error("Column family " + column.getNameAsString() + " is not a mob column family");
+          throw new DoNotRetryIOException("Column family " + column.getNameAsString()
+            + " is not a mob column family");
+        }
+        compactedColumns.add(column);
+      }
+    } else {
+      for (HColumnDescriptor column : htd.getColumnFamilies()) {
+        if (column.isMobEnabled()) {
+          compactedColumns.add(column);
+        }
+      }
+    }
+    requestMobCompaction(tableName, compactedColumns, allFiles);
   }
 }

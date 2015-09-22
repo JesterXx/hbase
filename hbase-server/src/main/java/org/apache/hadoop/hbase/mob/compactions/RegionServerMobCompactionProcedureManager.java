@@ -121,7 +121,6 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       throw new IllegalStateException("Can't start mob compaction subprocedure on RS: "
         + rss.getServerName() + ", because stopping/stopped!");
     }
-
     // check to see if this server is hosting any regions for the table
     List<Region> involvedRegions;
     try {
@@ -130,14 +129,12 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       throw new IllegalStateException(
         "Failed to figure out if there is region for mob compaction.", e1);
     }
-
     // parse the column names and if it is a major compaction
     boolean allFiles = (data[0] != (byte) 0);
     String columnName = Bytes.toString(data, 1, data.length - 1);
     // We need to run the subprocedure even if we have no relevant regions. The coordinator
     // expects participation in the procedure and without sending message the master procedure
     // will hang and fail.
-
     LOG.debug("Launching subprocedure to compact mob files for " + tableName.getNameAsString());
     ForeignExceptionDispatcher exnDispatcher = new ForeignExceptionDispatcher(
       tableName.getNameAsString());
@@ -155,13 +152,11 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
   }
 
   public class MobCompactionSubprocedureBuilder implements SubprocedureFactory {
-
     @Override
     public Subprocedure buildSubprocedure(String name, byte[] data) {
       // The name of the procedure instance from the master is the table name.
       return RegionServerMobCompactionProcedureManager.this.buildSubprocedure(TableName.valueOf(name), data);
     }
-
   }
 
   static class MobCompactionSubprocedurePool {
@@ -218,9 +213,13 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
           if (!futures.remove(f)) {
             LOG.warn("unexpected future" + f);
           }
-          LOG.debug("Completed " + (i + 1) + "/" + sz + " local region mob compaction tasks.");
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Completed " + (i + 1) + "/" + sz + " local region mob compaction tasks.");
+          }
         }
-        LOG.debug("Completed " + sz + " local region mob compaction tasks.");
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Completed " + sz + " local region mob compaction tasks.");
+        }
         return success;
       } catch (InterruptedException e) {
         LOG.warn("Got InterruptedException in MobCompactionSubprocedurePool", e);

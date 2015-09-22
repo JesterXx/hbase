@@ -127,7 +127,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
             }
           }
           if (equals) {
-            ZKUtil.setData(rss.getZooKeeper(), compactionServerZNode, Bytes.toBytes(true));
+            ZKUtil.setData(rss.getZooKeeper(), compactionServerZNode, new byte[] { 1 });
           }
         }
       } catch (KeeperException e) {
