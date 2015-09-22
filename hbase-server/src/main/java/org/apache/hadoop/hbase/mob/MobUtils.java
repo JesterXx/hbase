@@ -445,6 +445,8 @@ public class MobUtils {
 
   /**
    * Creates a writer for the mob file in temp directory.
+   * @param rss The current region server services.
+   * @param regionEncodedName The encoded name of the current region.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -501,6 +503,8 @@ public class MobUtils {
 
   /**
    * Creates a writer for the mob file in temp directory.
+   * @param rss The current region server services.
+   * @param regionEncodedName The encoded name of the current region.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -554,6 +558,8 @@ public class MobUtils {
 
   /**
    * Creates a writer for the mob file in temp directory.
+   * @param rss The current region server services.
+   * @param regionEncodedName The encoded name of the current region.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.

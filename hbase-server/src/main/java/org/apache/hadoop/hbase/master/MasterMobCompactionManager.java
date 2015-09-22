@@ -108,12 +108,15 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
   public static final String MOB_COMPACTION_PROCEDURE_SIGNATURE = "mob-compaction-proc";
 
-  private static final String MOB_COMPACTION_TIMEOUT_MILLIS_KEY = "hbase.mob.compaction.master.timeoutMillis";
+  private static final String MOB_COMPACTION_TIMEOUT_MILLIS_KEY =
+    "hbase.mob.compaction.master.timeoutMillis";
   private static final int MOB_COMPACTION_TIMEOUT_MILLIS_DEFAULT = 1800000; // 30 min
-  private static final String MOB_COMPACTION_WAKE_MILLIS_KEY = "hbase.mob.compaction.master.wakeMillis";
+  private static final String MOB_COMPACTION_WAKE_MILLIS_KEY =
+    "hbase.mob.compaction.master.wakeMillis";
   private static final int MOB_COMPACTION_WAKE_MILLIS_DEFAULT = 500;
 
-  private static final String MOB_COMPACTION_PROC_POOL_THREADS_KEY = "hbase.mob.compaction.procedure.master.threads";
+  private static final String MOB_COMPACTION_PROC_POOL_THREADS_KEY =
+    "hbase.mob.compaction.procedure.master.threads";
   private static final int MOB_COMPACTION_PROC_POOL_THREADS_DEFAULT = 2;
 
   private ProcedureCoordinator coordinator;
@@ -151,11 +154,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
   /**
    * Requests mob compaction
-   * @param conf The Configuration
-   * @param fs The file system
    * @param tableName The table the compact
    * @param columns The column descriptors
-   * @param tableLockManager The tableLock manager
    * @param allFiles Whether add all mob files into the compaction.
    */
   public Future<Void> requestMobCompaction(TableName tableName, List<HColumnDescriptor> columns,
@@ -204,7 +204,6 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
     @Override
     public Void call() throws Exception{
-      // TODO 6. wait until the procedure is finished.
       boolean tableLocked = false;
       TableLock lock = null;
       try {

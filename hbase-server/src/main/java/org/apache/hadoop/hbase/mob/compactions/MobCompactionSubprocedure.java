@@ -45,6 +45,11 @@ import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.zookeeper.KeeperException;
 
+/**
+ * The subprocedure implementation for mob compaction.
+ * The mob compaction is distributed to region servers, and executed in subprocedure
+ * in each region server.
+ */
 public class MobCompactionSubprocedure extends Subprocedure {
   private static final Log LOG = LogFactory.getLog(MobCompactionSubprocedure.class);
 
@@ -75,6 +80,9 @@ public class MobCompactionSubprocedure extends Subprocedure {
     compactionServerZNode = ZKUtil.joinZNode(compactionZNode, rss.getServerName().toString());
   }
 
+  /**
+   * Compacts mob files in the current region server.
+   */
   @Override
   public void acquireBarrier() throws ForeignException {
     if (regions.isEmpty()) {
@@ -109,6 +117,9 @@ public class MobCompactionSubprocedure extends Subprocedure {
     }
     // add nodes to zookeeper if all the tasks are finished successfully
     if (success && !regions.isEmpty()) {
+      // compare the regions passed from master and existing regions in the current region server.
+      // if they are the same, it means all regions are online, all mob files owned by this region
+      // server can be compacted. We call tell master this thing by setting data in zookeeper.
       try {
         List<String> foundRegionStartKeys = ZKUtil.listChildrenNoWatch(rss.getZooKeeper(),
           compactionServerZNode);
@@ -136,6 +147,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
     }
   }
 
+  // Callable for mob compaction.
   private class RegionMobCompactionTask implements Callable<Boolean> {
     Region region;
     List<FileStatus> files;
@@ -151,14 +163,21 @@ public class MobCompactionSubprocedure extends Subprocedure {
       region.startRegionOperation();
       try {
         LOG.debug("Mob compaction of region " + region.toString() + " started...");
-        return mobCompactRegion(region, allFiles);
+        return compactRegion(region, allFiles);
       } finally {
         LOG.debug("Closing region operation mob compaction on " + region);
         region.closeRegionOperation();
       }
     }
 
-    private boolean mobCompactRegion(Region region, boolean allFiles) throws IOException {
+    /**
+     * Performs mob compaction in the current region.
+     * @param region the current region.
+     * @param allFiles if a major compaction is required.
+     * @return True if all the files are selected.
+     * @throws IOException
+     */
+    private boolean compactRegion(Region region, boolean allFiles) throws IOException {
       HColumnDescriptor column = region.getTableDesc().getFamily(Bytes.toBytes(columnName));
       PartitionedMobCompactor compactor = new PartitionedMobCompactor(rss, region, tableName,
         column);

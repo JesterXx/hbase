@@ -43,12 +43,16 @@ import org.apache.hadoop.hbase.procedure.RegionServerProcedureManager;
 import org.apache.hadoop.hbase.procedure.Subprocedure;
 import org.apache.hadoop.hbase.procedure.SubprocedureFactory;
 import org.apache.hadoop.hbase.procedure.ZKProcedureMemberRpcs;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.zookeeper.KeeperException;
 
+/**
+ * This manager class handles mob compaction for table on a {@link HRegionServer}.
+ */
 public class RegionServerMobCompactionProcedureManager extends RegionServerProcedureManager {
   private static final Log LOG = LogFactory.getLog(RegionServerMobCompactionProcedureManager.class);
 
@@ -89,7 +93,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
   }
 
   /**
-   * Start accepting mob compaction requests.
+   * Starts accepting mob compaction requests.
    */
   @Override
   public void start() {
@@ -98,6 +102,11 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     this.memberRpcs.start(rss.getServerName().toString(), member);
   }
 
+  /**
+   * Closes <tt>this</tt> and all running tasks
+   * @param force forcefully stop all running tasks
+   * @throws IOException
+   */
   @Override
   public void stop(boolean force) throws IOException {
     String mode = force ? "abruptly" : "gracefully";
@@ -115,6 +124,13 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     return MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE;
   }
 
+  /**
+   * Creates a specified subprocedure to compact mob files.
+   *
+   * @param table the current table name.
+   * @param data the arguments passed in master side.
+   * @return Subprocedure to submit to the ProcedureMemeber.
+   */
   public Subprocedure buildSubprocedure(TableName tableName, byte[] data) {
     // don't run the subprocedure if the parent is stop(ping)
     if (rss.isStopping() || rss.isStopped()) {
@@ -132,10 +148,10 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     // parse the column names and if it is a major compaction
     boolean allFiles = (data[0] != (byte) 0);
     String columnName = Bytes.toString(data, 1, data.length - 1);
-    // We need to run the subprocedure even if we have no relevant regions. The coordinator
-    // expects participation in the procedure and without sending message the master procedure
-    // will hang and fail.
-    LOG.debug("Launching subprocedure to compact mob files for " + tableName.getNameAsString());
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Launching subprocedure to compact mob files for " + tableName.getNameAsString());
+    }
     ForeignExceptionDispatcher exnDispatcher = new ForeignExceptionDispatcher(
       tableName.getNameAsString());
     Configuration conf = rss.getConfiguration();
@@ -159,6 +175,14 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     }
   }
 
+  /**
+   * We use the MobCompactionSubprocedurePool, a class specific thread pool instead of
+   * {@link org.apache.hadoop.hbase.executor.ExecutorService}.
+   *
+   * It uses a {@link java.util.concurrent.ExecutorCompletionService} which provides queuing of
+   * completed tasks which lets us efficiently cancel pending tasks upon the earliest operation
+   * failures.
+   */
   static class MobCompactionSubprocedurePool {
     private final ExecutorCompletionService<Boolean> taskPool;
     private final ThreadPoolExecutor executor;
@@ -185,7 +209,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
 
     /**
      * Submit a task to the pool.
-     * 
+     *
      * NOTE: all must be submitted before you can safely {@link #waitForOutstandingTasks()}.
      */
     void submitTask(final Callable<Boolean> task) {
@@ -196,7 +220,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     /**
      * Wait for all of the currently outstanding tasks submitted via {@link #submitTask(Callable)}.
      * This *must* be called after all tasks are submitted via submitTask.
-     * 
+     *
      * @return <tt>true</tt> on success, <tt>false</tt> otherwise
      * @throws InterruptedException
      */
@@ -245,7 +269,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     /**
      * This attempts to cancel out all pending and in progress tasks. Does not interrupt the running
      * tasks itself.
-     * 
+     *
      * @throws InterruptedException
      */
     void cancelTasks() throws InterruptedException {
