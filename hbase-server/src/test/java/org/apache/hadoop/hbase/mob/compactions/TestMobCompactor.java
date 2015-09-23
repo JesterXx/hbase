@@ -760,7 +760,7 @@ public class TestMobCompactor {
         props);
       Thread.sleep(10);
     }
-    assertEquals(CompactionState.NONE, state);
+    assertEquals(true, state);
   }
 
   /**
