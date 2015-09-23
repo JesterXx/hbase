@@ -754,9 +754,10 @@ public class TestMobCompactor {
       if (state) {
         break;
       }
+      Map<String, String> props = Collections.emptyMap();
       state = admin.isProcedureFinished(
         MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE, tableName.getNameAsString(),
-        null);
+        props);
       Thread.sleep(10);
     }
     assertEquals(CompactionState.NONE, state);
