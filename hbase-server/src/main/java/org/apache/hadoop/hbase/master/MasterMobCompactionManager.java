@@ -81,6 +81,7 @@ import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
+import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 
 import com.google.common.collect.Lists;
@@ -330,18 +331,19 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         try {
           // clean the node if it exists
           ZKUtil.deleteNodeRecursively(master.getZooKeeper(), compactionZNode);
-          ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionZNode, null);
+          ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionZNode, null,
+            CreateMode.PERSISTENT);
           for (Entry<String, List<String>> entry : regionServers.entrySet()) {
             String serverName = entry.getKey();
             List<String> startKeysOfOnlineRegions = entry.getValue();
             String compactionServerZNode = ZKUtil.joinZNode(compactionZNode, serverName);
-            ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionServerZNode,
-              Bytes.toBytes(false));
+            ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionServerZNode,
+              Bytes.toBytes(false), CreateMode.PERSISTENT);
             for (String startKeyOfOnlineRegion : startKeysOfOnlineRegions) {
               String compactionStartKeyZNode = ZKUtil.joinZNode(compactionServerZNode,
                 startKeyOfOnlineRegion);
-              ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionStartKeyZNode,
-                null);
+              ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionStartKeyZNode,
+                null, CreateMode.PERSISTENT);
             }
           }
         } catch (KeeperException e) {
@@ -592,7 +594,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
   @Override
   public void initialize(MasterServices master, MetricsMaster metricsMaster)
     throws KeeperException, IOException, UnsupportedOperationException {
-    ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionBaseZNode, null);
+    ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionBaseZNode, null,
+      CreateMode.PERSISTENT);
     // get the configuration for the coordinator
     Configuration conf = master.getConfiguration();
     long wakeFrequency = conf.getInt(MOB_COMPACTION_WAKE_MILLIS_KEY,

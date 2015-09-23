@@ -747,14 +747,14 @@ public class TestMobCompactor {
   private void waitUntilMobCompactionFinished(TableName tableName) throws IOException,
     InterruptedException {
     long finished = EnvironmentEdgeManager.currentTime() + 60000;
+    Map<String, String> props = Collections.emptyMap();
     boolean state = admin.isProcedureFinished(
       MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE, tableName.getNameAsString(),
-      null);
+      props);
     while (EnvironmentEdgeManager.currentTime() < finished) {
       if (state) {
         break;
       }
-      Map<String, String> props = Collections.emptyMap();
       state = admin.isProcedureFinished(
         MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE, tableName.getNameAsString(),
         props);
