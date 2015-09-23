@@ -2718,4 +2718,12 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     return conf.get(HConstants.HBASE_MASTER_LOADBALANCER_CLASS, LoadBalancerFactory
         .getDefaultLoadBalancerClass().getName());
   }
+
+  /**
+   * Gets the instance of MasterMobCompactionManager.
+   * @return The instance of MasterMobCompactionManager.
+   */
+  public MasterMobCompactionManager getMasterMobCompactionManager() {
+    return this.mobCompactionManager;
+  }
 }

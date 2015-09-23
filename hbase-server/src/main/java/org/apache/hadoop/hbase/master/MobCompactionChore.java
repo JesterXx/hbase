@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
@@ -33,7 +32,6 @@ import org.apache.hadoop.hbase.ScheduledChore;
 import org.apache.hadoop.hbase.TableDescriptors;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.TableState;
-import org.apache.hadoop.hbase.mob.MobUtils;
 
 /**
  * The Class MobCompactChore for running compaction regularly to merge small mob files.
@@ -43,13 +41,11 @@ public class MobCompactionChore extends ScheduledChore {
 
   private static final Log LOG = LogFactory.getLog(MobCompactionChore.class);
   private HMaster master;
-  private ThreadPoolExecutor pool;
 
   public MobCompactionChore(HMaster master, int period) {
     // use the period as initial delay.
     super(master.getServerName() + "-MobCompactionChore", master, period, period, TimeUnit.SECONDS);
     this.master = master;
-    this.pool = MobUtils.createMobCompactorThreadPool(master.getConfiguration());
   }
 
   @Override
@@ -72,8 +68,7 @@ public class MobCompactionChore extends ScheduledChore {
               master.reportMobCompactionStart(htd.getTableName());
               reported = true;
             }
-            MasterMobCompactionManager compactionManager = new MasterMobCompactionManager(master,
-              pool);
+            MasterMobCompactionManager compactionManager = master.getMasterMobCompactionManager();
             List<HColumnDescriptor> columns = new ArrayList<HColumnDescriptor>(1);
             columns.add(hcd);
             Future<Void> future = compactionManager.requestMobCompaction(htd.getTableName(),
@@ -90,11 +85,5 @@ public class MobCompactionChore extends ScheduledChore {
     } catch (Exception e) {
       LOG.error("Failed to compact mob files", e);
     }
-  }
-
-  @Override
-  protected void cleanup() {
-    super.cleanup();
-    pool.shutdown();
   }
 }
