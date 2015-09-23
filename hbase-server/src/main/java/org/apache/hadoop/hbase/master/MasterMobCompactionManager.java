@@ -592,6 +592,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
   @Override
   public void initialize(MasterServices master, MetricsMaster metricsMaster)
     throws KeeperException, IOException, UnsupportedOperationException {
+    ZKUtil.createEphemeralNodeAndWatch(master.getZooKeeper(), compactionBaseZNode, null);
     // get the configuration for the coordinator
     Configuration conf = master.getConfiguration();
     long wakeFrequency = conf.getInt(MOB_COMPACTION_WAKE_MILLIS_KEY,
