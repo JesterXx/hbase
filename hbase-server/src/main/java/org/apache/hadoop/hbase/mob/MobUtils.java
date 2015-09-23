@@ -586,7 +586,7 @@ public class MobUtils {
       .withCreateTime(EnvironmentEdgeManager.currentTime()).build();
 
     InetSocketAddress[] favoredNodes = null;
-    if (rss != null) {
+    if (rss != null && regionEncodedName != null) {
       favoredNodes = rss.getFavoredNodesForRegion(regionEncodedName);
     }
     StoreFile.Writer w = new StoreFile.WriterBuilder(conf, cacheConfig, fs)
