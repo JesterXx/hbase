@@ -348,7 +348,7 @@ public class TestMobCompactor {
     resetConf();
     int mergeSize = 5000;
     // change the mob compaction merge size
-    conf.setLong(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
 
     int count = 4;
     // generate mob files
@@ -401,7 +401,7 @@ public class TestMobCompactor {
   public void testCompactionWithDelFilesAndWithSmallCompactionBatchSize() throws Exception {
     resetConf();
     int batchSize = 2;
-    conf.setInt(MobConstants.MOB_COMPACTION_BATCH_SIZE, batchSize);
+    setIntConf(MobConstants.MOB_COMPACTION_BATCH_SIZE, batchSize);
     int count = 4;
     // generate mob files
     loadData(admin, bufMut, tableName, count, rowNumPerFile);
@@ -1039,10 +1039,18 @@ public class TestMobCompactor {
    * Resets the configuration.
    */
   private void resetConf() {
-    conf.setLong(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD,
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD,
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD);
-    conf.setInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
+    setLongConf(MobConstants.MOB_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_COMPACTION_BATCH_SIZE);
+  }
+
+  private void setLongConf(String key, long value) {
+    TEST_UTIL.getMiniHBaseCluster().getConf().setLong(key, value);
+  }
+
+  private void setIntConf(String key, int value) {
+    TEST_UTIL.getMiniHBaseCluster().getConf().setInt(key, value);
   }
 
   private void compact(TableName tableName, HColumnDescriptor hcd) throws IOException,
