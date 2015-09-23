@@ -1048,10 +1048,10 @@ public class TestMobCompactor {
   private void compact(TableName tableName, HColumnDescriptor hcd) throws IOException,
     InterruptedException, ExecutionException {
     HMaster master = TEST_UTIL.getMiniHBaseCluster().getMaster();
-    MasterMobCompactionManager mobCompactorManager = new MasterMobCompactionManager(master, pool);
     List<HColumnDescriptor> columns = new ArrayList<HColumnDescriptor>(1);
     columns.add(hcd);
-    Future<Void> future = mobCompactorManager.requestMobCompaction(tableName, columns, false);
+    Future<Void> future = master.getMasterMobCompactionManager().requestMobCompaction(tableName,
+      columns, false);
     future.get();
   }
 }
