@@ -199,7 +199,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       this.name = name;
       executor = new ThreadPoolExecutor(1, threads, keepAlive, TimeUnit.MILLISECONDS,
         new LinkedBlockingQueue<Runnable>(), new DaemonThreadFactory("rs(" + name
-          + ")-flush-proc-pool"));
+          + ")-mobCompaction-proc-pool"));
       taskPool = new ExecutorCompletionService<Boolean>(executor);
     }
 
