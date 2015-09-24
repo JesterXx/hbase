@@ -1046,11 +1046,13 @@ public class TestMobCompactor {
   }
 
   private void setLongConf(String key, long value) {
-    TEST_UTIL.getMiniHBaseCluster().getConf().setLong(key, value);
+    TEST_UTIL.getMiniHBaseCluster().getMaster().getConfiguration().setLong(key, value);
+    TEST_UTIL.getMiniHBaseCluster().getRegionServer(0).getConfiguration().setLong(key, value);
   }
 
   private void setIntConf(String key, int value) {
-    TEST_UTIL.getMiniHBaseCluster().getConf().setInt(key, value);
+    TEST_UTIL.getMiniHBaseCluster().getMaster().getConfiguration().setInt(key, value);
+    TEST_UTIL.getMiniHBaseCluster().getRegionServer(0).getConfiguration().setInt(key, value);
   }
 
   private void compact(TableName tableName, HColumnDescriptor hcd) throws IOException,
