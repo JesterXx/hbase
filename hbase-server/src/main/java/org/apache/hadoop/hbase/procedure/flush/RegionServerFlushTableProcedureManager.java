@@ -215,6 +215,7 @@ public class RegionServerFlushTableProcedureManager extends RegionServerProcedur
       executor = new ThreadPoolExecutor(threads, threads, keepAlive, TimeUnit.MILLISECONDS,
           new LinkedBlockingQueue<Runnable>(), new DaemonThreadFactory("rs("
               + name + ")-flush-proc-pool"));
+      executor.allowCoreThreadTimeOut(true);
       taskPool = new ExecutorCompletionService<Void>(executor);
     }
 

@@ -285,6 +285,7 @@ public class RegionServerSnapshotManager extends RegionServerProcedureManager {
       executor = new ThreadPoolExecutor(threads, threads, keepAlive, TimeUnit.MILLISECONDS,
           new LinkedBlockingQueue<Runnable>(), new DaemonThreadFactory("rs("
               + name + ")-snapshot-pool"));
+      executor.allowCoreThreadTimeOut(true);
       taskPool = new ExecutorCompletionService<Void>(executor);
     }
 
