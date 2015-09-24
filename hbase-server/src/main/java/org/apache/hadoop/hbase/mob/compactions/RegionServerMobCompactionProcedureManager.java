@@ -197,7 +197,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       int threads = conf.getInt(CONCURENT_MOB_COMPACTION_TASKS_KEY,
         DEFAULT_CONCURRENT_MOB_COMPACTION_TASKS);
       this.name = name;
-      executor = new ThreadPoolExecutor(1, threads, keepAlive, TimeUnit.MILLISECONDS,
+      executor = new ThreadPoolExecutor(threads, threads, keepAlive, TimeUnit.MILLISECONDS,
         new LinkedBlockingQueue<Runnable>(), new DaemonThreadFactory("rs(" + name
           + ")-mobCompaction-proc-pool"));
       taskPool = new ExecutorCompletionService<Boolean>(executor);
