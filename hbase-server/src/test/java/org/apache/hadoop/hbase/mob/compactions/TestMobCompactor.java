@@ -534,6 +534,8 @@ public class TestMobCompactor {
 
   @Test
   public void testCompactionFromAdmin() throws Exception {
+    resetConf();
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, 5000);
     int count = 4;
     // generate mob files
     loadData(admin, bufMut, tableName, count, rowNumPerFile);
@@ -589,6 +591,8 @@ public class TestMobCompactor {
 
   @Test
   public void testMajorCompactionFromAdmin() throws Exception {
+    resetConf();
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, 5000);
     int count = 4;
     // generate mob files
     loadData(admin, bufMut, tableName, count, rowNumPerFile);
@@ -641,6 +645,7 @@ public class TestMobCompactor {
 
   @Test
   public void testScannerOnBulkLoadRefHFiles() throws Exception {
+    resetConf();
     long ts = EnvironmentEdgeManager.currentTime();
     byte[] key0 = Bytes.toBytes("k0");
     byte[] key1 = Bytes.toBytes("k1");
@@ -698,6 +703,7 @@ public class TestMobCompactor {
 
   @Test
   public void testScannerAfterCompactions() throws Exception {
+    resetConf();
     long ts = EnvironmentEdgeManager.currentTime();
     byte[] key0 = Bytes.toBytes("k0");
     byte[] key1 = Bytes.toBytes("k1");
