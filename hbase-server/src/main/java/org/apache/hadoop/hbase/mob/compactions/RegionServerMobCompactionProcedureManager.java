@@ -200,6 +200,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       executor = new ThreadPoolExecutor(threads, threads, keepAlive, TimeUnit.MILLISECONDS,
         new LinkedBlockingQueue<Runnable>(), new DaemonThreadFactory("rs(" + name
           + ")-mobCompaction-proc-pool"));
+      executor.allowCoreThreadTimeOut(true);
       taskPool = new ExecutorCompletionService<Boolean>(executor);
     }
 
