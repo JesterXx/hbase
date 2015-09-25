@@ -232,8 +232,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           try {
             lock.release();
           } catch (IOException e) {
-            LOG.error(
-              "Failed to release the write lock for the table " + tableName.getNameAsString(), e);
+            LOG.error("Failed to release the write lock of mob compaction for the table "
+              + tableName.getNameAsString(), e);
           }
         }
         // remove this compaction from memory.
