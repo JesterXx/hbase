@@ -68,11 +68,9 @@ public class MobCompactionChore extends ScheduledChore {
               master.reportMobCompactionStart(htd.getTableName());
               reported = true;
             }
-            MasterMobCompactionManager compactionManager = master.getMasterMobCompactionManager();
             List<HColumnDescriptor> columns = new ArrayList<HColumnDescriptor>(1);
             columns.add(hcd);
-            Future<Void> future = compactionManager.requestMobCompaction(htd.getTableName(),
-              columns, false);
+            Future<Void> future = master.requestMobCompaction(htd.getTableName(), columns, false);
             // wait for the end of the mob compaction
             future.get();
           }

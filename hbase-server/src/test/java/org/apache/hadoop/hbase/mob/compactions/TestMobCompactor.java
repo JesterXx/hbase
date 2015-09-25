@@ -26,9 +26,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -70,7 +68,6 @@ import org.apache.hadoop.hbase.io.crypto.aes.AES;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.master.HMaster;
-import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoResponse.CompactionState;
@@ -1040,8 +1037,7 @@ public class TestMobCompactor {
     HMaster master = TEST_UTIL.getMiniHBaseCluster().getMaster();
     List<HColumnDescriptor> columns = new ArrayList<HColumnDescriptor>(1);
     columns.add(hcd);
-    Future<Void> future = master.getMasterMobCompactionManager().requestMobCompaction(tableName,
-      columns, false);
+    Future<Void> future = master.requestMobCompaction(tableName, columns, false);
     future.get();
   }
 }

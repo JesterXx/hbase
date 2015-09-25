@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -2697,10 +2698,11 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
    * @param tableName The table the compact.
    * @param columns The compacted columns.
    * @param allFiles Whether add all mob files into the compaction.
+   * @return The result of a mob compaction.
    */
-  public void requestMobCompaction(TableName tableName, List<HColumnDescriptor> columns,
+  public Future<Void> requestMobCompaction(TableName tableName, List<HColumnDescriptor> columns,
     boolean allFiles) throws IOException {
-    mobCompactionManager.requestMobCompaction(tableName, columns, allFiles);
+    return mobCompactionManager.requestMobCompaction(tableName, columns, allFiles);
   }
 
   /**
@@ -2722,13 +2724,5 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   public String getLoadBalancerClassName() {
     return conf.get(HConstants.HBASE_MASTER_LOADBALANCER_CLASS, LoadBalancerFactory
         .getDefaultLoadBalancerClass().getName());
-  }
-
-  /**
-   * Gets the instance of MasterMobCompactionManager.
-   * @return The instance of MasterMobCompactionManager.
-   */
-  public MasterMobCompactionManager getMasterMobCompactionManager() {
-    return this.mobCompactionManager;
   }
 }
