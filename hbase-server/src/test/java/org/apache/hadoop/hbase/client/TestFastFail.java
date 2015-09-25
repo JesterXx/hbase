@@ -51,6 +51,7 @@ import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.Ignore;
 import org.junit.experimental.categories.Category;
 
 @Category({MediumTests.class, ClientTests.class})
@@ -95,7 +96,7 @@ public class TestFastFail {
     // Nothing to do.
   }
 
-  @Test
+  @Ignore ("Can go zombie -- see HBASE-14421; FIX") @Test
   public void testFastFail() throws IOException, InterruptedException {
     Admin admin = TEST_UTIL.getHBaseAdmin();
 

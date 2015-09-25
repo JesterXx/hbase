@@ -67,7 +67,7 @@ class DisabledWALProvider implements WALProvider {
   }
 
   @Override
-  public WAL getWAL(final byte[] identifier) throws IOException {
+  public WAL getWAL(final byte[] identifier, byte[] namespace) throws IOException {
     return disabled;
   }
 
@@ -156,7 +156,7 @@ class DisabledWALProvider implements WALProvider {
 
     @Override
     public long append(HTableDescriptor htd, HRegionInfo info, WALKey key, WALEdit edits,
-        AtomicLong sequenceId, boolean inMemstore, List<Cell> memstoreKVs) {
+                       boolean inMemstore) {
       if (!this.listeners.isEmpty()) {
         final long start = System.nanoTime();
         long len = 0;

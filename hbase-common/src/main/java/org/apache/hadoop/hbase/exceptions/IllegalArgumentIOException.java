@@ -15,20 +15,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.wal;
 
+package org.apache.hadoop.hbase.exceptions;
 
-import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.testclassification.LargeTests;
-import org.apache.hadoop.hbase.testclassification.RegionServerTests;
-import org.junit.experimental.categories.Category;
+import java.io.IOException;
 
-import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 
-@Category({RegionServerTests.class, LargeTests.class})
-public class TestDefaultWALProviderWithHLogKey extends TestDefaultWALProvider {
-  @Override
-  WALKey getWalKey(final byte[] info, final TableName tableName, final long timestamp) {
-    return new HLogKey(info, tableName, timestamp, mvcc);
+/**
+ * Exception thrown when an illegal argument is passed to a function/procedure.
+ */
+@SuppressWarnings("serial")
+@InterfaceAudience.Private
+public class IllegalArgumentIOException extends IOException {
+  public IllegalArgumentIOException() {
+    super();
+  }
+
+  public IllegalArgumentIOException(final String message) {
+    super(message);
+  }
+
+  public IllegalArgumentIOException(final String message, final Throwable t) {
+    super(message, t);
+  }
+
+  public IllegalArgumentIOException(final Throwable t) {
+    super(t);
   }
 }
