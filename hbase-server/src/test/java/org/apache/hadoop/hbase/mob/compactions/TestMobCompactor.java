@@ -567,11 +567,7 @@ public class TestMobCompactor {
 
     int largeFilesCount = countLargeFiles(5000, family1);
     // do the mob compaction
-    Map<String, String> props = new HashMap<String, String>();
-    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
-      hcd1.getNameAsString());
-    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
-      tableName.getNameAsString(), props);
+    admin.compactMob(tableName, hcd1.getName());
 
     waitUntilMobCompactionFinished(tableName);
     assertEquals("After compaction: mob rows count", regionNum * (rowNumPerRegion - delRowNum),
@@ -621,12 +617,7 @@ public class TestMobCompactor {
         countFiles(tableName, false, family2));
 
     // do the major mob compaction, it will force all files to compaction
-    Map<String, String> props = new HashMap<String, String>();
-    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
-      hcd1.getNameAsString());
-    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY, "true");
-    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
-      tableName.getNameAsString(), props);
+    admin.majorCompactMob(tableName, hcd1.getName());
 
     waitUntilMobCompactionFinished(tableName);
     assertEquals("After compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
@@ -666,12 +657,7 @@ public class TestMobCompactor {
     Cell cell = result.getColumnLatestCell(hcd1.getName(), Bytes.toBytes(qf1));
     assertEquals("Before compaction: mob value of k0", newValue0,
       Bytes.toString(CellUtil.cloneValue(cell)));
-    Map<String, String> props = new HashMap<String, String>();
-    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
-      hcd1.getNameAsString());
-    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY, "true");
-    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
-      tableName.getNameAsString(), props);
+    admin.majorCompactMob(tableName, hcd1.getName());
     waitUntilMobCompactionFinished(tableName);
     // read the latest cell of key0, the cell seqId in bulk loaded file is not reset in the
     // scanner. The cell that has "new" value is still visible.
@@ -720,12 +706,7 @@ public class TestMobCompactor {
     loadData(admin, bufMut, tableName, new Put[] { put1 }); // now two mob files
     admin.majorCompact(tableName);
     waitUntilCompactionFinished(tableName);
-    Map<String, String> props = new HashMap<String, String>();
-    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_COLUMN_KEY,
-      hcd1.getNameAsString());
-    props.put(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY, "true");
-    admin.execProcedure(MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE,
-      tableName.getNameAsString(), props);
+    admin.majorCompactMob(tableName, hcd1.getName());
     waitUntilMobCompactionFinished(tableName);
     // read the latest cell of key1.
     Get get = new Get(key1);
@@ -751,20 +732,15 @@ public class TestMobCompactor {
   private void waitUntilMobCompactionFinished(TableName tableName) throws IOException,
     InterruptedException {
     long finished = EnvironmentEdgeManager.currentTime() + 60000;
-    Map<String, String> props = Collections.emptyMap();
-    boolean state = admin.isProcedureFinished(
-      MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE, tableName.getNameAsString(),
-      props);
+    CompactionState state = admin.getMobCompactionState(tableName);
     while (EnvironmentEdgeManager.currentTime() < finished) {
-      if (state) {
+      if (state == CompactionState.NONE) {
         break;
       }
-      state = admin.isProcedureFinished(
-        MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE, tableName.getNameAsString(),
-        props);
+      state = admin.getMobCompactionState(tableName);
       Thread.sleep(10);
     }
-    assertEquals(true, state);
+    assertEquals(CompactionState.NONE, state);
   }
 
   /**
