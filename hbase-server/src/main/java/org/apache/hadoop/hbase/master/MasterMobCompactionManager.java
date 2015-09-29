@@ -87,7 +87,7 @@ import org.apache.zookeeper.KeeperException;
 import com.google.common.collect.Lists;
 
 /**
- * The mob compaction thread used in {@link HMaster}
+ * The mob compaction manager used in {@link HMaster}
  */
 public class MasterMobCompactionManager extends MasterProcedureManager implements Stoppable {
 
@@ -119,6 +119,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
   private static final String MOB_COMPACTION_PROC_POOL_THREADS_KEY =
     "hbase.mob.compaction.procedure.master.threads";
   private static final int MOB_COMPACTION_PROC_POOL_THREADS_DEFAULT = 2;
+  private boolean closePoolOnStop = true;
 
   private ProcedureCoordinator coordinator;
   private Map<TableName, Future<Void>> compactions = new HashMap<TableName, Future<Void>>();
@@ -146,6 +147,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
     // this pool is used to run the mob compaction
     if (mobCompactionPool != null) {
       this.mobCompactionPool = mobCompactionPool;
+      closePoolOnStop = false;
     } else {
       int threads = conf.getInt(MOB_COMPACTION_PROC_POOL_THREADS_KEY,
         MOB_COMPACTION_PROC_POOL_THREADS_DEFAULT);
@@ -268,7 +270,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           EnvironmentEdgeManager.currentTime(), cryptoContext, mobTableDir, mobFamilyDir);
         // dispatch mob compaction request to region servers.
         boolean isAllFiles = dispatchMobCompaction(tableName, column, allFiles);
-        // delete the del files if it is a major compaction
+        // archive the del files if it is a major compaction
         if (isAllFiles && !delFilePaths.isEmpty()) {
           LOG.info("After a mob compaction with all files selected, archiving the del files "
             + delFilePaths);
@@ -300,7 +302,9 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
      */
     private boolean dispatchMobCompaction(TableName tableName, HColumnDescriptor column,
       boolean allFiles) throws IOException {
-      // use procedure to dispatch the compaction to region servers.
+      // Only all the regions are online when the procedure runs in region
+      // servers, the compaction is considered as a major one.
+      // Use procedure to dispatch the compaction to region servers.
       // Find all the online regions
       boolean allRegionsOnline = true;
       List<Pair<HRegionInfo, ServerName>> regionsAndLocations = MetaTableAccessor
@@ -326,7 +330,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       }
       boolean success = false;
       if (allRegionsOnline && !regionServers.isEmpty()) {
-        // add the map to zookeeper
+        // add the map to zookeeper to record the online regions in region servers
         String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
         try {
           // clean the node if it exists
@@ -370,13 +374,14 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         proc.waitForCompleted();
         LOG.info("Done waiting - mob compaction for " + tableName.getNameAsString());
         if (allRegionsOnline && !regionServers.isEmpty()) {
-          // check if all the mob compactions is all files
+          // check if all the files are selected in compaction of all region servers.
           String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode,
             tableName.getNameAsString());
           try {
             for (Entry<String, List<String>> entry : regionServers.entrySet()) {
               String serverName = entry.getKey();
               String compactionServerZNode = ZKUtil.joinZNode(compactionZNode, serverName);
+              // if the result is 1, it means all files are selected in that region server.
               byte[] result = ZKUtil.getData(master.getZooKeeper(), compactionServerZNode);
               success = result != null && result.length == 1 && result[0] == 1;
             }
@@ -393,7 +398,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       } catch (ForeignException e) {
         monitor.receive(e);
       }
-      // return if all the compactions are finished successfully
+      // return true if all the compactions are finished successfully and all files are selected
+      // in all region servers.
       return allRegionsOnline && success;
     }
 
@@ -404,7 +410,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
      * @throws IOException
      */
     private List<Path> selectDelFiles(Path mobFamilyDir) throws IOException {
-      // since all the del files are used in mob compaction, they have to be merged in one time
+      // since all the del files are used in mob compaction, they have to be merged one time
       // together.
       List<Path> allDelFiles = new ArrayList<Path>();
       for (FileStatus file : fs.listStatus(mobFamilyDir)) {
@@ -583,6 +589,11 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       }
     } catch (IOException e) {
       LOG.error("stop ProcedureCoordinator error", e);
+    }
+    if (closePoolOnStop) {
+      if (this.mobCompactionPool != null) {
+        mobCompactionPool.shutdown();
+      }
     }
   }
 
