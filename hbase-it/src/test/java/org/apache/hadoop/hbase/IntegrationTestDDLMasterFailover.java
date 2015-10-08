@@ -58,12 +58,18 @@ import org.junit.experimental.categories.Category;
  *     <li>DeleteTableAction</li>
  *     <li>AddRowAction</li>
  * </ul>
- * Actions performing DDL operations:
+ * Actions performing column family DDL operations:
  * <ul>
  *     <li>AddColumnFamilyAction</li>
  *     <li>AlterColumnFamilyVersionsAction</li>
  *     <li>AlterColumnFamilyEncodingAction</li>
  *     <li>DeleteColumnFamilyAction</li>
+ * </ul>
+ * Actions performing namespace DDL operations:
+ * <ul>
+ *     <li>AddNamespaceAction</li>
+ *     <li>AlterNamespaceAction</li>
+ *     <li>DeleteNamespaceAction</li>
  * </ul>
  * <br/>
  *
@@ -97,6 +103,7 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
 
   protected static final int DEFAULT_NUM_REGIONS = 50; // number of regions in pre-split tables
 
+  private boolean keepTableAtTheEnd = false;
   protected HBaseCluster cluster;
 
   protected Connection connection;
@@ -113,6 +120,9 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
   protected AtomicBoolean create_table = new AtomicBoolean(true);
 
   protected int numThreads, numRegions;
+
+  ConcurrentHashMap<String, NamespaceDescriptor> namespaceMap =
+      new ConcurrentHashMap<String, NamespaceDescriptor>();
 
   ConcurrentHashMap<TableName, HTableDescriptor> enabledTables =
       new ConcurrentHashMap<TableName, HTableDescriptor>();
@@ -134,9 +144,16 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
 
   @Override
   public void cleanUpCluster() throws Exception {
-    Admin admin = util.getHBaseAdmin();
-    admin.disableTables("ittable-\\d+");
-    admin.deleteTables("ittable-\\d+");
+    if (!keepTableAtTheEnd) {
+      Admin admin = util.getHBaseAdmin();
+      admin.disableTables("ittable-\\d+");
+      admin.deleteTables("ittable-\\d+");
+    }
+    enabledTables.clear();
+    disabledTables.clear();
+    deletedTables.clear();
+    namespaceMap.clear();
+
     Connection connection = getConnection();
     connection.close();
     super.cleanUpCluster();
@@ -160,6 +177,23 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
       }
     }
     return connection;
+  }
+
+  protected void verifyNamespaces() throws  IOException{
+    Connection connection = getConnection();
+    Admin admin = connection.getAdmin();
+    // iterating concurrent map
+    for (String nsName : namespaceMap.keySet()){
+      try {
+        Assert.assertTrue(
+          "Namespace: " + nsName + " in namespaceMap does not exist",
+          admin.getNamespaceDescriptor(nsName) != null);
+      } catch (NamespaceNotFoundException nsnfe) {
+        Assert.fail(
+          "Namespace: " + nsName + " in namespaceMap does not exist: " + nsnfe.getMessage());
+      }
+    }
+    admin.close();
   }
 
   protected void verifyTables() throws  IOException{
@@ -196,6 +230,148 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
     Connection connection = getConnection();
 
     abstract void perform() throws IOException;
+  }
+
+  private abstract class NamespaceAction extends MasterAction {
+    final String nsTestConfigKey = "hbase.namespace.testKey";
+
+    // NamespaceAction has implemented selectNamespace() shared by multiple namespace Actions
+    protected NamespaceDescriptor selectNamespace(
+        ConcurrentHashMap<String, NamespaceDescriptor> namespaceMap) {
+      // randomly select namespace from namespaceMap
+      if (namespaceMap.isEmpty()) {
+        return null;
+      }
+      // synchronization to prevent removal from multiple threads
+      synchronized (namespaceMap) {
+        ArrayList<String> namespaceList = new ArrayList<String>(namespaceMap.keySet());
+        String randomKey = namespaceList.get(RandomUtils.nextInt(namespaceList.size()));
+        NamespaceDescriptor randomNsd = namespaceMap.get(randomKey);
+        // remove from namespaceMap
+        namespaceMap.remove(randomKey);
+        return randomNsd;
+      }
+    }
+  }
+
+  private class CreateNamespaceAction extends NamespaceAction {
+    @Override
+    void perform() throws IOException {
+      Admin admin = connection.getAdmin();
+      try {
+        NamespaceDescriptor nsd;
+        while (true) {
+          nsd = createNamespaceDesc();
+          try {
+            if (admin.getNamespaceDescriptor(nsd.getName()) != null) {
+              // the namespace has already existed.
+              continue;
+            } else {
+              // currently, the code never return null - always throws exception if
+              // namespace is not found - this just a defensive programming to make
+              // sure null situation is handled in case the method changes in the
+              // future.
+              break;
+            }
+          } catch (NamespaceNotFoundException nsnfe) {
+            // This is expected for a random generated NamespaceDescriptor
+            break;
+          }
+        }
+        LOG.info("Creating namespace:" + nsd);
+        admin.createNamespace(nsd);
+        NamespaceDescriptor freshNamespaceDesc = admin.getNamespaceDescriptor(nsd.getName());
+        Assert.assertTrue("Namespace: " + nsd + " was not created", freshNamespaceDesc != null);
+        LOG.info("Created namespace:" + freshNamespaceDesc);
+        namespaceMap.put(nsd.getName(), freshNamespaceDesc);
+      } catch (Exception e){
+        LOG.warn("Caught exception in action: " + this.getClass());
+        throw e;
+      } finally {
+        admin.close();
+      }
+      verifyNamespaces();
+    }
+
+    private NamespaceDescriptor createNamespaceDesc() {
+      String namespaceName = "itnamespace" + String.format("%010d",
+        RandomUtils.nextInt(Integer.MAX_VALUE));
+      NamespaceDescriptor nsd = NamespaceDescriptor.create(namespaceName).build();
+
+      nsd.setConfiguration(
+        nsTestConfigKey,
+        String.format("%010d", RandomUtils.nextInt(Integer.MAX_VALUE)));
+      return nsd;
+    }
+  }
+
+  private class ModifyNamespaceAction extends NamespaceAction {
+    @Override
+    void perform() throws IOException {
+      NamespaceDescriptor selected = selectNamespace(namespaceMap);
+      if (selected == null) {
+        return;
+      }
+
+      Admin admin = connection.getAdmin();
+      try {
+        String namespaceName = selected.getName();
+        LOG.info("Modifying namespace :" + selected);
+        NamespaceDescriptor modifiedNsd = NamespaceDescriptor.create(namespaceName).build();
+        String nsValueNew;
+        do {
+          nsValueNew = String.format("%010d", RandomUtils.nextInt(Integer.MAX_VALUE));
+        } while (selected.getConfigurationValue(nsTestConfigKey).equals(nsValueNew));
+        modifiedNsd.setConfiguration(nsTestConfigKey, nsValueNew);
+        admin.modifyNamespace(modifiedNsd);
+        NamespaceDescriptor freshNamespaceDesc = admin.getNamespaceDescriptor(namespaceName);
+        Assert.assertTrue(
+          "Namespace: " + selected + " was not modified",
+          freshNamespaceDesc.getConfigurationValue(nsTestConfigKey).equals(nsValueNew));
+        LOG.info("Modified namespace :" + freshNamespaceDesc);
+        namespaceMap.put(namespaceName, freshNamespaceDesc);
+      } catch (Exception e){
+        LOG.warn("Caught exception in action: " + this.getClass());
+        throw e;
+      } finally {
+        admin.close();
+      }
+      verifyNamespaces();
+    }
+  }
+
+  private class DeleteNamespaceAction extends NamespaceAction {
+    @Override
+    void perform() throws IOException {
+      NamespaceDescriptor selected = selectNamespace(namespaceMap);
+      if (selected == null) {
+        return;
+      }
+
+      Admin admin = connection.getAdmin();
+      try {
+        String namespaceName = selected.getName();
+        LOG.info("Deleting namespace :" + selected);
+        admin.deleteNamespace(namespaceName);
+        try {
+          if (admin.getNamespaceDescriptor(namespaceName) != null) {
+            // the namespace still exists.
+            Assert.assertTrue("Namespace: " + selected + " was not deleted", false);
+          } else {
+            LOG.info("Deleted namespace :" + selected);
+          }
+        } catch (NamespaceNotFoundException nsnfe) {
+          // This is expected result
+          LOG.info("Deleted namespace :" + selected);
+        }
+      } catch (Exception e){
+        LOG.warn("Caught exception in action: " + this.getClass());
+        throw e;
+      } finally {
+        admin.close();
+      }
+      verifyNamespaces();
+    }
   }
 
   private abstract class TableAction extends  MasterAction{
@@ -239,16 +415,9 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
         HTableDescriptor freshTableDesc = admin.getTableDescriptor(tableName);
         enabledTables.put(tableName, freshTableDesc);
         LOG.info("Created table:" + freshTableDesc);
-      } catch (Exception e){
+      } catch (Exception e) {
         LOG.warn("Caught exception in action: " + this.getClass());
-        // TODO workaround
-        // when master failover happens during CREATE_TABLE, client will do RPC retry and get TableExistsException
-        // ignore for now till better resolution
-        if (e instanceof TableExistsException) {
-          LOG.warn("Caught TableExistsException in action: " + this.getClass(), e);
-        } else {
-          throw e;
-        }
+        throw e;
       } finally {
         admin.close();
       }
@@ -379,17 +548,9 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
                 admin.tableExists(tableName));
         deletedTables.put(tableName, selected);
         LOG.info("Deleted table :" + selected);
-      } catch (Exception e){
+      } catch (Exception e) {
         LOG.warn("Caught exception in action: " + this.getClass());
-        // TODO workaround
-        // when master failover happens during DELETE_TABLE, client will do RPC retry and get
-        // TableNotFoundException ignore for now till better resolution
-        if (e instanceof TableNotFoundException) {
-          LOG.warn("Caught TableNotFoundException in action: " + this.getClass());
-          e.printStackTrace();
-        } else {
-          throw e;
-        }
+        throw e;
       } finally {
         admin.close();
       }
@@ -440,19 +601,9 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
             freshTableDesc.hasFamily(cfd.getName()));
         LOG.info("Added column family: " + cfd + " to table: " + tableName);
         disabledTables.put(tableName, freshTableDesc);
-      } catch (Exception e){
+      } catch (Exception e) {
         LOG.warn("Caught exception in action: " + this.getClass());
-        // TODO HBASE-13415
-        // loose restriction for InvalidFamilyOperationException thrown in async operations before
-        // HBASE-13415 completes when failover happens, multiple procids may be created from the
-        // same request when 1 procedure succeeds, the others would complain about family already
-        // exists
-        if (e instanceof InvalidFamilyOperationException) {
-          LOG.warn("Caught InvalidFamilyOperationException in action: " + this.getClass());
-          e.printStackTrace();
-        } else {
-          throw e;
-        }
+        throw e;
       } finally {
         admin.close();
       }
@@ -576,17 +727,7 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
         disabledTables.put(tableName, freshTableDesc);
       } catch (Exception e) {
         LOG.warn("Caught exception in action: " + this.getClass());
-        // TODO HBASE-13415
-        // loose restriction for InvalidFamilyOperationException thrown in async operations before
-        // HBASE-13415 completes when failover happens, multiple procids may be created from the
-        //  same request when 1 procedure succeeds, the others would complain about family not
-        // exists
-        if (e instanceof InvalidFamilyOperationException) {
-          LOG.warn("Caught InvalidFamilyOperationException in action: " + this.getClass());
-          e.printStackTrace();
-        } else {
-          throw e;
-        }
+        throw e;
       } finally {
         admin.close();
       }
@@ -642,6 +783,9 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
   }
 
   private enum ACTION {
+    CREATE_NAMESPACE,
+    MODIFY_NAMESPACE,
+    DELETE_NAMESPACE,
     CREATE_TABLE,
     DISABLE_TABLE,
     ENABLE_TABLE,
@@ -669,6 +813,15 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
 
         try {
           switch (selectedAction) {
+          case CREATE_NAMESPACE:
+            new CreateNamespaceAction().perform();
+            break;
+          case MODIFY_NAMESPACE:
+            new ModifyNamespaceAction().perform();
+            break;
+          case DELETE_NAMESPACE:
+            new DeleteNamespaceAction().perform();
+            break;
           case CREATE_TABLE:
             // stop creating new tables in the later stage of the test to avoid too many empty
             // tables
@@ -773,6 +926,8 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
     // verify
     LOG.info("Verify actions of all threads succeeded");
     checkException(workers);
+    LOG.info("Verify namespaces");
+    verifyNamespaces();
     LOG.info("Verify states of all tables");
     verifyTables();
 
@@ -782,6 +937,11 @@ public class IntegrationTestDDLMasterFailover extends IntegrationTestBase {
     try {
       LOG.info("Running hbck");
       hbck = HbckTestingUtil.doFsck(util.getConfiguration(), false);
+      if (HbckTestingUtil.inconsistencyFound(hbck)) {
+        // Find the inconsistency during HBCK. Leave table undropped so that
+        // we can check outside the test.
+        keepTableAtTheEnd = true;
+      }
       HbckTestingUtil.assertNoErrors(hbck);
       LOG.info("Finished hbck");
     } finally {

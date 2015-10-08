@@ -19,22 +19,31 @@
 
 module Shell
   module Commands
-    class CompactMob < Command
+    class AbortProcedure < Command
       def help
         return <<-EOF
-          Run compaction on a mob enabled column family
-          or all mob enabled column families within a table
-          Examples:
-          Compact a column family within a table:
-          hbase> compact_mob 't1', 'c1'
-          Compact all mob enabled column families
-          hbase> compact_mob 't1'
-        EOF
+Given a procedure Id (and optional boolean may_interrupt_if_running parameter,
+default is true), abort a procedure in hbase. Use with caution. Some procedures
+might not be abortable. For experts only.
+
+If this command is accepted and the procedure is in the process of aborting,
+it will return true; if the procedure could not be aborted (eg. procedure
+does not exist, or procedure already completed or abort will cause corruption),
+this command will return false.
+
+Examples:
+
+  hbase> abort_procedure proc_id
+  hbase> abort_procedure proc_id, true
+  hbase> abort_procedure proc_id, false
+EOF
       end
 
-      def command(table_name, family = nil)
+      def command(proc_id, may_interrupt_if_running=nil)
         format_simple_command do
-          admin.compact_mob(table_name, family)
+          formatter.row([
+            admin.abort_procedure?(proc_id, may_interrupt_if_running).to_s
+          ])
         end
       end
     end

@@ -314,6 +314,9 @@ Shell.load_command_group(
     balancer
     balance_switch
     balancer_enabled
+    normalize
+    normalizer_switch
+    normalizer_enabled
     close_region
     compact
     flush
@@ -329,8 +332,6 @@ Shell.load_command_group(
     catalogjanitor_enabled
     compact_rs
     trace
-    compact_mob
-    major_compact_mob
   ],
   # TODO remove older hlog_roll command
   :aliases => {
@@ -407,6 +408,7 @@ Shell.load_command_group(
   'procedures',
   :full_name => 'PROCEDURES MANAGEMENT',
   :commands => %w[
+    abort_procedure
     list_procedures
   ]
 )

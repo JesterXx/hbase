@@ -23,9 +23,13 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import com.google.common.base.Objects;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
+
 
 /**
  * Manages the read/write consistency. This provides an interface for readers to determine what
@@ -34,13 +38,15 @@ import org.apache.hadoop.hbase.util.ClassSize;
  */
 @InterfaceAudience.Private
 public class MultiVersionConcurrencyControl {
+  private static final Log LOG = LogFactory.getLog(MultiVersionConcurrencyControl.class);
+
   final AtomicLong readPoint = new AtomicLong(0);
   final AtomicLong writePoint = new AtomicLong(0);
   private final Object readWaiters = new Object();
   /**
    * Represents no value, or not set.
    */
-  private static final long NONE = -1;
+  public static final long NONE = -1;
 
   // This is the pending queue of writes.
   //
@@ -201,10 +207,15 @@ public class MultiVersionConcurrencyControl {
    */
   void waitForRead(WriteEntry e) {
     boolean interrupted = false;
+    int count = 0;
     synchronized (readWaiters) {
       while (readPoint.get() < e.getWriteNumber()) {
+        if (count % 100 == 0 && count > 0) {
+          LOG.warn("STUCK: " + this);
+        }
+        count++;
         try {
-          readWaiters.wait(0);
+          readWaiters.wait(10);
         } catch (InterruptedException ie) {
           // We were interrupted... finish the loop -- i.e. cleanup --and then
           // on our way out, reset the interrupt flag.
@@ -215,6 +226,13 @@ public class MultiVersionConcurrencyControl {
     if (interrupted) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  @VisibleForTesting
+  public String toString() {
+    return Objects.toStringHelper(this)
+        .add("readPoint", readPoint)
+        .add("writePoint", writePoint).toString();
   }
 
   public long getReadPoint() {
@@ -249,6 +267,11 @@ public class MultiVersionConcurrencyControl {
 
     public long getWriteNumber() {
       return this.writeNumber;
+    }
+
+    @Override
+    public String toString() {
+      return this.writeNumber + ", " + this.completed;
     }
   }
 

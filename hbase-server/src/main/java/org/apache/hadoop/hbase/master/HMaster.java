@@ -148,6 +148,7 @@ import org.apache.hadoop.hbase.zookeeper.DrainingServerTracker;
 import org.apache.hadoop.hbase.zookeeper.LoadBalancerTracker;
 import org.apache.hadoop.hbase.zookeeper.MasterAddressTracker;
 import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
+import org.apache.hadoop.hbase.zookeeper.RegionNormalizerTracker;
 import org.apache.hadoop.hbase.zookeeper.RegionServerTracker;
 import org.apache.hadoop.hbase.zookeeper.ZKClusterId;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
@@ -247,6 +248,9 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   // Tracker for load balancer state
   LoadBalancerTracker loadBalancerTracker;
 
+  // Tracker for region normalizer state
+  private RegionNormalizerTracker regionNormalizerTracker;
+
   /** Namespace stuff */
   private TableNamespaceManager tableNamespaceManager;
 
@@ -281,8 +285,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   private volatile boolean serverCrashProcessingEnabled = false;
 
   LoadBalancer balancer;
-  RegionNormalizer normalizer;
-  private boolean normalizerEnabled = false;
+  private RegionNormalizer normalizer;
   private BalancerChore balancerChore;
   private RegionNormalizerChore normalizerChore;
   private ClusterStatusChore clusterStatusChore;
@@ -572,9 +575,10 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     this.balancer = LoadBalancerFactory.getLoadBalancer(conf);
     this.normalizer = RegionNormalizerFactory.getRegionNormalizer(conf);
     this.normalizer.setMasterServices(this);
-    this.normalizerEnabled = conf.getBoolean(HConstants.HBASE_NORMALIZER_ENABLED, false);
     this.loadBalancerTracker = new LoadBalancerTracker(zooKeeper, this);
     this.loadBalancerTracker.start();
+    this.regionNormalizerTracker = new RegionNormalizerTracker(zooKeeper, this);
+    this.regionNormalizerTracker.start();
     this.assignmentManager = new AssignmentManager(this, serverManager,
       this.balancer, this.service, this.metricsMaster,
       this.tableLockManager, tableStateManager);
@@ -1330,7 +1334,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
       return false;
     }
 
-    if (!this.normalizerEnabled) {
+    if (!this.regionNormalizerTracker.isNormalizerOn()) {
       LOG.debug("Region normalization is disabled, don't run region normalizer.");
       return false;
     }
@@ -2121,7 +2125,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
           getLoadedCoprocessors());
     }
     if (t != null) LOG.fatal(msg, t);
-    stop(msg);
+    stopMaster();
   }
 
   @Override
@@ -2480,13 +2484,34 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   }
 
   @Override
-  public boolean abortProcedure(final long procId, final boolean mayInterruptIfRunning) {
-    return this.procedureExecutor.abort(procId, mayInterruptIfRunning);
+  public boolean abortProcedure(final long procId, final boolean mayInterruptIfRunning)
+      throws IOException {
+    if (cpHost != null) {
+      cpHost.preAbortProcedure(this.procedureExecutor, procId);
+    }
+
+    final boolean result = this.procedureExecutor.abort(procId, mayInterruptIfRunning);
+
+    if (cpHost != null) {
+      cpHost.postAbortProcedure();
+    }
+
+    return result;
   }
 
   @Override
   public List<ProcedureInfo> listProcedures() throws IOException {
-    return this.procedureExecutor.listProcedures();
+    if (cpHost != null) {
+      cpHost.preListProcedures();
+    }
+
+    final List<ProcedureInfo> procInfoList = this.procedureExecutor.listProcedures();
+
+    if (cpHost != null) {
+      cpHost.postListProcedures(procInfoList);
+    }
+
+    return procInfoList;
   }
 
   @Override
@@ -2717,6 +2742,17 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   }
 
   /**
+   * Queries the state of the {@link RegionNormalizerTracker}. If it's not initialized,
+   * false is returned.
+   */
+   public boolean isNormalizerOn() {
+    if (null == regionNormalizerTracker) {
+      return false;
+    }
+    return regionNormalizerTracker.isNormalizerOn();
+  }
+
+  /**
    * Fetch the configured {@link LoadBalancer} class name. If none is set, a default is returned.
    *
    * @return The name of the {@link LoadBalancer} in use.
@@ -2724,5 +2760,12 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   public String getLoadBalancerClassName() {
     return conf.get(HConstants.HBASE_MASTER_LOADBALANCER_CLASS, LoadBalancerFactory
         .getDefaultLoadBalancerClass().getName());
+  }
+
+  /**
+   * @return RegionNormalizerTracker instance
+   */
+  public RegionNormalizerTracker getRegionNormalizerTracker() {
+    return regionNormalizerTracker;
   }
 }

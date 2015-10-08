@@ -791,13 +791,35 @@ public interface Admin extends Abortable, Closeable {
    * @return True if balancer ran, false otherwise.
    */
   boolean balancer(boolean force) throws IOException;
-  
+
   /**
    * Query the current state of the balancer
    *
    * @return true if the balancer is enabled, false otherwise.
    */
   boolean isBalancerEnabled() throws IOException;
+
+  /**
+   * Invoke region normalizer. Can NOT run for various reasons.  Check logs.
+   *
+   * @return True if region normalizer ran, false otherwise.
+   */
+  boolean normalize() throws IOException;
+
+  /**
+   * Query the current state of the region normalizer
+   *
+   * @return true if region normalizer is enabled, false otherwise.
+   */
+  boolean isNormalizerEnabled() throws IOException;
+
+  /**
+   * Turn region normalizer on or off.
+   *
+   * @return Previous normalizer value
+   */
+  boolean setNormalizerRunning(final boolean on)
+    throws IOException;
 
   /**
    * Enable/Disable the catalog janitor
@@ -1543,56 +1565,61 @@ public interface Admin extends Abortable, Closeable {
   public int getMasterInfoPort() throws IOException;
 
   /**
-   * Compact the mob files in all mob-enabled column families. Asynchronous operation.
+   * Compact a table. Asynchronous operation.
    *
    * @param tableName table to compact
+   * @param compactType {@link org.apache.hadoop.hbase.client.Admin.CompactType}
    * @throws IOException
    * @throws InterruptedException
    */
-  void compactMobs(final TableName tableName) throws IOException,
-    InterruptedException;
+  void compact(final TableName tableName, CompactType compactType)
+    throws IOException, InterruptedException;
 
   /**
-   * Compact the mob files in a mob-enabled column family. Asynchronous operation.
+   * Compact a column family within a table. Asynchronous operation.
    *
    * @param tableName table to compact
    * @param columnFamily column family within a table
+   * @param compactType {@link org.apache.hadoop.hbase.client.Admin.CompactType}
    * @throws IOException if not a mob column family or if a remote or network exception occurs
    * @throws InterruptedException
    */
-  void compactMob(final TableName tableName, final byte[] columnFamily) throws IOException,
-    InterruptedException;
+  void compact(final TableName tableName, final byte[] columnFamily, CompactType compactType)
+    throws IOException, InterruptedException;
 
   /**
-   * Major compact the mob files in all mob-enabled column family. Asynchronous operation.
+   * Major compact a table. Asynchronous operation.
    *
    * @param tableName table to compact
+   * @param compactType {@link org.apache.hadoop.hbase.client.Admin.CompactType}
    * @throws IOException
    * @throws InterruptedException
    */
-  void majorCompactMobs(final TableName tableName) throws IOException,
-    InterruptedException;
+  void majorCompact(final TableName tableName, CompactType compactType)
+    throws IOException, InterruptedException;
 
   /**
-   * Major compact the mob files in a mob-enabled column family. Asynchronous operation.
+   * Major compact a column family within a table. Asynchronous operation.
    *
    * @param tableName table to compact
    * @param columnFamily column family within a table
+   * @param compactType {@link org.apache.hadoop.hbase.client.Admin.CompactType}
    * @throws IOException if not a mob column family or if a remote or network exception occurs
    * @throws InterruptedException
    */
-  void majorCompactMob(final TableName tableName, final byte[] columnFamily) throws IOException,
-    InterruptedException;
+  void majorCompact(final TableName tableName, final byte[] columnFamily, CompactType compactType)
+    throws IOException, InterruptedException;
 
   /**
    * Get the current compaction state of a table. It could be in a compaction, or none.
    *
    * @param tableName table to examine
+   * @param compactType {@link org.apache.hadoop.hbase.client.Admin.CompactType}
    * @return the current compaction state
    * @throws IOException if a remote or network exception occurs
    */
-  AdminProtos.GetRegionInfoResponse.CompactionState getMobCompactionState(final TableName tableName)
-    throws IOException;
+  AdminProtos.GetRegionInfoResponse.CompactionState getCompactionState(final TableName tableName,
+    CompactType compactType) throws IOException;
 
   /**
    * Return the set of supported security capabilities.
@@ -1600,4 +1627,20 @@ public interface Admin extends Abortable, Closeable {
    * @throws UnsupportedOperationException
    */
   List<SecurityCapability> getSecurityCapabilities() throws IOException;
+
+  /**
+   * Currently, there are only two compact types:
+   * {@code NORMAL} means do store files compaction;
+   * {@code MOB} means do mob files compaction.
+   * */
+
+  @InterfaceAudience.Public
+  @InterfaceStability.Unstable
+  public enum CompactType {
+
+    NORMAL    (0),
+    MOB       (1);
+
+    CompactType(int value) {}
+  }
 }

@@ -549,8 +549,8 @@ public class HRegionServer extends HasThread implements
     rpcRetryingCallerFactory = RpcRetryingCallerFactory.instantiate(this.conf);
 
     // login the zookeeper client principal (if using security)
-    ZKUtil.loginClient(this.conf, "hbase.zookeeper.client.keytab.file",
-      "hbase.zookeeper.client.kerberos.principal", hostName);
+    ZKUtil.loginClient(this.conf, HConstants.ZK_CLIENT_KEYTAB_FILE,
+      HConstants.ZK_CLIENT_KERBEROS_PRINCIPAL, hostName);
     // login the server principal (if using secure Hadoop)
     login(userProvider, hostName);
 
@@ -851,7 +851,7 @@ public class HRegionServer extends HasThread implements
 
     // Setup RPC client for master communication
     rpcClient = RpcClientFactory.createClient(conf, clusterId, new InetSocketAddress(
-        rpcServices.isa.getAddress(), 0));
+        rpcServices.isa.getAddress(), 0), clusterConnection.getConnectionMetrics());
 
     boolean onlyMetaRefresh = false;
     int storefileRefreshPeriod = conf.getInt(
@@ -1546,7 +1546,7 @@ public class HRegionServer extends HasThread implements
               } else {
                 this.instance.compactSplitThread.requestCompaction(r, s, getName()
                     + " requests major compaction; use configured priority",
-                  this.majorCompactPriority, null);
+                  this.majorCompactPriority, null, null);
               }
             }
           } catch (IOException e) {

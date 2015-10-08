@@ -31,6 +31,7 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
+import org.apache.hadoop.hbase.ProcedureInfo;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
@@ -39,6 +40,8 @@ import org.apache.hadoop.hbase.coprocessor.CoprocessorService;
 import org.apache.hadoop.hbase.coprocessor.MasterCoprocessorEnvironment;
 import org.apache.hadoop.hbase.coprocessor.MasterObserver;
 import org.apache.hadoop.hbase.coprocessor.ObserverContext;
+import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
+import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.protobuf.generated.QuotaProtos.Quotas;
 
@@ -601,6 +604,48 @@ public class MasterCoprocessorHost
     });
   }
 
+  public boolean preAbortProcedure(
+      final ProcedureExecutor<MasterProcedureEnv> procEnv,
+      final long procId) throws IOException {
+    return execOperation(coprocessors.isEmpty() ? null : new CoprocessorOperation() {
+      @Override
+      public void call(MasterObserver oserver, ObserverContext<MasterCoprocessorEnvironment> ctx)
+          throws IOException {
+        oserver.preAbortProcedure(ctx, procEnv, procId);
+      }
+    });
+  }
+
+  public void postAbortProcedure() throws IOException {
+    execOperation(coprocessors.isEmpty() ? null : new CoprocessorOperation() {
+      @Override
+      public void call(MasterObserver oserver, ObserverContext<MasterCoprocessorEnvironment> ctx)
+          throws IOException {
+        oserver.postAbortProcedure(ctx);
+      }
+    });
+  }
+
+  public boolean preListProcedures() throws IOException {
+    return execOperation(coprocessors.isEmpty() ? null : new CoprocessorOperation() {
+      @Override
+      public void call(MasterObserver oserver, ObserverContext<MasterCoprocessorEnvironment> ctx)
+          throws IOException {
+        oserver.preListProcedures(ctx);
+      }
+    });
+  }
+
+  public void postListProcedures(final List<ProcedureInfo> procInfoList) throws IOException {
+    execOperation(coprocessors.isEmpty() ? null : new CoprocessorOperation() {
+      @Override
+      public void call(MasterObserver oserver, ObserverContext<MasterCoprocessorEnvironment> ctx)
+          throws IOException {
+        oserver.postListProcedures(ctx, procInfoList);
+      }
+    });
+  }
+
   public boolean preMove(final HRegionInfo region, final ServerName srcServer,
       final ServerName destServer) throws IOException {
     return execOperation(coprocessors.isEmpty() ? null : new CoprocessorOperation() {
@@ -1079,7 +1124,9 @@ public class MasterCoprocessorHost
   private boolean execOperation(final CoprocessorOperation ctx) throws IOException {
     if (ctx == null) return false;
     boolean bypass = false;
-    for (MasterEnvironment env: coprocessors) {
+    List<MasterEnvironment> envs = coprocessors.get();
+    for (int i = 0; i < envs.size(); i++) {
+      MasterEnvironment env = envs.get(i);
       if (env.getInstance() instanceof MasterObserver) {
         ctx.prepare(env);
         Thread currentThread = Thread.currentThread();

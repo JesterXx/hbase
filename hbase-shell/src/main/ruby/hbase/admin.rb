@@ -56,12 +56,25 @@ module Hbase
 
     #----------------------------------------------------------------------------------------------
     # Requests a table or region or column family compaction
-    def compact(table_or_region_name, family = nil)
-      if family == nil
-        @admin.compact(table_or_region_name)
+    def compact(table_or_region_name, family = nil, type = "NORMAL")
+      if type == "NORMAL"
+        if family == nil
+          @admin.compact(table_or_region_name)
+        else
+          # We are compacting a column family within a region.
+          @admin.compact(table_or_region_name, family)
+        end
+      elsif type == "MOB"
+        if family == nil
+          @admin.compact(org.apache.hadoop.hbase.TableName.valueOf(table_or_region_name),
+          org.apache.hadoop.hbase.client.Admin::CompactType::MOB)
+        else
+          # We are compacting a mob column family within a table.
+          @admin.compact(org.apache.hadoop.hbase.TableName.valueOf(table_or_region_name), family.to_java_bytes,
+          org.apache.hadoop.hbase.client.Admin::CompactType::MOB)
+        end
       else
-        # We are compacting a column family within a region.
-        @admin.compact(table_or_region_name, family)
+         raise ArgumentError, "only NORMAL or MOB accepted for type!"
       end
     end
 
@@ -72,12 +85,25 @@ module Hbase
 
     #----------------------------------------------------------------------------------------------
     # Requests a table or region or column family major compaction
-    def major_compact(table_or_region_name, family = nil)
-      if family == nil
-        @admin.majorCompact(table_or_region_name)
+    def major_compact(table_or_region_name, family = nil, type = "NORMAL")
+      if type == "NORMAL"
+        if family == nil
+          @admin.majorCompact(table_or_region_name)
+        else
+          # We are major compacting a column family within a region or table.
+          @admin.majorCompact(table_or_region_name, family)
+        end
+      elsif type == "MOB"
+        if family == nil
+          @admin.majorCompact(org.apache.hadoop.hbase.TableName.valueOf(table_or_region_name),
+          org.apache.hadoop.hbase.client.Admin::CompactType::MOB)
+        else
+          # We are major compacting a mob column family within a table.
+          @admin.majorCompact(org.apache.hadoop.hbase.TableName.valueOf(table_or_region_name),
+          family.to_java_bytes, org.apache.hadoop.hbase.client.Admin::CompactType::MOB)
+        end
       else
-        # We are major compacting a column family within a region or table.
-        @admin.majorCompact(table_or_region_name, family)
+        raise ArgumentError, "only NORMAL or MOB accepted for type!"
       end
     end
 
@@ -119,6 +145,27 @@ module Hbase
     # Returns the balancer's state (true is enabled).
     def balancer_enabled?()
       @admin.isBalancerEnabled()
+    end
+
+    #----------------------------------------------------------------------------------------------
+    # Requests region normalization for all configured tables in the cluster
+    # Returns true if normalizer ran successfully
+    def normalize()
+      @admin.normalize()
+    end
+
+    #----------------------------------------------------------------------------------------------
+    # Enable/disable region normalizer
+    # Returns previous normalizer switch setting.
+    def normalizer_switch(enableDisable)
+      @admin.setNormalizerRunning(java.lang.Boolean::valueOf(enableDisable))
+    end
+
+    #----------------------------------------------------------------------------------------------
+    # Query the current state of region normalizer.
+    # Returns the state of region normalizer (true is enabled).
+    def normalizer_enabled?()
+      @admin.isNormalizerEnabled()
     end
 
     #----------------------------------------------------------------------------------------------
@@ -559,6 +606,8 @@ module Hbase
         htd.setMaxFileSize(JLong.valueOf(arg.delete(MAX_FILESIZE))) if arg[MAX_FILESIZE]
         htd.setReadOnly(JBoolean.valueOf(arg.delete(READONLY))) if arg[READONLY]
         htd.setCompactionEnabled(JBoolean.valueOf(arg[COMPACTION_ENABLED])) if arg[COMPACTION_ENABLED]
+        htd.setNormalizationEnabled(
+          JBoolean.valueOf(arg[NORMALIZATION_ENABLED])) if arg[NORMALIZATION_ENABLED]
         htd.setMemStoreFlushSize(JLong.valueOf(arg.delete(MEMSTORE_FLUSHSIZE))) if arg[MEMSTORE_FLUSHSIZE]
         # DEFERRED_LOG_FLUSH is deprecated and was replaced by DURABILITY.  To keep backward compatible, it still exists.
         # However, it has to be set before DURABILITY so that DURABILITY could overwrite if both args are set
@@ -584,7 +633,7 @@ module Hbase
             if (k =~ /coprocessor/i)
               v = String.new(value)
               v.strip!
-              htd.addCoprocessor(v)
+              htd.addCoprocessorWithSpec(v)
               valid_coproc_keys << key
             end
           end
@@ -994,31 +1043,18 @@ module Hbase
     end
 
     #----------------------------------------------------------------------------------------------
-    # Requests a mob file compaction
-    def compact_mob(table_name, family = nil)
-      if family == nil
-        @admin.compactMobs(org.apache.hadoop.hbase.TableName.valueOf(table_name))
-      else
-        # We are compacting a mob column family within a table.
-        @admin.compactMob(org.apache.hadoop.hbase.TableName.valueOf(table_name), family.to_java_bytes)
-      end
-    end
-
-    #----------------------------------------------------------------------------------------------
-    # Requests a mob file major compaction
-    def major_compact_mob(table_name, family = nil)
-      if family == nil
-        @admin.majorCompactMobs(org.apache.hadoop.hbase.TableName.valueOf(table_name))
-      else
-        # We are major compacting a mob column family within a table.
-        @admin.majorCompactMob(org.apache.hadoop.hbase.TableName.valueOf(table_name), family.to_java_bytes)
-      end
-    end
-
-    #----------------------------------------------------------------------------------------------
     # Get security capabilities
     def get_security_capabilities
       @admin.getSecurityCapabilities
+    end
+
+    # Abort a procedure
+    def abort_procedure?(proc_id, may_interrupt_if_running=nil)
+      if may_interrupt_if_running.nil?
+        @admin.abortProcedure(proc_id, true)
+      else
+        @admin.abortProcedure(proc_id, may_interrupt_if_running)
+      end
     end
 
     # List all procedures

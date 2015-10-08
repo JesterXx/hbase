@@ -18,6 +18,8 @@
  */
 package org.apache.hadoop.hbase.client;
 
+import static org.apache.hadoop.hbase.client.MetricsConnection.CLIENT_SIDE_METRICS_ENABLED_KEY;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.BlockingRpcChannel;
 import com.google.protobuf.RpcController;
@@ -56,8 +58,14 @@ import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsBalancerEnabledRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsBalancerEnabledResponse;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsNormalizerEnabledRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsNormalizerEnabledResponse;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.NormalizeRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.NormalizeResponse;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SecurityCapabilitiesRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SecurityCapabilitiesResponse;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SetNormalizerRunningRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SetNormalizerRunningResponse;
 import org.apache.hadoop.hbase.quotas.ThrottlingException;
 import org.apache.hadoop.hbase.regionserver.RegionServerStoppedException;
 import org.apache.hadoop.hbase.security.User;
@@ -104,7 +112,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   public static final String RETRIES_BY_SERVER_KEY = "hbase.client.retries.by.server";
   private static final Log LOG = LogFactory.getLog(ConnectionImplementation.class);
   private static final String CLIENT_NONCES_ENABLED_KEY = "hbase.client.nonces.enabled";
+  private static final String RESOLVE_HOSTNAME_ON_FAIL_KEY = "hbase.resolve.hostnames.on.failure";
 
+  private final boolean hostnamesCanChange;
   private final long pause;
   private final boolean useMetaReplicas;
   private final int numTries;
@@ -157,11 +167,12 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   // Client rpc instance.
   private RpcClient rpcClient;
 
-  private MetaCache metaCache = new MetaCache();
+  private final MetaCache metaCache;
+  private final MetricsConnection metrics;
 
   private int refCount;
 
-  private User user;
+  protected User user;
 
   private RpcRetryingCallerFactory rpcCallerFactory;
 
@@ -182,54 +193,19 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
    */
   ConnectionImplementation(Configuration conf,
                            ExecutorService pool, User user) throws IOException {
-    this(conf);
+    this.conf = conf;
     this.user = user;
     this.batchPool = pool;
-    this.registry = setupRegistry();
-    retrieveClusterId();
-
-    this.rpcClient = RpcClientFactory.createClient(this.conf, this.clusterId);
-    this.rpcControllerFactory = RpcControllerFactory.instantiate(conf);
-
-    // Do we publish the status?
-    boolean shouldListen = conf.getBoolean(HConstants.STATUS_PUBLISHED,
-        HConstants.STATUS_PUBLISHED_DEFAULT);
-    Class<? extends ClusterStatusListener.Listener> listenerClass =
-        conf.getClass(ClusterStatusListener.STATUS_LISTENER_CLASS,
-            ClusterStatusListener.DEFAULT_STATUS_LISTENER_CLASS,
-            ClusterStatusListener.Listener.class);
-    if (shouldListen) {
-      if (listenerClass == null) {
-        LOG.warn(HConstants.STATUS_PUBLISHED + " is true, but " +
-            ClusterStatusListener.STATUS_LISTENER_CLASS + " is not set - not listening status");
-      } else {
-        clusterStatusListener = new ClusterStatusListener(
-            new ClusterStatusListener.DeadServerHandler() {
-              @Override
-              public void newDead(ServerName sn) {
-                clearCaches(sn);
-                rpcClient.cancelConnections(sn);
-              }
-            }, conf, listenerClass);
-      }
-    }
-  }
-
-  /**
-   * For tests.
-   */
-  protected ConnectionImplementation(Configuration conf) {
-    this.conf = conf;
     this.tableConfig = new TableConfiguration(conf);
     this.closed = false;
     this.pause = conf.getLong(HConstants.HBASE_CLIENT_PAUSE,
         HConstants.DEFAULT_HBASE_CLIENT_PAUSE);
     this.useMetaReplicas = conf.getBoolean(HConstants.USE_META_REPLICAS,
-      HConstants.DEFAULT_USE_META_REPLICAS);
+        HConstants.DEFAULT_USE_META_REPLICAS);
     this.numTries = tableConfig.getRetriesNumber();
     this.rpcTimeout = conf.getInt(
-      HConstants.HBASE_RPC_TIMEOUT_KEY,
-      HConstants.DEFAULT_HBASE_RPC_TIMEOUT);
+        HConstants.HBASE_RPC_TIMEOUT_KEY,
+        HConstants.DEFAULT_HBASE_RPC_TIMEOUT);
     if (conf.getBoolean(CLIENT_NONCES_ENABLED_KEY, true)) {
       synchronized (nonceGeneratorCreateLock) {
         if (nonceGenerator == null) {
@@ -239,11 +215,56 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     } else {
       nonceGenerator = new NoNonceGenerator();
     }
-    stats = ServerStatisticTracker.create(conf);
-    this.asyncProcess = createAsyncProcess(this.conf);
+
+    this.stats = ServerStatisticTracker.create(conf);
     this.interceptor = (new RetryingCallerInterceptorFactory(conf)).build();
+    this.rpcControllerFactory = RpcControllerFactory.instantiate(conf);
     this.rpcCallerFactory = RpcRetryingCallerFactory.instantiate(conf, interceptor, this.stats);
     this.backoffPolicy = ClientBackoffPolicyFactory.create(conf);
+    this.asyncProcess = createAsyncProcess(this.conf);
+    if (conf.getBoolean(CLIENT_SIDE_METRICS_ENABLED_KEY, false)) {
+      this.metrics = new MetricsConnection(this);
+    } else {
+      this.metrics = null;
+    }
+    this.metaCache = new MetaCache(this.metrics);
+
+    boolean shouldListen = conf.getBoolean(HConstants.STATUS_PUBLISHED,
+        HConstants.STATUS_PUBLISHED_DEFAULT);
+    this.hostnamesCanChange = conf.getBoolean(RESOLVE_HOSTNAME_ON_FAIL_KEY, true);
+    Class<? extends ClusterStatusListener.Listener> listenerClass =
+        conf.getClass(ClusterStatusListener.STATUS_LISTENER_CLASS,
+            ClusterStatusListener.DEFAULT_STATUS_LISTENER_CLASS,
+            ClusterStatusListener.Listener.class);
+
+    try {
+      this.registry = setupRegistry();
+      retrieveClusterId();
+
+      this.rpcClient = RpcClientFactory.createClient(this.conf, this.clusterId);
+
+      // Do we publish the status?
+      if (shouldListen) {
+        if (listenerClass == null) {
+          LOG.warn(HConstants.STATUS_PUBLISHED + " is true, but " +
+              ClusterStatusListener.STATUS_LISTENER_CLASS + " is not set - not listening status");
+        } else {
+          clusterStatusListener = new ClusterStatusListener(
+              new ClusterStatusListener.DeadServerHandler() {
+                @Override
+                public void newDead(ServerName sn) {
+                  clearCaches(sn);
+                  rpcClient.cancelConnections(sn);
+                }
+              }, conf, listenerClass);
+        }
+      }
+    } catch (Throwable e) {
+      // avoid leaks: registry, rpcClient, ...
+      LOG.debug("connection construction failed", e);
+      close();
+      throw e;
+    }
   }
 
   /**
@@ -365,12 +386,17 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     return new HBaseAdmin(this);
   }
 
+  @Override
+  public MetricsConnection getConnectionMetrics() {
+    return this.metrics;
+  }
+
   private ExecutorService getBatchPool() {
     if (batchPool == null) {
       synchronized (this) {
         if (batchPool == null) {
           this.batchPool = getThreadPool(conf.getInt("hbase.hconnection.threads.max", 256),
-              conf.getInt("hbase.hconnection.threads.core", 256), "-shared-", null); 
+              conf.getInt("hbase.hconnection.threads.core", 256), "-shared-", null);
           this.cleanupPool = true;
         }
       }
@@ -478,7 +504,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
   protected String clusterId = null;
 
-  void retrieveClusterId() {
+  protected void retrieveClusterId() {
     if (clusterId != null) return;
     this.clusterId = this.registry.getClusterId();
     if (clusterId == null) {
@@ -1185,7 +1211,8 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
           throw new MasterNotRunningException(sn + " is dead.");
         }
         // Use the security info interface name as our stub key
-        String key = getStubKey(getServiceName(), sn.getHostname(), sn.getPort());
+        String key = getStubKey(getServiceName(),
+            sn.getHostname(), sn.getPort(), hostnamesCanChange);
         connectionLock.putIfAbsent(key, key);
         Object stub = null;
         synchronized (connectionLock.get(key)) {
@@ -1274,7 +1301,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       throw new RegionServerStoppedException(serverName + " is dead.");
     }
     String key = getStubKey(AdminProtos.AdminService.BlockingInterface.class.getName(),
-        serverName.getHostname(), serverName.getPort());
+        serverName.getHostname(), serverName.getPort(), this.hostnamesCanChange);
     this.connectionLock.putIfAbsent(key, key);
     AdminProtos.AdminService.BlockingInterface stub = null;
     synchronized (this.connectionLock.get(key)) {
@@ -1297,7 +1324,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     }
     String key = getStubKey(
       ClientProtos.ClientService.BlockingInterface.class.getName(), sn.getHostname(),
-      sn.getPort());
+      sn.getPort(), this.hostnamesCanChange);
     this.connectionLock.putIfAbsent(key, key);
     ClientProtos.ClientService.BlockingInterface stub = null;
     synchronized (this.connectionLock.get(key)) {
@@ -1314,16 +1341,21 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     return stub;
   }
 
-  static String getStubKey(final String serviceName, final String rsHostname, int port) {
+  static String getStubKey(final String serviceName,
+                           final String rsHostname,
+                           int port,
+                           boolean resolveHostnames) {
     // Sometimes, servers go down and they come back up with the same hostname but a different
     // IP address. Force a resolution of the rsHostname by trying to instantiate an
     // InetSocketAddress, and this way we will rightfully get a new stubKey.
     // Also, include the hostname in the key so as to take care of those cases where the
     // DNS name is different but IP address remains the same.
-    InetAddress i =  new InetSocketAddress(rsHostname, port).getAddress();
     String address = rsHostname;
-    if (i != null) {
-      address = i.getHostAddress() + "-" + rsHostname;
+    if (resolveHostnames) {
+      InetAddress i = new InetSocketAddress(rsHostname, port).getAddress();
+      if (i != null) {
+        address = i.getHostAddress() + "-" + rsHostname;
+      }
     }
     return serviceName + "@" + address + ":" + port;
   }
@@ -1539,6 +1571,19 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       }
 
       @Override
+      public NormalizeResponse normalize(RpcController controller,
+          NormalizeRequest request) throws ServiceException {
+        return stub.normalize(controller, request);
+      }
+
+      @Override
+      public SetNormalizerRunningResponse setNormalizerRunning(
+          RpcController controller, SetNormalizerRunningRequest request)
+          throws ServiceException {
+        return stub.setNormalizerRunning(controller, request);
+      }
+
+      @Override
       public MasterProtos.RunCatalogScanResponse runCatalogScan(RpcController controller,
           MasterProtos.RunCatalogScanRequest request) throws ServiceException {
         return stub.runCatalogScan(controller, request);
@@ -1751,6 +1796,12 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       public IsBalancerEnabledResponse isBalancerEnabled(RpcController controller,
           IsBalancerEnabledRequest request) throws ServiceException {
         return stub.isBalancerEnabled(controller, request);
+      }
+
+      @Override
+      public IsNormalizerEnabledResponse isNormalizerEnabled(RpcController controller,
+          IsNormalizerEnabledRequest request) throws ServiceException {
+        return stub.isNormalizerEnabled(controller, request);
       }
 
       @Override
@@ -1979,9 +2030,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   // For tests to override.
   protected AsyncProcess createAsyncProcess(Configuration conf) {
     // No default pool available.
-    return new AsyncProcess(this, conf, this.batchPool,
-        RpcRetryingCallerFactory.instantiate(conf, this.getStatisticsTracker()), false,
-        RpcControllerFactory.instantiate(conf));
+    return new AsyncProcess(this, conf, batchPool, rpcCallerFactory, false, rpcControllerFactory);
   }
 
   @Override
@@ -2105,6 +2154,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     }
     closeMaster();
     shutdownPools();
+    if (this.metrics != null) {
+      this.metrics.shutdown();
+    }
     this.closed = true;
     closeZooKeeperWatcher();
     this.stubs.clear();

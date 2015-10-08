@@ -19,22 +19,23 @@
 
 module Shell
   module Commands
-    class MajorCompactMob < Command
+    class NormalizerSwitch < Command
       def help
         return <<-EOF
-          Run major compaction on a mob enabled column family
-          or all mob enabled column families within a table
-          Examples:
-          Compact a column family within a table:
-          hbase> major_compact_mob 't1', 'c1'
-          Compact all mob enabled column families within a table
-          hbase> major_compact_mob 't1'
-        EOF
+Enable/Disable region normalizer. Returns previous normalizer state.
+When normalizer is enabled, it handles all tables with 'NORMALIZATION_ENABLED' => true.
+Examples:
+
+  hbase> normalizer_switch true
+  hbase> normalizer_switch false
+EOF
       end
 
-      def command(table_name, family = nil)
+      def command(enableDisable)
         format_simple_command do
-          admin.major_compact_mob(table_name, family)
+          formatter.row([
+            admin.normalizer_switch(enableDisable)? "true" : "false"
+          ])
         end
       end
     end

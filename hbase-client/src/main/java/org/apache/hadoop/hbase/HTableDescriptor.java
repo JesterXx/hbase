@@ -249,6 +249,7 @@ public class HTableDescriptor implements Comparable<HTableDescriptor> {
         String.valueOf(DEFAULT_DEFERRED_LOG_FLUSH));
     DEFAULT_VALUES.put(DURABILITY, DEFAULT_DURABLITY.name()); //use the enum name
     DEFAULT_VALUES.put(REGION_REPLICATION, String.valueOf(DEFAULT_REGION_REPLICATION));
+    DEFAULT_VALUES.put(NORMALIZATION_ENABLED, String.valueOf(DEFAULT_NORMALIZATION_ENABLED));
     for (String s : DEFAULT_VALUES.keySet()) {
       RESERVED_KEYWORDS.add(new Bytes(Bytes.toBytes(s)));
     }
@@ -1265,7 +1266,6 @@ public class HTableDescriptor implements Comparable<HTableDescriptor> {
    * {@link HConstants#CP_HTD_ATTR_VALUE_PATTERN}
    * @throws IOException
    */
-  // Pity about ugly method name. addCoprocessor(String) already taken above.
   public HTableDescriptor addCoprocessorWithSpec(final String specStr) throws IOException {
     String className = getCoprocessorClassNameFromSpecStr(specStr);
     if (className == null) {

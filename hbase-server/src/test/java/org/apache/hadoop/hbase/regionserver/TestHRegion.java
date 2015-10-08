@@ -167,6 +167,8 @@ import org.junit.rules.TestName;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatcher;
 import org.mockito.Mockito;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
@@ -1161,27 +1163,16 @@ public class TestHRegion {
       } catch (IOException expected) {
         // expected
       }
-      // The WAL is hosed. It has failed an append and a sync. It has an exception stuck in it
-      // which it will keep returning until we roll the WAL to prevent any further appends going
-      // in or syncs succeeding on top of failed appends, a no-no.
-      wal.rollWriter(true);
+      // The WAL is hosed now. It has two edits appended. We cannot roll the log without it
+      // throwing a DroppedSnapshotException to force an abort. Just clean up the mess.
+      region.close(true);
+      wal.close();
 
       // 2. Test case where START_FLUSH succeeds but COMMIT_FLUSH will throw exception
       wal.flushActions = new FlushAction [] {FlushAction.COMMIT_FLUSH};
+      wal = new FailAppendFlushMarkerWAL(FileSystem.get(walConf), FSUtils.getRootDir(walConf),
+            getName(), walConf);
 
-      try {
-        region.flush(true);
-        fail("This should have thrown exception");
-      } catch (DroppedSnapshotException expected) {
-        // we expect this exception, since we were able to write the snapshot, but failed to
-        // write the flush marker to WAL
-      } catch (IOException unexpected) {
-        throw unexpected;
-      }
-
-      region.close();
-      // Roll WAL to clean out any exceptions stuck in it. See note above where we roll WAL.
-      wal.rollWriter(true);
       this.region = initHRegion(tableName, HConstants.EMPTY_START_ROW,
         HConstants.EMPTY_END_ROW, method, CONF, false, Durability.USE_DEFAULT, wal, family);
       region.put(put);
@@ -3762,6 +3753,10 @@ public class TestHRegion {
     private volatile boolean done;
     private Throwable error = null;
 
+    FlushThread() {
+      super("FlushThread");
+    }
+
     public void done() {
       done = true;
       synchronized (this) {
@@ -3792,20 +3787,21 @@ public class TestHRegion {
           region.flush(true);
         } catch (IOException e) {
           if (!done) {
-            LOG.error("Error while flusing cache", e);
+            LOG.error("Error while flushing cache", e);
             error = e;
           }
           break;
+        } catch (Throwable t) {
+          LOG.error("Uncaught exception", t);
+          throw t;
         }
       }
-
     }
 
     public void flush() {
       synchronized (this) {
         notify();
       }
-
     }
   }
 
@@ -3908,6 +3904,7 @@ public class TestHRegion {
     private byte[][] qualifiers;
 
     private PutThread(int numRows, byte[][] families, byte[][] qualifiers) {
+      super("PutThread");
       this.numRows = numRows;
       this.families = families;
       this.qualifiers = qualifiers;
@@ -3963,8 +3960,9 @@ public class TestHRegion {
           }
         } catch (InterruptedIOException e) {
           // This is fine. It means we are done, or didn't get the lock on time
+          LOG.info("Interrupted", e);
         } catch (IOException e) {
-          LOG.error("error while putting records", e);
+          LOG.error("Error while putting records", e);
           error = e;
           break;
         }
@@ -5776,6 +5774,64 @@ public class TestHRegion {
     }
   }
 
+  /**
+   * Test for HBASE-14497: Reverse Scan threw StackOverflow caused by readPt checking
+   */
+  @Test (timeout = 60000)
+  public void testReverseScanner_StackOverflow() throws IOException {
+    byte[] cf1 = Bytes.toBytes("CF1");
+    byte[][] families = {cf1};
+    byte[] col = Bytes.toBytes("C");
+    String method = this.getName();
+    HBaseConfiguration conf = new HBaseConfiguration();
+    this.region = initHRegion(tableName, method, conf, families);
+    try {
+      // setup with one storefile and one memstore, to create scanner and get an earlier readPt
+      Put put = new Put(Bytes.toBytes("19998"));
+      put.add(cf1, col, Bytes.toBytes("val"));
+      region.put(put);
+      region.flushcache(true, true);
+      Put put2 = new Put(Bytes.toBytes("19997"));
+      put2.add(cf1, col, Bytes.toBytes("val"));
+      region.put(put2);
+
+      Scan scan = new Scan(Bytes.toBytes("19998"));
+      scan.setReversed(true);
+      InternalScanner scanner = region.getScanner(scan);
+
+      // create one storefile contains many rows will be skipped
+      // to check StoreFileScanner.seekToPreviousRow
+      for (int i = 10000; i < 20000; i++) {
+        Put p = new Put(Bytes.toBytes(""+i));
+        p.add(cf1, col, Bytes.toBytes(""+i));
+        region.put(p);
+      }
+      region.flushcache(true, true);
+
+      // create one memstore contains many rows will be skipped
+      // to check MemStoreScanner.seekToPreviousRow
+      for (int i = 10000; i < 20000; i++) {
+        Put p = new Put(Bytes.toBytes(""+i));
+        p.add(cf1, col, Bytes.toBytes(""+i));
+        region.put(p);
+      }
+
+      List<Cell> currRow = new ArrayList<>();
+      boolean hasNext;
+      do {
+        hasNext = scanner.next(currRow);
+      } while (hasNext);
+      assertEquals(2, currRow.size());
+      assertEquals("19998", Bytes.toString(currRow.get(0).getRowArray(),
+        currRow.get(0).getRowOffset(), currRow.get(0).getRowLength()));
+      assertEquals("19997", Bytes.toString(currRow.get(1).getRowArray(),
+        currRow.get(1).getRowOffset(), currRow.get(1).getRowLength()));
+    } finally {
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
+      this.region = null;
+    }
+  }
+
   @Test (timeout=60000)
   public void testSplitRegionWithReverseScan() throws IOException {
     TableName tableName = TableName.valueOf("testSplitRegionWithReverseScan");
@@ -5927,7 +5983,7 @@ public class TestHRegion {
     ArgumentCaptor<WALEdit> editCaptor = ArgumentCaptor.forClass(WALEdit.class);
 
     // capture append() calls
-    WAL wal = mock(WAL.class);
+    WAL wal = mockWAL();
     when(rss.getWAL((HRegionInfo) any())).thenReturn(wal);
 
     try {
@@ -6032,7 +6088,7 @@ public class TestHRegion {
     ArgumentCaptor<WALEdit> editCaptor = ArgumentCaptor.forClass(WALEdit.class);
 
     // capture append() calls
-    WAL wal = mock(WAL.class);
+    WAL wal = mockWAL();
     when(rss.getWAL((HRegionInfo) any())).thenReturn(wal);
 
     // add the region to recovering regions
@@ -6092,6 +6148,29 @@ public class TestHRegion {
     }
   }
 
+  /**
+   * Utility method to setup a WAL mock.
+   * Needs to do the bit where we close latch on the WALKey on append else test hangs.
+   * @return
+   * @throws IOException
+   */
+  private WAL mockWAL() throws IOException {
+    WAL wal = mock(WAL.class);
+    Mockito.when(wal.append((HTableDescriptor)Mockito.any(), (HRegionInfo)Mockito.any(),
+        (WALKey)Mockito.any(), (WALEdit)Mockito.any(), Mockito.anyBoolean())).
+      thenAnswer(new Answer<Long>() {
+        @Override
+        public Long answer(InvocationOnMock invocation) throws Throwable {
+          WALKey key = invocation.getArgumentAt(2, WALKey.class);
+          MultiVersionConcurrencyControl.WriteEntry we = key.getMvcc().begin();
+          key.setWriteEntry(we);
+          return 1L;
+        }
+      
+    });
+    return wal;
+  }
+
   @Test
   public void testCloseRegionWrittenToWAL() throws Exception {
     final ServerName serverName = ServerName.valueOf("testCloseRegionWrittenToWAL", 100, 42);
@@ -6102,14 +6181,15 @@ public class TestHRegion {
     htd.addFamily(new HColumnDescriptor(fam1));
     htd.addFamily(new HColumnDescriptor(fam2));
 
-    HRegionInfo hri = new HRegionInfo(htd.getTableName(),
+    final HRegionInfo hri = new HRegionInfo(htd.getTableName(),
       HConstants.EMPTY_BYTE_ARRAY, HConstants.EMPTY_BYTE_ARRAY);
 
     ArgumentCaptor<WALEdit> editCaptor = ArgumentCaptor.forClass(WALEdit.class);
 
     // capture append() calls
-    WAL wal = mock(WAL.class);
+    WAL wal = mockWAL();
     when(rss.getWAL((HRegionInfo) any())).thenReturn(wal);
+    
 
     // open a region first so that it can be closed later
     region = HRegion.openHRegion(hri, htd, rss.getWAL(hri),

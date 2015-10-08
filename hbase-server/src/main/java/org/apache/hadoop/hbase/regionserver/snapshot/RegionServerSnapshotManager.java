@@ -175,7 +175,7 @@ public class RegionServerSnapshotManager extends RegionServerProcedureManager {
     // will hang and fail.
 
     LOG.debug("Launching subprocedure for snapshot " + snapshot.getName() + " from table "
-        + snapshot.getTable());
+        + snapshot.getTable() + " type " + snapshot.getType());
     ForeignExceptionDispatcher exnDispatcher = new ForeignExceptionDispatcher(snapshot.getName());
     Configuration conf = rss.getConfiguration();
     long timeoutMillis = conf.getLong(SNAPSHOT_TIMEOUT_MILLIS_KEY,
@@ -282,9 +282,10 @@ public class RegionServerSnapshotManager extends RegionServerProcedureManager {
         RegionServerSnapshotManager.SNAPSHOT_TIMEOUT_MILLIS_DEFAULT);
       int threads = conf.getInt(CONCURENT_SNAPSHOT_TASKS_KEY, DEFAULT_CONCURRENT_SNAPSHOT_TASKS);
       this.name = name;
-      executor = new ThreadPoolExecutor(1, threads, keepAlive, TimeUnit.MILLISECONDS,
+      executor = new ThreadPoolExecutor(threads, threads, keepAlive, TimeUnit.MILLISECONDS,
           new LinkedBlockingQueue<Runnable>(), new DaemonThreadFactory("rs("
               + name + ")-snapshot-pool"));
+      executor.allowCoreThreadTimeOut(true);
       taskPool = new ExecutorCompletionService<Void>(executor);
     }
 
