@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.SortedSet;
 import java.util.UUID;
@@ -82,6 +83,7 @@ import com.google.common.collect.Ordering;
 public class StoreFile {
   private static final Log LOG = LogFactory.getLog(StoreFile.class.getName());
 
+  static final String HBASE_HFILE_PLUGINS_KEY = "hbase.hfile.plugins";
   // Keys for fileinfo values in HFile
 
   /** Max Sequence ID in FileInfo */
@@ -173,6 +175,10 @@ public class StoreFile {
   public static final byte[] SKIP_RESET_SEQ_ID = Bytes.toBytes("SKIP_RESET_SEQ_ID");
 
   /**
+   * Configuration
+   */
+  private final Configuration conf;
+  /**
    * Constructor, loads a reader and it's indices, etc. May allocate a
    * substantial amount of ram depending on the underlying files (10-20MB?).
    *
@@ -213,6 +219,7 @@ public class StoreFile {
     this.fs = fs;
     this.fileInfo = fileInfo;
     this.cacheConf = cacheConf;
+    this.conf = conf;
 
     if (BloomFilterFactory.isGeneralBloomEnabled(conf)) {
       this.cfBloomType = cfBloomType;
@@ -232,6 +239,8 @@ public class StoreFile {
     this.fileInfo = other.fileInfo;
     this.cacheConf = other.cacheConf;
     this.cfBloomType = other.cfBloomType;
+    this.conf = other.conf;
+
   }
 
   /**
@@ -709,7 +718,6 @@ public class StoreFile {
    * @param comparator Comparator used to compare KVs.
    * @return The split point row, or null if splitting is not possible, or reader is null.
    */
-  @SuppressWarnings("deprecation")
   byte[] getFileSplitPoint(CellComparator comparator) throws IOException {
     if (this.reader == null) {
       LOG.warn("Storefile " + this + " Reader is null; cannot get split point");
@@ -764,6 +772,8 @@ public class StoreFile {
 
     protected HFile.Writer writer;
     private KeyValue.KeyOnlyKeyValue lastBloomKeyOnlyKV = null;
+
+    private List<StoreFile.Plugin> plugins;
 
     /**
      * Creates an HFile.Writer that also write helpful meta data.
@@ -820,6 +830,7 @@ public class StoreFile {
         if (LOG.isTraceEnabled()) LOG.trace("Delete Family Bloom filter type for " + path + ": "
             + deleteFamilyBloomFilterWriter.getClass().getSimpleName());
       }
+      this.plugins = StoreFilePluginFactory.getPlugins(conf);
     }
 
     /**
@@ -835,6 +846,21 @@ public class StoreFile {
       writer.appendFileInfo(MAJOR_COMPACTION_KEY,
           Bytes.toBytes(majorCompaction));
       appendTrackedTimestampsToMetadata();
+      notifyPluginsOnAppendMetadata(writer);
+    }
+
+    private void notifyPluginsOnAppendMetadata(
+        org.apache.hadoop.hbase.io.hfile.HFile.Writer w)
+        throws IOException
+    {
+      if(plugins.size() > 0){
+        int size = plugins.size();
+        for(int i=0; i < size; i++){
+          Plugin plugin = plugins.get(i);
+          StoreFile.MetaWriter metaWriter = plugin.getMetaWriter();
+          metaWriter.appendMetadata(w);
+        }
+      }
     }
 
     /**
@@ -851,6 +877,7 @@ public class StoreFile {
       writer.appendFileInfo(MAJOR_COMPACTION_KEY, Bytes.toBytes(majorCompaction));
       writer.appendFileInfo(MOB_CELLS_COUNT, Bytes.toBytes(mobCellsCount));
       appendTrackedTimestampsToMetadata();
+      //TODO append plug in meta - it does not work for MOBs for some reason
     }
 
     /**
@@ -1001,6 +1028,19 @@ public class StoreFile {
       appendDeleteFamilyBloomFilter(cell);
       writer.append(cell);
       trackTimestamps(cell);
+      notifyPluginsOnAppend(cell);
+    }
+
+    private void notifyPluginsOnAppend(Cell cell)
+    {
+      if(plugins.size() > 0){
+        int size = plugins.size();
+        for(int i=0; i < size; i++){
+          Plugin plugin = plugins.get(i);
+          StoreFile.MetaWriter metaWriter = plugin.getMetaWriter();
+          metaWriter.add(cell);
+        }
+      }
     }
 
     public Path getPath() {
@@ -1696,5 +1736,53 @@ public class StoreFile {
         return sf.getPath().getName();
       }
     }
+  }
+
+  /**
+   * StoreFile plug-in supports custom code in Writer/Reader(in a future)
+   * path. The main goal is to provide HBase applications with a hook allowing
+   * to store/retrieve custom meta info associated with a store file.
+   *
+   */
+  public static abstract class Plugin {
+    private Configuration conf;
+    public Plugin(){
+
+    }
+    public void config(Configuration conf){
+      this.conf = conf;
+    }
+
+    public abstract StoreFile.MetaWriter getMetaWriter();
+  }
+  /**
+   * Meta writer plug-in code here.
+   */
+  public static abstract class MetaWriter {
+
+    protected Configuration conf;
+
+    public MetaWriter(){
+    }
+    /**
+     * Configure meta writer
+     * @param conf
+     */
+    public void config(Configuration conf){
+      this.conf = conf;
+    }
+    /**
+     * Add cell is called by StoreFile.Writer on add(Cell cell)
+     * @param cell
+     */
+    public abstract void add(Cell cell);
+
+    /**
+     * Append meta-data
+     * @param writer
+     */
+    public abstract void appendMetadata(HFile.Writer writer)
+      throws IOException;
+
   }
 }
