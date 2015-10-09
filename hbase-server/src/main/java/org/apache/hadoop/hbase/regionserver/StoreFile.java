@@ -877,6 +877,7 @@ public class StoreFile {
       writer.appendFileInfo(MAJOR_COMPACTION_KEY, Bytes.toBytes(majorCompaction));
       writer.appendFileInfo(MOB_CELLS_COUNT, Bytes.toBytes(mobCellsCount));
       appendTrackedTimestampsToMetadata();
+      notifyPluginsOnAppendMetadata(writer);
       //TODO append plug in meta - it does not work for MOBs for some reason
     }
 
