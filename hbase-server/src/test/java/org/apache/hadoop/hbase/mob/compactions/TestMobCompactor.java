@@ -617,7 +617,8 @@ public class TestMobCompactor {
     }
     int index = fileLength.size() / 2;
     if (index > 0) {
-      while (index < fileLength.size() && fileLength.get(index - 1) == fileLength.get(index)) {
+      while (index < fileLength.size()
+        && fileLength.get(index - 1).longValue() == fileLength.get(index).longValue()) {
         index++;
       }
     }
