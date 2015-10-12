@@ -878,7 +878,6 @@ public class StoreFile {
       writer.appendFileInfo(MOB_CELLS_COUNT, Bytes.toBytes(mobCellsCount));
       appendTrackedTimestampsToMetadata();
       notifyPluginsOnAppendMetadata(writer);
-      //TODO append plug in meta - it does not work for MOBs for some reason
     }
 
     /**
@@ -1747,10 +1746,8 @@ public class StoreFile {
    */
   public static abstract class Plugin {
     private Configuration conf;
-    public Plugin(){
 
-    }
-    public void config(Configuration conf){
+    public void config(Configuration conf) {
       this.conf = conf;
     }
 
@@ -1763,13 +1760,11 @@ public class StoreFile {
 
     protected Configuration conf;
 
-    public MetaWriter(){
-    }
     /**
      * Configure meta writer
      * @param conf
      */
-    public void config(Configuration conf){
+    public void config(Configuration conf) {
       this.conf = conf;
     }
     /**
