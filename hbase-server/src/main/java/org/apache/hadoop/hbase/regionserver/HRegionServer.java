@@ -186,6 +186,8 @@ import com.google.protobuf.RpcCallback;
 import com.google.protobuf.RpcController;
 import com.google.protobuf.Service;
 import com.google.protobuf.ServiceException;
+import sun.misc.Signal;
+import sun.misc.SignalHandler;
 
 /**
  * HRegionServer makes a set of HRegions available to clients. It checks in with
@@ -603,6 +605,13 @@ public class HRegionServer extends HasThread implements
     putUpWebUI();
     this.walRoller = new LogRoller(this, this);
     this.choreService = new ChoreService(getServerName().toString());
+
+    Signal.handle(new Signal("HUP"), new SignalHandler() {
+      public void handle(Signal signal) {
+        getConfiguration().reloadConfiguration();
+        configurationManager.notifyAllObservers(getConfiguration());
+      }
+    });
   }
 
   protected TableDescriptors getFsTableDescriptors() throws IOException {
@@ -1403,6 +1412,7 @@ public class HRegionServer extends HasThread implements
   private void createMyEphemeralNode() throws KeeperException, IOException {
     RegionServerInfo.Builder rsInfo = RegionServerInfo.newBuilder();
     rsInfo.setInfoPort(infoServer != null ? infoServer.getPort() : -1);
+    rsInfo.setVersionInfo(ProtobufUtil.getVersionInfo());
     byte[] data = ProtobufUtil.prependPBMagic(rsInfo.build().toByteArray());
     ZKUtil.createEphemeralNodeAndWatch(this.zooKeeper,
       getMyEphemeralNodePath(), data);

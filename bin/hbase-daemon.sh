@@ -81,11 +81,11 @@ cleanAfterRun() {
 
   if [ -f ${HBASE_ZNODE_FILE} ]; then
     if [ "$command" = "master" ]; then
-      $bin/hbase master clear > /dev/null 2>&1
+      HBASE_OPTS="$HBASE_OPTS $HBASE_MASTER_OPTS" $bin/hbase master clear > /dev/null 2>&1
     else
       #call ZK to delete the node
       ZNODE=`cat ${HBASE_ZNODE_FILE}`
-      $bin/hbase zkcli delete ${ZNODE} > /dev/null 2>&1
+      HBASE_OPTS="$HBASE_OPTS $HBASE_REGIONSERVER_OPTS" $bin/hbase zkcli delete ${ZNODE} > /dev/null 2>&1
     fi
     rm ${HBASE_ZNODE_FILE}
   fi
@@ -186,8 +186,9 @@ case $startStop in
     hbase_rotate_log $HBASE_LOGOUT
     hbase_rotate_log $HBASE_LOGGC
     echo starting $command, logging to $HBASE_LOGOUT
-    nohup $thiscmd --config "${HBASE_CONF_DIR}" \
+    $thiscmd --config "${HBASE_CONF_DIR}" \
         foreground_start $command $args < /dev/null > ${HBASE_LOGOUT} 2>&1  &
+    disown -h -r
     sleep 1; head "${HBASE_LOGOUT}"
   ;;
 
