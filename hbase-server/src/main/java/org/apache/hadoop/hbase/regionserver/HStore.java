@@ -88,6 +88,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ChecksumType;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
+import org.apache.hadoop.hbase.util.HFileArchiveUtil;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
@@ -1197,8 +1198,10 @@ public class HStore implements Store {
       if (region.getRegionServerServices().getLogMovePool() != null) {
         LOG.info("Now start to archive/move " + filesToCompact.size() + " store files to disk");
         Collection<Path> pathsToCompact = new ArrayList<Path>();
+        Path storeArchiveDir = HFileArchiveUtil.getStoreArchivePath(conf, this.getRegionInfo(),
+          this.getRegionFileSystem().getTableDir(), family.getName());
         for (StoreFile fileToCompact : filesToCompact) {
-          pathsToCompact.add(fileToCompact.getPath());
+          pathsToCompact.add(new Path(storeArchiveDir, fileToCompact.getPath().getName()));
         }
         if (!pathsToCompact.isEmpty()) {
           region

@@ -495,7 +495,7 @@ public class HRegionServer extends HasThread implements
     this.abortRequested = false;
     this.stopped = false;
 
-    logMovePool = new ThreadPoolExecutor(15, 100, 60, TimeUnit.SECONDS,
+    logMovePool = new ThreadPoolExecutor(10, 10, 60, TimeUnit.SECONDS,
       new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
 
         @Override

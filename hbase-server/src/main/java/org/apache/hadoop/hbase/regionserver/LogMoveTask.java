@@ -43,11 +43,19 @@ public class LogMoveTask implements Callable<Void> {
 
   @Override
   public Void call() throws Exception {
+    LOG.info("start to move-log: " + files.size() + " files to " + storagePolicy);
     long start = EnvironmentEdgeManager.currentTime();
     DFSClient client = ((DistributedFileSystem) fs).getClient();
-    for (Path file : files) {
-      client.setStoragePolicy(file.toString(), storagePolicy);
-      client.applyFilePolicy(file.toString());
+    try {
+      for (Path file : files) {
+        String path = Path.getPathWithoutSchemeAndAuthority(file).toString();
+//        String path = file.toString();
+        client.setStoragePolicy(path, storagePolicy);
+        client.applyFilePolicy(path.toString());
+      }  
+    } catch(Exception e) {
+      LOG.error("Failed to move logg",e);
+      throw e;
     }
     long duration = EnvironmentEdgeManager.currentTime() - start;
     LOG.info("log move took " + duration);

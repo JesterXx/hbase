@@ -213,6 +213,7 @@ class MemStoreFlusher implements FlushRequester {
                 // entire server - another thread is flushing regions. We'll just
                 // sleep a little bit to avoid spinning, and then pretend that
                 // we flushed one, so anyone blocked will check again
+                LOG.warn("Can-not flush any region");
                 Thread.sleep(1000);
                 wakeUpIfBlocking();
               }
@@ -269,6 +270,7 @@ class MemStoreFlusher implements FlushRequester {
         }
 
         if (checkStoreFileCount && isTooManyStoreFiles(region)) {
+          LOG.warn("one region have too-m files");
           continue;
         }
         return region;
@@ -374,6 +376,7 @@ class MemStoreFlusher implements FlushRequester {
     HRegion region = fqe.region;
     if (!region.getRegionInfo().isMetaRegion() &&
         isTooManyStoreFiles(region)) {
+      LOG.warn("Too-many store files in region when flushing.");
       if (fqe.isMaximumWait(this.blockingWaitTime)) {
         LOG.info("Waited " + (EnvironmentEdgeManager.currentTime() - fqe.createTime) +
           "ms on a compaction to clean up 'too many store files'; waited " +

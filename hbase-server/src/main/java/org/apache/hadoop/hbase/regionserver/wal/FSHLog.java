@@ -774,6 +774,7 @@ public class FSHLog implements WAL {
     Map<byte[], Long> oldestFlushingSeqNumsLocal = null;
     Map<byte[], Long> oldestUnflushedSeqNumsLocal = null;
     List<Path> logsToArchive = new ArrayList<Path>();
+    List<Path> logsAfterArchive = new ArrayList<Path>();
     // make a local copy so as to avoid locking when we iterate over these maps.
     synchronized (regionSequenceIdLock) {
       oldestFlushingSeqNumsLocal = new HashMap<byte[], Long>(this.lowestFlushingRegionSequenceIds);
@@ -791,17 +792,25 @@ public class FSHLog implements WAL {
         LOG.debug("WAL file ready for archiving " + log);
       }
     }
+    long startArchive =  EnvironmentEdgeManager.currentTime();
     for (Path p : logsToArchive) {
       this.totalLogSize.addAndGet(-this.fs.getFileStatus(p).getLen());
       archiveLogFile(p);
+      Path newPath = getWALArchivePath(this.fullPathArchiveDir, p);
+      logsAfterArchive.add(newPath);
       this.byWalRegionSequenceIds.remove(p);
     }
+    long durationArchive = EnvironmentEdgeManager.currentTime() - startArchive;
+    LOG.warn("The wal-archive costs: " + durationArchive);
     // move the files.
     LOG.info("Now there are " + logMoveEvents.size()
-      + " events in log moving queue. One more which has " + logsToArchive.size()
+      + " events in log moving queue. One more which has " + logsAfterArchive.size()
       + " files is going to be submitted");
-    if (!logsToArchive.isEmpty()) {
-      logMovePool.submit(new LogMoveTask(fs, logsToArchive, HdfsConstants.HOT_STORAGE_POLICY_NAME));
+    if (!logsAfterArchive.isEmpty()) {
+      long start =  EnvironmentEdgeManager.currentTime();
+      logMovePool.submit(new LogMoveTask(fs, logsAfterArchive, HdfsConstants.HOT_STORAGE_POLICY_NAME));
+      long duration = EnvironmentEdgeManager.currentTime() - start;
+      LOG.warn("The log-mover start costs: " + duration);
     }
   }
 

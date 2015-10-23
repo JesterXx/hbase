@@ -3211,6 +3211,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
     if (this.getRegionInfo().isMetaRegion()) return;
 
     if (this.memstoreSize.get() > this.blockingMemStoreSize) {
+      LOG.warn("Above memstore limit***:" + this.memstoreSize.get());
       blockedRequestsCount.increment();
       requestFlush();
       throw new RegionTooBusyException("Above memstore limit, " +
