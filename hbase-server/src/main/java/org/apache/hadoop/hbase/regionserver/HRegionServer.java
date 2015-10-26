@@ -496,7 +496,9 @@ public class HRegionServer extends HasThread implements
     this.abortRequested = false;
     this.stopped = false;
 
-    logMovePool = new ThreadPoolExecutor(10, 10, 60, TimeUnit.SECONDS,
+    int poolSize = conf.getInt("hbase.logmovepool.core", 10);
+    LOG.info("log move pool size is " + poolSize);
+    logMovePool = new ThreadPoolExecutor(poolSize, poolSize, 60, TimeUnit.SECONDS,
       new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
 
         @Override
