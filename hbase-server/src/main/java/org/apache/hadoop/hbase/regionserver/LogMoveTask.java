@@ -55,7 +55,7 @@ public class LogMoveTask implements Callable<Void> {
           client.applyFilePolicy(path);
         }
       } catch (Exception e) {
-        LOG.error("Failed to move logg", e);
+        LOG.error("Failed to move logg : " + e.getMessage());
       }
     }
     long duration = EnvironmentEdgeManager.currentTime() - start;
