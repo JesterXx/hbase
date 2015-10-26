@@ -336,8 +336,8 @@ public class FSHLog implements WAL {
 
   private final AtomicInteger closeErrorCount = new AtomicInteger();
 
-  private ExecutorService logMovePool;
-  private LinkedBlockingQueue<Runnable> logMoveEvents;
+  private ThreadPoolExecutor logMovePool;
+  private BlockingQueue<Runnable> logMoveEvents;
 
   // Region sequence id accounting across flushes and for knowing when we can GC a WAL.  These
   // sequence id numbers are by region and unrelated to the ring buffer sequence number accounting
@@ -443,6 +443,11 @@ public class FSHLog implements WAL {
     this(fs, root, logDir, HConstants.HREGION_OLDLOGDIR_NAME, conf, null, true, null, null);
   }
 
+  public void setThreadPoolExecutor(ThreadPoolExecutor pool) {
+    this.logMovePool = pool;
+    logMoveEvents = logMovePool.getQueue();
+  }
+
   /**
    * Create an edit log at the given <code>dir</code> location.
    *
@@ -476,21 +481,6 @@ public class FSHLog implements WAL {
     this.fullPathLogDir = new Path(rootDir, logDir);
     this.fullPathArchiveDir = new Path(rootDir, archiveDir);
     this.conf = conf;
-    logMoveEvents = new LinkedBlockingQueue<Runnable>();
-    logMovePool = new ThreadPoolExecutor(5, 5, 60, TimeUnit.SECONDS, logMoveEvents,
-      new ThreadFactory() {
-
-        @Override
-        public Thread newThread(Runnable r) {
-          Thread t = new Thread(r);
-          t.setDaemon(true);
-          t.setName(Thread.currentThread().getName() + "-FSHLogMoveHLog-"
-            + EnvironmentEdgeManager.currentTime());
-          return t;
-        }
-      });
-    ((ThreadPoolExecutor) this.logMovePool).allowCoreThreadTimeOut(true);
-
     if (!fs.exists(fullPathLogDir) && !fs.mkdirs(fullPathLogDir)) {
       throw new IOException("Unable to mkdir " + fullPathLogDir);
     }

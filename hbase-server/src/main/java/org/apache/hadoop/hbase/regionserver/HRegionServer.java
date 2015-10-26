@@ -132,6 +132,7 @@ import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.Repor
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionProgress;
 import org.apache.hadoop.hbase.regionserver.handler.CloseMetaHandler;
 import org.apache.hadoop.hbase.regionserver.handler.CloseRegionHandler;
+import org.apache.hadoop.hbase.regionserver.wal.FSHLog;
 import org.apache.hadoop.hbase.regionserver.wal.MetricsWAL;
 import org.apache.hadoop.hbase.regionserver.wal.WALActionsListener;
 import org.apache.hadoop.hbase.replication.regionserver.ReplicationLoad;
@@ -337,7 +338,7 @@ public class HRegionServer extends HasThread implements
 
   protected volatile WALFactory walFactory;
 
-  private java.util.concurrent.ExecutorService logMovePool;
+  private ThreadPoolExecutor logMovePool;
 
   // WAL roller. log is protected rather than private to avoid
   // eclipse warning when accessed by inner classes
@@ -507,7 +508,7 @@ public class HRegionServer extends HasThread implements
           return t;
         }
       });
-    ((ThreadPoolExecutor) this.logMovePool).allowCoreThreadTimeOut(true);
+    this.logMovePool.allowCoreThreadTimeOut(true);
 
     rpcServices = createRpcServices();
     this.startcode = System.currentTimeMillis();
@@ -1770,6 +1771,10 @@ public class HRegionServer extends HasThread implements
       wal = walFactory.getWAL(UNSPECIFIED_REGION);
     } else {
       wal = walFactory.getWAL(regionInfo.getEncodedNameAsBytes());
+    }
+    if (wal instanceof FSHLog) {
+      FSHLog fsHlog = (FSHLog)wal;
+      fsHlog.setThreadPoolExecutor(logMovePool);
     }
     roller.addWAL(wal);
     return wal;
