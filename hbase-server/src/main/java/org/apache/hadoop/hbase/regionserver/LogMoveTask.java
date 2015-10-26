@@ -51,7 +51,7 @@ public class LogMoveTask implements Callable<Void> {
         String path = Path.getPathWithoutSchemeAndAuthority(file).toString();
 //        String path = file.toString();
         client.setStoragePolicy(path, storagePolicy);
-        client.applyFilePolicy(path.toString());
+        client.applyFilePolicy(path);
       }  
     } catch(Exception e) {
       LOG.error("Failed to move logg",e);
