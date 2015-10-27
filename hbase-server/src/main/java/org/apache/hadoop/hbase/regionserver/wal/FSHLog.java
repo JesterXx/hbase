@@ -68,6 +68,7 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.LogMoveTask;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
@@ -785,6 +786,7 @@ public class FSHLog implements WAL {
     long startArchive =  EnvironmentEdgeManager.currentTime();
     for (Path p : logsToArchive) {
       this.totalLogSize.addAndGet(-this.fs.getFileStatus(p).getLen());
+      fs.create(new Path(HRegionServer.HSM_ARCHIVE, p.getName()));
       archiveLogFile(p);
       Path newPath = getWALArchivePath(this.fullPathArchiveDir, p);
       logsAfterArchive.add(newPath);

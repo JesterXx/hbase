@@ -193,6 +193,7 @@ public class HRegionServer extends HasThread implements
 
   public static final Log LOG = LogFactory.getLog(HRegionServer.class);
 
+  public static String HSM_ARCHIVE = "hsmArchive";
   /*
    * Strings to be used in forming the exception message for
    * RegionsAlreadyInTransitionException.
@@ -572,6 +573,10 @@ public class HRegionServer extends HasThread implements
     rpcServices.start();
     putUpWebUI();
     this.walRoller = new LogRoller(this, this);
+    Path hbaseDir = new Path(conf.get(HConstants.HBASE_DIR));
+    Path archivePath = new Path(hbaseDir, HSM_ARCHIVE);
+    fs.delete(archivePath, true);
+    fs.mkdirs(archivePath);
   }
 
   protected void login(UserProvider user, String host) throws IOException {

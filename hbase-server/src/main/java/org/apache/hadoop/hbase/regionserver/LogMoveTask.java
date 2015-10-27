@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.concurrent.Callable;
 
@@ -56,6 +57,13 @@ public class LogMoveTask implements Callable<Void> {
         }
       } catch (Exception e) {
         LOG.warn("Failed to move logg : " + e.getMessage());
+      } finally {
+        Path path = new Path(HRegionServer.HSM_ARCHIVE, file.getName());
+        try {
+          fs.delete(path, false); 
+        } catch(IOException e) {
+          LOG.warn("Failed to delete the archived link", e);
+        }
       }
     }
     long duration = EnvironmentEdgeManager.currentTime() - start;

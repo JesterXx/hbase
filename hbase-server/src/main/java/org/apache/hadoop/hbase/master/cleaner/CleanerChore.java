@@ -30,6 +30,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Chore;
 import org.apache.hadoop.hbase.RemoteExceptionHandler;
 import org.apache.hadoop.hbase.Stoppable;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.util.FSUtils;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -214,7 +215,14 @@ public abstract class CleanerChore<T extends FileCleanerDelegate> extends Chore 
     List<FileStatus> invalidFiles = Lists.newArrayList();
     for (FileStatus file : files) {
       if (validate(file.getPath())) {
-        validFiles.add(file);
+        Path p1 = new Path(HRegionServer.HSM_ARCHIVE, file.getPath().getName());
+        try {
+          if(!fs.exists(p1)) {
+            validFiles.add(file);
+          }
+        } catch (IOException e) {
+          LOG.warn("Failed to find-the-file " + p1);
+        }
       } else {
         LOG.warn("Found a wrongly formatted file: " + file.getPath() + " - will delete it.");
         invalidFiles.add(file);
