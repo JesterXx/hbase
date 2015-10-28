@@ -193,8 +193,6 @@ public class HRegionServer extends HasThread implements
 
   public static final Log LOG = LogFactory.getLog(HRegionServer.class);
 
-  public static String HSM_ARCHIVE = "hsmArchive";
-  public static Path hsmArchivePath = null;
   /*
    * Strings to be used in forming the exception message for
    * RegionsAlreadyInTransitionException.
@@ -498,9 +496,6 @@ public class HRegionServer extends HasThread implements
     this.abortRequested = false;
     this.stopped = false;
 
-    Path hbaseDir = new Path(conf.get(HConstants.HBASE_DIR));
-    hsmArchivePath = new Path(hbaseDir, HSM_ARCHIVE);
-
     int poolSize = conf.getInt("hbase.logmovepool.core", 10);
     LOG.info("log move pool size is " + poolSize);
     logMovePool = new ThreadPoolExecutor(poolSize, poolSize, 60, TimeUnit.SECONDS,
@@ -577,8 +572,6 @@ public class HRegionServer extends HasThread implements
     rpcServices.start();
     putUpWebUI();
     this.walRoller = new LogRoller(this, this);
-    fs.delete(hsmArchivePath, true);
-    fs.mkdirs(hsmArchivePath);
   }
 
   protected void login(UserProvider user, String host) throws IOException {

@@ -35,45 +35,44 @@ public class LogMoveTask implements Callable<Void> {
   private FileSystem fs;
   private Collection<Path> files;
   private String storagePolicy;
+  private String source;
 
-  public LogMoveTask(FileSystem fs, Collection<Path> files, String storagePolicy) {
+  public LogMoveTask(FileSystem fs, Collection<Path> files, String storagePolicy, String source) {
     this.fs = fs;
     this.files = files;
     this.storagePolicy = storagePolicy;
+    this.source = source;
   }
 
   @Override
   public Void call() throws Exception {
-    LOG.info("start to move-log: " + files.size() + " files to " + storagePolicy);
+    LOG.info("start to move-log [" + source + "] : " + files.size() + " files to " + storagePolicy);
     long start = EnvironmentEdgeManager.currentTime();
-    DFSClient client = ((DistributedFileSystem) fs).getClient();
+    DFSClient client = null;
+    try{
+      client = ((DistributedFileSystem) fs).getClient();  
+    } catch(Exception e) {
+      LOG.error("ClassCastException-movefile", e);
+      throw e;
+    }
+    
     for (Path file : files) {
       Path p = Path.getPathWithoutSchemeAndAuthority(file);
       try {
         String path = p.toString();
         if (client.exists(path)) {
-          LOG.info("moved-log path is " + path);
+          LOG.info("moved-log path is ["+source+"] " + path);
           client.setStoragePolicy(path, storagePolicy);
           client.applyFilePolicy(path);
         } else {
-          LOG.warn("moved-log path is not found " + path);
+          LOG.warn("moved-log path is not found ["+source+"] " + path);
         }
       } catch (Exception e) {
-        LOG.warn("Failed to move logg : " + e.getMessage());
-      } finally {
-        Path path = new Path(HRegionServer.hsmArchivePath, p.getName());
-        try {
-          boolean successful = fs.delete(path, false);
-          if(!successful) {
-            LOG.warn("arhived-llink is not found " + path);
-          }
-        } catch(IOException e) {
-          LOG.warn("Failed to delete the archived link", e);
-        }
+        LOG.warn("Failed to move logg ["+source+"] : " + e.getMessage());
       }
     }
     long duration = EnvironmentEdgeManager.currentTime() - start;
-    LOG.info("log move took " + duration);
+    LOG.info("log move took ["+source+"] " + duration);
     return null;
   }
 }

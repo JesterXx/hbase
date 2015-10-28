@@ -44,7 +44,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -68,7 +67,6 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.LogMoveTask;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
@@ -85,7 +83,6 @@ import org.apache.hadoop.hbase.wal.WALPrettyPrinter;
 import org.apache.hadoop.hbase.wal.WALProvider.Writer;
 import org.apache.hadoop.hbase.wal.WALSplitter;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
-import org.apache.hadoop.hdfs.StorageType;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.util.StringUtils;
@@ -786,7 +783,6 @@ public class FSHLog implements WAL {
     long startArchive =  EnvironmentEdgeManager.currentTime();
     for (Path p : logsToArchive) {
       this.totalLogSize.addAndGet(-this.fs.getFileStatus(p).getLen());
-      fs.createNewFile(new Path(HRegionServer.hsmArchivePath, p.getName()));
       archiveLogFile(p);
       Path newPath = getWALArchivePath(this.fullPathArchiveDir, p);
       logsAfterArchive.add(newPath);
@@ -800,7 +796,7 @@ public class FSHLog implements WAL {
       + " files is going to be submitted");
     if (!logsAfterArchive.isEmpty()) {
       long start =  EnvironmentEdgeManager.currentTime();
-      logMovePool.submit(new LogMoveTask(fs, logsAfterArchive, HdfsConstants.HOT_STORAGE_POLICY_NAME));
+      logMovePool.submit(new LogMoveTask(fs, logsAfterArchive, HdfsConstants.HOT_STORAGE_POLICY_NAME, "wal"));
       long duration = EnvironmentEdgeManager.currentTime() - start;
       LOG.warn("The log-mover start costs: " + duration);
     }

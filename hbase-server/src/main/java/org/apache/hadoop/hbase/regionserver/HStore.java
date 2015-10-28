@@ -62,6 +62,7 @@ import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.conf.ConfigurationManager;
+import org.apache.hadoop.hbase.fs.HFileSystem;
 import org.apache.hadoop.hbase.io.compress.Compression;
 import org.apache.hadoop.hbase.io.crypto.Cipher;
 import org.apache.hadoop.hbase.io.crypto.Encryption;
@@ -1193,10 +1194,6 @@ public class HStore implements Store {
         compactedCellsSize += getCompactionProgress().totalCompactedSize;
       }
       // At this point the store will use new files for all new scanners.
-      for (StoreFile sf : filesToCompact) {
-        Path p = new Path(HRegionServer.hsmArchivePath, sf.getPath().getName());
-        fs.getFileSystem().createNewFile(p);
-      }
       completeCompaction(filesToCompact, true); // Archive old files & update store size.
 
       if (region.getRegionServerServices().getLogMovePool() != null) {
@@ -1212,8 +1209,8 @@ public class HStore implements Store {
             .getRegionServerServices()
             .getLogMovePool()
             .submit(
-              new LogMoveTask(fs.getFileSystem(), pathsToCompact,
-                HdfsConstants.HOT_STORAGE_POLICY_NAME));
+              new LogMoveTask(((HFileSystem)fs.getFileSystem()).getRawFileSystem(), pathsToCompact,
+                HdfsConstants.HOT_STORAGE_POLICY_NAME, "hfile"));
         }
       }
 
