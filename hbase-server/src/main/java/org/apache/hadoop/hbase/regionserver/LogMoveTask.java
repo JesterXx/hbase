@@ -48,19 +48,25 @@ public class LogMoveTask implements Callable<Void> {
     long start = EnvironmentEdgeManager.currentTime();
     DFSClient client = ((DistributedFileSystem) fs).getClient();
     for (Path file : files) {
+      Path p = Path.getPathWithoutSchemeAndAuthority(file);
       try {
-        String path = Path.getPathWithoutSchemeAndAuthority(file).toString();
+        String path = p.toString();
         if (client.exists(path)) {
           LOG.info("moved-log path is " + path);
           client.setStoragePolicy(path, storagePolicy);
           client.applyFilePolicy(path);
+        } else {
+          LOG.warn("moved-log path is not found " + path);
         }
       } catch (Exception e) {
         LOG.warn("Failed to move logg : " + e.getMessage());
       } finally {
-        Path path = new Path(HRegionServer.hsmArchivePath, file.getName());
+        Path path = new Path(HRegionServer.hsmArchivePath, p.getName());
         try {
-          fs.delete(path, false); 
+          boolean successful = fs.delete(path, false);
+          if(!successful) {
+            LOG.warn("arhived-llink is not found " + path);
+          }
         } catch(IOException e) {
           LOG.warn("Failed to delete the archived link", e);
         }
