@@ -215,7 +215,7 @@ public abstract class CleanerChore<T extends FileCleanerDelegate> extends Chore 
     List<FileStatus> invalidFiles = Lists.newArrayList();
     for (FileStatus file : files) {
       if (validate(file.getPath())) {
-        Path p1 = new Path(HRegionServer.HSM_ARCHIVE, file.getPath().getName());
+        Path p1 = new Path(HRegionServer.hsmArchivePath, file.getPath().getName());
         try {
           if(!fs.exists(p1)) {
             validFiles.add(file);

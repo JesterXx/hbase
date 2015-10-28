@@ -786,7 +786,7 @@ public class FSHLog implements WAL {
     long startArchive =  EnvironmentEdgeManager.currentTime();
     for (Path p : logsToArchive) {
       this.totalLogSize.addAndGet(-this.fs.getFileStatus(p).getLen());
-      fs.createNewFile(new Path(HRegionServer.HSM_ARCHIVE, p.getName()));
+      fs.createNewFile(new Path(HRegionServer.hsmArchivePath, p.getName()));
       archiveLogFile(p);
       Path newPath = getWALArchivePath(this.fullPathArchiveDir, p);
       logsAfterArchive.add(newPath);

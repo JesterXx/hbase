@@ -1194,7 +1194,7 @@ public class HStore implements Store {
       }
       // At this point the store will use new files for all new scanners.
       for (StoreFile sf : filesToCompact) {
-        Path p = new Path(HRegionServer.HSM_ARCHIVE, sf.getPath().getName());
+        Path p = new Path(HRegionServer.hsmArchivePath, sf.getPath().getName());
         fs.getFileSystem().createNewFile(p);
       }
       completeCompaction(filesToCompact, true); // Archive old files & update store size.

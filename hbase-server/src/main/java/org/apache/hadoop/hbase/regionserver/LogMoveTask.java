@@ -58,7 +58,7 @@ public class LogMoveTask implements Callable<Void> {
       } catch (Exception e) {
         LOG.warn("Failed to move logg : " + e.getMessage());
       } finally {
-        Path path = new Path(HRegionServer.HSM_ARCHIVE, file.getName());
+        Path path = new Path(HRegionServer.hsmArchivePath, file.getName());
         try {
           fs.delete(path, false); 
         } catch(IOException e) {
