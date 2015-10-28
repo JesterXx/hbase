@@ -577,8 +577,8 @@ public class HRegionServer extends HasThread implements
     rpcServices.start();
     putUpWebUI();
     this.walRoller = new LogRoller(this, this);
-    fs.delete(archivePath, true);
-    fs.mkdirs(archivePath);
+    fs.delete(hsmArchivePath, true);
+    fs.mkdirs(hsmArchivePath);
   }
 
   protected void login(UserProvider user, String host) throws IOException {
