@@ -29,11 +29,13 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.regionserver.DefaultStoreFlusher;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.ScanType;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 
 /**
@@ -81,6 +83,7 @@ public class DefaultCompactor extends Compactor {
     List<Path> newFiles = new ArrayList<Path>();
     boolean cleanSeqId = false;
     IOException e = null;
+    byte[] storageType = DefaultStoreFlusher.HDD_TYPE;
     try {
       InternalScanner scanner = null;
       try {
@@ -106,6 +109,7 @@ public class DefaultCompactor extends Compactor {
         LOG.info("Compacting files size is " + fd.fileLength);
         if (fd.fileLength <= hsmSsdThreshold) {
           LOG.info("Compacting files " + fd.fileLength + " are moved to SSD");
+          storageType = Bytes.toBytes(HdfsConstants.ALLSSD_STORAGE_POLICY_NAME);
           writer = store.createWriterInTmp(fd.maxKeyCount, this.compactionCompression, true,
             fd.maxMVCCReadpoint > 0, fd.maxTagsLength > 0, HdfsConstants.ALLSSD_STORAGE_POLICY_NAME);
         } else {
@@ -138,6 +142,8 @@ public class DefaultCompactor extends Compactor {
           if (e != null) {
             writer.close();
           } else {
+            writer.appendFileInfo(DefaultStoreFlusher.STORAGE_TYPE,
+              storageType);
             writer.appendMetadata(fd.maxSeqId, request.isAllFiles());
             writer.close();
             newFiles.add(writer.getPath());

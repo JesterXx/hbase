@@ -1197,13 +1197,17 @@ public class HStore implements Store {
       completeCompaction(filesToCompact, true); // Archive old files & update store size.
 
       if (region.getRegionServerServices().getLogMovePool() != null) {
-        LOG.info("Now start to archive/move " + filesToCompact.size() + " store files to disk");
         Collection<Path> pathsToCompact = new ArrayList<Path>();
         Path storeArchiveDir = HFileArchiveUtil.getStoreArchivePath(conf, this.getRegionInfo(),
           this.getRegionFileSystem().getTableDir(), family.getName());
         for (StoreFile fileToCompact : filesToCompact) {
-          pathsToCompact.add(new Path(storeArchiveDir, fileToCompact.getPath().getName()));
+          byte[] value = fileToCompact.getMetadataValue(DefaultStoreFlusher.STORAGE_TYPE);
+          if (value != null && !Bytes.equals(value, DefaultStoreFlusher.HDD_TYPE)) {
+            pathsToCompact.add(new Path(storeArchiveDir, fileToCompact.getPath().getName()));
+          }
         }
+        LOG.info("Now start to archive/move " + pathsToCompact.size() + "/" + filesToCompact
+          + " store files to disk");
         if (!pathsToCompact.isEmpty()) {
           region
             .getRegionServerServices()

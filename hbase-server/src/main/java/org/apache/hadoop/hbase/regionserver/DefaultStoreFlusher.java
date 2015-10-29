@@ -28,6 +28,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hdfs.StorageType;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.util.StringUtils;
@@ -39,6 +40,9 @@ import org.apache.hadoop.util.StringUtils;
 public class DefaultStoreFlusher extends StoreFlusher {
   private static final Log LOG = LogFactory.getLog(DefaultStoreFlusher.class);
   private final Object flushLock = new Object();
+  public static byte[] STORAGE_TYPE = Bytes.toBytes("st");
+  public static byte[] SDD_TYPE = Bytes.toBytes(HdfsConstants.ALLSSD_STORAGE_POLICY_NAME);
+  public static byte[] HDD_TYPE = Bytes.toBytes(HdfsConstants.HOT_STORAGE_POLICY_NAME);
 
   public DefaultStoreFlusher(Configuration conf, Store store) {
     super(conf, store);
@@ -79,6 +83,8 @@ public class DefaultStoreFlusher extends StoreFlusher {
           if (e != null) {
             writer.close();
           } else {
+            writer.appendFileInfo(STORAGE_TYPE,
+              SDD_TYPE);
             finalizeWriter(writer, cacheFlushId, status);
           }
         }
