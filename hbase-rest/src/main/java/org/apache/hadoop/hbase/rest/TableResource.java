@@ -34,14 +34,13 @@ import javax.ws.rs.core.UriInfo;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.filter.Filter;
-import org.apache.hadoop.hbase.filter.FilterList;
 import org.apache.hadoop.hbase.filter.ParseFilter;
-import org.apache.hadoop.hbase.filter.PrefixFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 
 @InterfaceAudience.Private
@@ -136,15 +135,11 @@ public class TableResource extends ResourceBase {
       @DefaultValue("true") @QueryParam(Constants.SCAN_BATCH_SIZE) boolean cacheBlocks, 
       @DefaultValue("") @QueryParam(Constants.SCAN_FILTER) String filters) {
     try {
-      Filter filter = null;
       Scan tableScan = new Scan();
       if (scanSpec.indexOf('*') > 0) {
         String prefix = scanSpec.substring(0, scanSpec.indexOf('*'));
         byte[] prefixBytes = Bytes.toBytes(prefix);
-        filter = new PrefixFilter(Bytes.toBytes(prefix));
-        if (startRow.isEmpty()) {
-          tableScan.setStartRow(prefixBytes);
-        }
+        tableScan.setRowPrefixFilter(prefixBytes);
       }
       LOG.debug("Query parameters  : Table Name = > " + this.table + " Start Row => " + startRow
           + " End Row => " + endRow + " Columns => " + column + " Start Time => " + startTime
@@ -154,10 +149,27 @@ public class TableResource extends ResourceBase {
       tableScan.setBatch(batchSize);
       tableScan.setMaxVersions(maxVersions);
       tableScan.setTimeRange(startTime, endTime);
-      if (!startRow.isEmpty()) {
-        tableScan.setStartRow(Bytes.toBytes(startRow));
+      byte[] startRowBytes = startRow.isEmpty() ? HConstants.EMPTY_START_ROW : Bytes
+        .toBytes(startRow);
+      byte[] endRowBytes = endRow.isEmpty() ? HConstants.EMPTY_END_ROW : Bytes.toBytes(endRow);
+      if (startRowBytes != HConstants.EMPTY_START_ROW
+        && Bytes.compareTo(tableScan.getStartRow(), startRowBytes) < 0) {
+        tableScan.setStartRow(startRowBytes);
       }
-      tableScan.setStopRow(Bytes.toBytes(endRow));
+      if ((tableScan.getStopRow() == HConstants.EMPTY_END_ROW && endRowBytes != HConstants.EMPTY_END_ROW)
+        || (tableScan.getStopRow() != HConstants.EMPTY_END_ROW
+          && endRowBytes != HConstants.EMPTY_END_ROW && Bytes.compareTo(tableScan.getStopRow(),
+          endRowBytes) > 0)) {
+        tableScan.setStopRow(endRowBytes);
+      }
+      if (tableScan.getStartRow() != HConstants.EMPTY_START_ROW
+        && tableScan.getStopRow() != HConstants.EMPTY_START_ROW
+        && Bytes.compareTo(tableScan.getStartRow(), tableScan.getStopRow()) > 0) {
+        LOG.warn("After optimization, query parameters  : Table Name = > " + this.table
+          + " Start Row => " + Bytes.toString(tableScan.getStartRow()) + " End Row => "
+          + Bytes.toString(tableScan.getStopRow()) + ". The start row is larger the end row!");
+        return null;
+      }
       for (String csplit : column) {
         String[] familysplit = csplit.trim().split(":");
         if (familysplit.length == 2) {
@@ -174,21 +186,10 @@ public class TableResource extends ResourceBase {
           tableScan.addFamily(Bytes.toBytes(familysplit[0]));
         }
       }
-      FilterList filterList = null;
       if (StringUtils.isNotEmpty(filters)) {
           ParseFilter pf = new ParseFilter();
           Filter filterParam = pf.parseFilterString(filters);
-          if (filter != null) {
-            filterList = new FilterList(filter, filterParam);
-          }
-          else {
-            filter = filterParam;
-          }
-      }
-      if (filterList != null) {
-        tableScan.setFilter(filterList);
-      } else if (filter != null) {
-        tableScan.setFilter(filter);
+          tableScan.setFilter(filterParam);
       }
       int fetchSize = this.servlet.getConfiguration().getInt(Constants.SCAN_FETCH_SIZE, 10);
       tableScan.setCaching(fetchSize);
