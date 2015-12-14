@@ -51,6 +51,8 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.ByteString;
 
+
+import org.apache.hadoop.hbase.regionserver.HRegion.RowOperationContext;
 // imports for things that haven't moved from regionserver.wal yet.
 import org.apache.hadoop.hbase.regionserver.wal.CompressionContext;
 import org.apache.hadoop.hbase.regionserver.wal.WALCellCodec;
@@ -76,10 +78,21 @@ import org.apache.hadoop.hbase.regionserver.wal.WALCellCodec;
 @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.REPLICATION)
 public class WALKey implements SequenceId, Comparable<WALKey> {
   private static final Log LOG = LogFactory.getLog(WALKey.class);
+  private RowOperationContext[] rowOperationContexts;
 
   @InterfaceAudience.Private // For internal use only.
   public MultiVersionConcurrencyControl getMvcc() {
     return mvcc;
+  }
+
+  @InterfaceAudience.Private // For internal use only.
+  public RowOperationContext[] getRowOperationContexts() {
+    return rowOperationContexts;
+  }
+
+  @InterfaceAudience.Private // For internal use only.
+  public void setRowOperationContexts(RowOperationContext... rowOperationContexts) {
+    this.rowOperationContexts = rowOperationContexts;
   }
 
   /**

@@ -263,8 +263,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   // - the thread that owns the lock (allow reentrancy)
   // - reference count of (reentrant) locks held by the thread
   // - the row itself
-  private final ConcurrentHashMap<HashedBytes, RowLockContext> lockedRows =
-      new ConcurrentHashMap<HashedBytes, RowLockContext>();
+  private final ConcurrentHashMap<HashedBytes, RowContext> lockedRows =
+      new ConcurrentHashMap<HashedBytes, RowContext>();
 
   protected final Map<byte[], Store> stores = new ConcurrentSkipListMap<byte[], Store>(
       Bytes.BYTES_RAWCOMPARATOR);
@@ -2987,6 +2987,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
     /** Keep track of the locks we hold so we can release them in finally clause */
     List<RowLock> acquiredRowLocks = Lists.newArrayListWithCapacity(batchOp.operations.length);
+    RowOperationContext[] rowOpContexts = new RowOperationContext[batchOp.operations.length];
     // reference family maps directly so coprocessors can mutate them if desired
     Map<byte[], List<Cell>>[] familyMaps = new Map[batchOp.operations.length];
     // We try to set up a batch in the range [firstIndex,lastIndexExclusive)
@@ -3053,18 +3054,19 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
         // If we haven't got any rows in our batch, we should block to
         // get the next one.
-        RowLock rowLock = null;
+        Pair<RowContext, RowLock> pair = null;
         try {
-          rowLock = getRowLock(mutation.getRow(), true);
+          pair = getRowLockPair(mutation.getRow(), true);
         } catch (IOException ioe) {
           LOG.warn("Failed getting lock in batch put, row="
             + Bytes.toStringBinary(mutation.getRow()), ioe);
         }
-        if (rowLock == null) {
+        if (pair == null) {
           // We failed to grab another lock
           break; // stop acquiring more rows for this batch
         } else {
-          acquiredRowLocks.add(rowLock);
+          acquiredRowLocks.add(pair.getSecond());
+          rowOpContexts[lastIndexExclusive] = pair.getFirst().getRowOperationContext();
         }
 
         lastIndexExclusive++;
@@ -3202,6 +3204,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         walKey = new HLogKey(this.getRegionInfo().getEncodedNameAsBytes(),
             this.htableDescriptor.getTableName(), WALKey.NO_SEQUENCE_ID, now,
             mutation.getClusterIds(), currentNonceGroup, currentNonce, mvcc);
+          walKey.setRowOperationContexts(rowOpContexts);
         }
         txid = this.wal.append(this.htableDescriptor, this.getRegionInfo(), walKey, walEdit, true);
       }
@@ -3210,7 +3213,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       // ----------------------------------
       if (walKey == null) {
         // If this is a skip wal operation just get the read point from mvcc
-        walKey = this.appendEmptyEdit(this.wal);
+        walKey = this.appendEmptyEdit(this.wal, rowOpContexts);
       }
       if (!isInReplay) {
         writeEntry = walKey.getWriteEntry();
@@ -3397,9 +3400,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       get.addColumn(family, qualifier);
 
       // Lock row - note that doBatchMutate will relock this row if called
-      RowLock rowLock = getRowLock(get.getRow());
+      Pair<RowContext, RowLock> pair = getRowLockPair(get.getRow(), false);
+      RowLock rowLock = pair.getSecond();
       // wait for all previous transactions to complete (with lock held)
-      mvcc.await();
+      mvcc.await(pair.getFirst().getRowOperationContext());
       try {
         if (this.getCoprocessorHost() != null) {
           Boolean processed = null;
@@ -3506,9 +3510,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       get.addColumn(family, qualifier);
 
       // Lock row - note that doBatchMutate will relock this row if called
-      RowLock rowLock = getRowLock(get.getRow());
+      Pair<RowContext, RowLock> pair = getRowLockPair(get.getRow(), false);
+      RowLock rowLock = pair.getSecond();
       // wait for all previous transactions to complete (with lock held)
-      mvcc.await();
+      mvcc.await(pair.getFirst().getRowOperationContext());
       try {
         List<Cell> result = get(get, false);
 
@@ -5141,6 +5146,113 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     return getRowLock(row, false);
   }
 
+  public static class RowContext {
+    private RowOperationContext rowOperationContext;
+    private RowLockContext rowLockContext;
+
+    public RowContext(RowLockContext rowLockContext) {
+      this.rowLockContext = rowLockContext;
+      this.rowOperationContext = new RowOperationContext();
+    }
+
+    public RowOperationContext getRowOperationContext() {
+      return rowOperationContext;
+    }
+
+    public void setRowOperationContext(RowOperationContext rowOperationContext) {
+      this.rowOperationContext = rowOperationContext;
+    }
+
+    public RowLockContext getRowLockContext() {
+      return rowLockContext;
+    }
+
+    public void setRowLockContext(RowLockContext rowLockContext) {
+      this.rowLockContext = rowLockContext;
+    }
+  }
+
+  public static class RowOperationContext {
+    private long nextWriteNumber = -1;
+
+    public long getNextWriteNumber() {
+      return nextWriteNumber;
+    }
+
+    public void setNextWriteNumber(long nextWriteNumber) {
+      this.nextWriteNumber = nextWriteNumber;
+    }
+  }
+
+  public Pair<RowContext, RowLock> getRowLockPair(byte[] row, boolean readLock)
+    throws IOException {
+    // Make sure the row is inside of this region before getting the lock for it.
+    checkRow(row, "row lock");
+    // create an object to use a a key in the row lock map
+    HashedBytes rowKey = new HashedBytes(row);
+
+    RowLockContext rowLockContext = null;
+    RowLockImpl result = null;
+    RowContext rowContext = null;
+    TraceScope traceScope = null;
+
+    // If we're tracing start a span to show how long this took.
+    if (Trace.isTracing()) {
+      traceScope = Trace.startSpan("HRegion.getRowLock");
+      traceScope.getSpan().addTimelineAnnotation("Getting a " + (readLock?"readLock":"writeLock"));
+    }
+
+    try {
+      // Keep trying until we have a lock or error out.
+      // TODO: do we need to add a time component here?
+      while (result == null) {
+
+        // Try adding a RowLockContext to the lockedRows.
+        // If we can add it then there's no other transactions currently running.
+        rowLockContext = new RowLockContext(rowKey);
+        rowContext = new RowContext(rowLockContext);
+        RowContext existingContext = lockedRows.putIfAbsent(rowKey, rowContext);
+
+        // if there was a running transaction then there's already a context.
+        if (existingContext != null) {
+          rowContext = existingContext;
+        }
+
+        // Now try an get the lock.
+        //
+        // This can fail as
+        if (readLock) {
+          result = rowContext.getRowLockContext().newReadLock();
+        } else {
+          result = rowContext.getRowLockContext().newWriteLock();
+        }
+      }
+      if (!result.getLock().tryLock(this.rowLockWaitDuration, TimeUnit.MILLISECONDS)) {
+        if (traceScope != null) {
+          traceScope.getSpan().addTimelineAnnotation("Failed to get row lock");
+        }
+        result = null;
+        // Clean up the counts just in case this was the thing keeping the context alive.
+        rowLockContext.cleanUp();
+        throw new IOException("Timed out waiting for lock for row: " + rowKey);
+      }
+      return new Pair<RowContext, RowLock>(rowContext, result);
+    } catch (InterruptedException ie) {
+      LOG.warn("Thread interrupted waiting for lock on row: " + rowKey);
+      InterruptedIOException iie = new InterruptedIOException();
+      iie.initCause(ie);
+      if (traceScope != null) {
+        traceScope.getSpan().addTimelineAnnotation("Interrupted exception getting row lock");
+      }
+      Thread.currentThread().interrupt();
+      throw iie;
+    } finally {
+      if (traceScope != null) {
+        traceScope.close();
+      }
+    }
+  }
+  
   /**
    *
    * Get a row lock for the specified row. All locks are reentrant.
@@ -5175,20 +5287,21 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         // Try adding a RowLockContext to the lockedRows.
         // If we can add it then there's no other transactions currently running.
         rowLockContext = new RowLockContext(rowKey);
-        RowLockContext existingContext = lockedRows.putIfAbsent(rowKey, rowLockContext);
+        RowContext rowContext = new RowContext(rowLockContext);
+        RowContext existingContext = lockedRows.putIfAbsent(rowKey, rowContext);
 
         // if there was a running transaction then there's already a context.
         if (existingContext != null) {
-          rowLockContext = existingContext;
+          rowContext = existingContext;
         }
 
         // Now try an get the lock.
         //
         // This can fail as
         if (readLock) {
-          result = rowLockContext.newReadLock();
+          result = rowContext.getRowLockContext().newReadLock();
         } else {
-          result = rowLockContext.newWriteLock();
+          result = rowContext.getRowLockContext().newWriteLock();
         }
       }
       if (!result.getLock().tryLock(this.rowLockWaitDuration, TimeUnit.MILLISECONDS)) {
@@ -5265,8 +5378,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         synchronized (lock) {
           if (count.get() <= 0 ){
             usable.set(false);
-            RowLockContext removed = lockedRows.remove(row);
-            assert removed == this: "we should never remove a different context";
+            RowContext removed = lockedRows.remove(row);
+            assert removed.getRowLockContext() ==
+              this: "we should never remove a different context";
           }
         }
       }
@@ -6872,10 +6986,14 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     try {
       // 2. Acquire the row lock(s)
       acquiredRowLocks = new ArrayList<RowLock>(rowsToLock.size());
+      RowOperationContext[] rowOpContexts = new RowOperationContext[rowsToLock.size()];
+      int index = 0;
       for (byte[] row : rowsToLock) {
         // Attempt to lock all involved rows, throw if any lock times out
         // use a writer lock for mixed reads and writes
-        acquiredRowLocks.add(getRowLock(row));
+        Pair<RowContext, RowLock> pair = getRowLockPair(row, false);
+        acquiredRowLocks.add(pair.getSecond());
+        rowOpContexts[index++] = pair.getFirst().getRowOperationContext();
       }
       // 3. Region lock
       lock(this.updatesLock.readLock(), acquiredRowLocks.size() == 0 ? 1 : acquiredRowLocks.size());
@@ -6900,13 +7018,14 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             walKey = new HLogKey(this.getRegionInfo().getEncodedNameAsBytes(),
               this.htableDescriptor.getTableName(), WALKey.NO_SEQUENCE_ID, now,
               processor.getClusterIds(), nonceGroup, nonce, mvcc);
+            walKey.setRowOperationContexts(rowOpContexts);
             txid = this.wal.append(this.htableDescriptor, this.getRegionInfo(),
                 walKey, walEdit, false);
           }
           if(walKey == null){
             // since we use wal sequence Id as mvcc, for SKIP_WAL changes we need a "faked" WALEdit
             // to get a sequence id assigned which is done by FSWALEntry#stampRegionSequenceId
-            walKey = this.appendEmptyEdit(this.wal);
+            walKey = this.appendEmptyEdit(this.wal, rowOpContexts);
           }
 
           // 7. Start mvcc transaction
@@ -7106,14 +7225,16 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     MultiVersionConcurrencyControl.WriteEntry writeEntry = null;
     boolean doRollBackMemstore = false;
     try {
-      rowLock = getRowLock(row);
+//      rowLock = getRowLock(row);
+      Pair<RowContext, RowLock> pair = getRowLockPair(row, false);
+      rowLock = pair.getSecond();
       assert rowLock != null;
       try {
         lock(this.updatesLock.readLock());
         try {
           // Wait for all prior MVCC transactions to finish - while we hold the row lock
           // (so that we are guaranteed to see the latest state when we do our Get)
-          mvcc.await();
+          mvcc.await(pair.getFirst().getRowOperationContext());
           if (this.coprocessorHost != null) {
             Result r = this.coprocessorHost.preAppendAfterRowLock(mutate);
             if (r!= null) {
@@ -7232,6 +7353,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
                   nonceGroup,
                   nonce,
                   mvcc);
+              walKey.setRowOperationContexts(pair.getFirst().getRowOperationContext());
               txid =
                 this.wal.append(this.htableDescriptor, getRegionInfo(), walKey, walEdits, true);
             } else {
@@ -7240,7 +7362,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           }
           if (walKey == null) {
             // Append a faked WALEdit in order for SKIP_WAL updates to get mvcc assigned
-            walKey = this.appendEmptyEdit(this.wal);
+            walKey = this.appendEmptyEdit(this.wal, pair.getFirst().getRowOperationContext());
           }
 
           // now start my own transaction
@@ -7350,14 +7472,15 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     boolean doRollBackMemstore = false;
     TimeRange tr = mutation.getTimeRange();
     try {
-      rowLock = getRowLock(row);
+      Pair<RowContext, RowLock> rowLockPair = getRowLockPair(row, false);
+      rowLock = rowLockPair.getSecond();
       assert rowLock != null;
       try {
         lock(this.updatesLock.readLock());
         try {
           // wait for all prior MVCC transactions to finish - while we hold the row lock
           // (so that we are guaranteed to see the latest state)
-          mvcc.await();
+          mvcc.await(rowLockPair.getFirst().getRowOperationContext());
           if (this.coprocessorHost != null) {
             Result r = this.coprocessorHost.preIncrementAfterRowLock(mutation);
             if (r != null) {
@@ -7463,6 +7586,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
                   nonceGroup,
                   nonce,
                   mvcc);
+              walKey.setRowOperationContexts(rowLockPair.getFirst().getRowOperationContext());
               txid = this.wal.append(this.htableDescriptor, this.getRegionInfo(),
                   walKey, walEdits, true);
             } else {
@@ -7471,7 +7595,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           }
           if (walKey == null) {
             // Append a faked WALEdit in order for SKIP_WAL updates to get mvccNum assigned
-            walKey = this.appendEmptyEdit(this.wal);
+            walKey = this
+              .appendEmptyEdit(this.wal, rowLockPair.getFirst().getRowOperationContext());
           }
 
           // now start my own transaction
@@ -8138,6 +8263,25 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       getRegionInfo().getTable(), WALKey.NO_SEQUENCE_ID, 0, null,
       HConstants.NO_NONCE, HConstants.NO_NONCE, getMVCC());
     
+    // Call append but with an empty WALEdit.  The returned sequence id will not be associated
+    // with any edit and we can be sure it went in after all outstanding appends.
+    try {
+      wal.append(getTableDesc(), getRegionInfo(), key, WALEdit.EMPTY_WALEDIT, false);
+    } catch (Throwable t) {
+      // If exception, our mvcc won't get cleaned up by client, so do it here.
+      getMVCC().complete(key.getWriteEntry());
+    }
+    return key;
+  }
+
+  private WALKey appendEmptyEdit(final WAL wal, RowOperationContext... rowOperationContexts)
+    throws IOException {
+    // we use HLogKey here instead of WALKey directly to support legacy coprocessors.
+    @SuppressWarnings("deprecation")
+    WALKey key = new HLogKey(getRegionInfo().getEncodedNameAsBytes(),
+      getRegionInfo().getTable(), WALKey.NO_SEQUENCE_ID, 0, null,
+      HConstants.NO_NONCE, HConstants.NO_NONCE, getMVCC());
+    key.setRowOperationContexts(rowOperationContexts);
     // Call append but with an empty WALEdit.  The returned sequence id will not be associated
     // with any edit and we can be sure it went in after all outstanding appends.
     try {

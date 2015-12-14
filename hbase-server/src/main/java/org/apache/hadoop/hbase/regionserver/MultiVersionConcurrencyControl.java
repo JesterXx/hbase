@@ -24,9 +24,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.google.common.annotations.VisibleForTesting;
 
 import com.google.common.base.Objects;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.regionserver.HRegion.RowOperationContext;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
 
@@ -128,6 +130,27 @@ public class MultiVersionConcurrencyControl {
     }
   }
 
+  public WriteEntry begin(RowOperationContext... rowOperationContexts) {
+    synchronized (writeQueue) {
+      long nextWriteNumber = writePoint.incrementAndGet();
+      WriteEntry e = new WriteEntry(nextWriteNumber);
+      if (rowOperationContexts != null && rowOperationContexts.length > 0) {
+        long lastWriterNumber = -1;
+        for (RowOperationContext context : rowOperationContexts) {
+          if (context != null) {
+            if (lastWriterNumber < context.getNextWriteNumber()) {
+              lastWriterNumber = context.getNextWriteNumber();
+            }
+            context.setNextWriteNumber(nextWriteNumber);
+          }
+        }
+        e.setLastWriteNumber(lastWriterNumber);
+      }
+      writeQueue.add(e);
+      return e;
+    }
+  }
+
   /**
    * Wait until the read point catches up to the write point; i.e. wait on all outstanding mvccs
    * to complete.
@@ -135,6 +158,13 @@ public class MultiVersionConcurrencyControl {
   public void await() {
     // Add a write and then wait on reads to catch up to it.
     completeAndWait(begin());
+  }
+
+  public void await(RowOperationContext rowOperationContext) {
+    // Add a write and then wait on reads to catch up to it.
+    WriteEntry writeEntry = begin(rowOperationContext);
+    complete(writeEntry);
+    waitForRead(writeEntry, true);
   }
 
   /**
@@ -202,14 +232,19 @@ public class MultiVersionConcurrencyControl {
     }
   }
 
+  void waitForRead(WriteEntry e) {
+    waitForRead(e, false);
+  }
+
   /**
    * Wait for the global readPoint to advance up to the passed in write entry number.
    */
-  void waitForRead(WriteEntry e) {
+  void waitForRead(WriteEntry e, boolean useLastWriteNumber) {
     boolean interrupted = false;
     int count = 0;
     synchronized (readWaiters) {
-      while (readPoint.get() < e.getWriteNumber()) {
+      long writeNumber = useLastWriteNumber ? e.getLastWriteNumber() : e.getWriteNumber();
+      while (readPoint.get() < writeNumber) {
         if (count % 100 == 0 && count > 0) {
           LOG.warn("STUCK: " + this);
         }
@@ -252,6 +287,7 @@ public class MultiVersionConcurrencyControl {
   public static class WriteEntry {
     private final long writeNumber;
     private boolean completed = false;
+    private long lastWriteNumber = -1;
 
     WriteEntry(long writeNumber) {
       this.writeNumber = writeNumber;
@@ -267,6 +303,14 @@ public class MultiVersionConcurrencyControl {
 
     public long getWriteNumber() {
       return this.writeNumber;
+    }
+
+    public long getLastWriteNumber() {
+      return lastWriteNumber;
+    }
+
+    public void setLastWriteNumber(long lastWriteNumber) {
+      this.lastWriteNumber = lastWriteNumber;
     }
 
     @Override

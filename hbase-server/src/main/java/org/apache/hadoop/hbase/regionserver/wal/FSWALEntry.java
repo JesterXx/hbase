@@ -115,7 +115,7 @@ class FSWALEntry extends Entry {
     MultiVersionConcurrencyControl.WriteEntry we = null;
 
     if (mvcc != null) {
-      we = mvcc.begin();
+      we = mvcc.begin(getKey().getRowOperationContexts());
       regionSequenceId = we.getWriteNumber();
     }
 
