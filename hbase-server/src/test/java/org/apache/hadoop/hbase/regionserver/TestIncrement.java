@@ -126,6 +126,55 @@ public class TestIncrement {
     }
   }
 
+  /**
+   * Have each thread update its own Cell. Avoid contention with another thread.
+   * @throws IOException
+   * @throws InterruptedException
+   */
+  @Test
+  public void testUnContendedSingleCellIncrementer() throws IOException, InterruptedException {
+    String methodName = this.name.getMethodName();
+    TableName tableName = TableName.valueOf(methodName);
+
+    byte[] incrementBytes = Bytes.toBytes("increment");
+
+    Configuration conf = TEST_UTIL.getConfiguration();
+    final WAL wal = new FSHLog(FileSystem.get(conf), TEST_UTIL.getDataTestDir(), TEST_UTIL
+      .getDataTestDir().toString(), conf);
+    final HRegion region = (HRegion) TEST_UTIL.createLocalHRegion(tableName,
+      HConstants.EMPTY_BYTE_ARRAY, HConstants.EMPTY_BYTE_ARRAY, false, Durability.SKIP_WAL, wal,
+      incrementBytes);
+    try {
+      final int threadCount = 100;
+      final int incrementCount = 25000;
+      SingleCellIncrementer[] threads = new SingleCellIncrementer[threadCount];
+      for (int i = 0; i < threads.length; i++) {
+        byte[] rowBytes = Bytes.toBytes(i);
+        Increment increment = new Increment(rowBytes);
+        increment.addColumn(incrementBytes, incrementBytes, 1);
+        threads[i] = new SingleCellIncrementer(i, incrementCount, region, increment);
+      }
+      for (int i = 0; i < threads.length; i++) {
+        threads[i].start();
+      }
+      for (int i = 0; i < threads.length; i++) {
+        threads[i].join();
+      }
+      RegionScanner regionScanner = region.getScanner(new Scan());
+      List<Cell> cells = new ArrayList<Cell>(100);
+      while (regionScanner.next(cells))
+        continue;
+      LOG.info("After " + cells.size());
+      long total = 0;
+      for (Cell cell : cells)
+        total += CellUtil.getValueAsLong(cell);
+      assertEquals(incrementCount * threadCount, total);
+    } finally {
+      region.close();
+      wal.close();
+    }
+  }
+
   private void assertEquals(int i, long total) {
     // TODO Auto-generated method stub
 
