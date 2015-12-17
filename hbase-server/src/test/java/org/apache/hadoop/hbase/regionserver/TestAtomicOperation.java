@@ -65,6 +65,7 @@ import org.apache.hadoop.hbase.io.hfile.BlockCache;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.VerySlowRegionServerTests;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.junit.After;
@@ -660,13 +661,15 @@ public class TestAtomicOperation {
         final HRegionInfo regionInfo, final HTableDescriptor htd, RegionServerServices rsServices) {
       super(tableDir, log, fs, conf, regionInfo, htd, rsServices);
     }
-
+    
     @Override
-    public RowLock getRowLock(final byte[] row, boolean readLock) throws IOException {
+    public Pair<RowContext, RowLock> getRowLockPair(byte[] row, boolean readLock)
+      throws IOException {
       if (testStep == TestStep.CHECKANDPUT_STARTED) {
         latch.countDown();
       }
-      return new WrappedRowLock(super.getRowLock(row, readLock));
+      Pair<RowContext, RowLock> pair = super.getRowLockPair(row, readLock);
+      return new Pair<RowContext, RowLock>(pair.getFirst(), new WrappedRowLock(pair.getSecond()));
     }
     
     public class WrappedRowLock implements RowLock {

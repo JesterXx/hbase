@@ -2988,6 +2988,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     /** Keep track of the locks we hold so we can release them in finally clause */
     List<RowLock> acquiredRowLocks = Lists.newArrayListWithCapacity(batchOp.operations.length);
     RowOperationContext[] rowOpContexts = new RowOperationContext[batchOp.operations.length];
+    List<RowContext> rowContexts = Lists.newArrayListWithCapacity(batchOp.operations.length);
     // reference family maps directly so coprocessors can mutate them if desired
     Map<byte[], List<Cell>>[] familyMaps = new Map[batchOp.operations.length];
     // We try to set up a batch in the range [firstIndex,lastIndexExclusive)
@@ -3067,6 +3068,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         } else {
           acquiredRowLocks.add(pair.getSecond());
           rowOpContexts[lastIndexExclusive] = pair.getFirst().getRowOperationContext();
+          rowContexts.add(pair.getFirst());
         }
 
         lastIndexExclusive++;
@@ -3167,6 +3169,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             walKey = new ReplayHLogKey(this.getRegionInfo().getEncodedNameAsBytes(),
               this.htableDescriptor.getTableName(), now, m.getClusterIds(),
               currentNonceGroup, currentNonce, mvcc);
+            walKey.setRowOperationContexts(rowOpContexts);
             txid = this.wal.append(this.htableDescriptor,  this.getRegionInfo(),  walKey,
               walEdit, true);
             walEdit = new WALEdit(isInReplay);
@@ -3197,6 +3200,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           mutation.getClusterIds(), currentNonceGroup, currentNonce, mvcc);
         long replaySeqId = batchOp.getReplaySequenceId();
         walKey.setOrigLogSeqNum(replaySeqId);
+        walKey.setRowOperationContexts(rowOpContexts);
       }
       if (walEdit.size() > 0) {
         if (!isInReplay) {
@@ -3322,7 +3326,11 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         this.updatesLock.readLock().unlock();
       }
       releaseRowLocks(acquiredRowLocks);
-
+      for (RowContext context : rowContexts) {
+        if (context != null) {
+          context.cleanUp();
+        }
+      }
       // See if the column families were consistent through the whole thing.
       // if they were then keep them. If they were not then pass a null.
       // null will be treated as unknown.
@@ -3483,6 +3491,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         return false;
       } finally {
         rowLock.release();
+        pair.getFirst().cleanUp();
       }
     } finally {
       closeRegionOperation();
@@ -3582,6 +3591,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         return false;
       } finally {
         rowLock.release();
+        pair.getFirst().cleanUp();
       }
     } finally {
       closeRegionOperation();
@@ -5170,6 +5180,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     public void setRowLockContext(RowLockContext rowLockContext) {
       this.rowLockContext = rowLockContext;
     }
+    
+    public void cleanUp() {
+      this.rowLockContext.cleanUpContext();
+    }
   }
 
   public static class RowOperationContext {
@@ -5373,7 +5387,11 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     }
 
     void cleanUp() {
-      long c = count.decrementAndGet();
+      count.decrementAndGet();
+    }
+
+    void cleanUpContext() {
+      long c = count.intValue();
       if (c <= 0) {
         synchronized (lock) {
           if (count.get() <= 0 ){
@@ -6987,6 +7005,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       // 2. Acquire the row lock(s)
       acquiredRowLocks = new ArrayList<RowLock>(rowsToLock.size());
       RowOperationContext[] rowOpContexts = new RowOperationContext[rowsToLock.size()];
+      List<RowContext> rowContexts = new ArrayList<HRegion.RowContext>(rowsToLock.size());
       int index = 0;
       for (byte[] row : rowsToLock) {
         // Attempt to lock all involved rows, throw if any lock times out
@@ -6994,6 +7013,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         Pair<RowContext, RowLock> pair = getRowLockPair(row, false);
         acquiredRowLocks.add(pair.getSecond());
         rowOpContexts[index++] = pair.getFirst().getRowOperationContext();
+        rowContexts.add(pair.getFirst());
       }
       // 3. Region lock
       lock(this.updatesLock.readLock(), acquiredRowLocks.size() == 0 ? 1 : acquiredRowLocks.size());
@@ -7096,6 +7116,11 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         }
         // release locks if some were acquired but another timed out
         releaseRowLocks(acquiredRowLocks);
+        for (RowContext context : rowContexts) {
+          if (context != null) {
+            context.cleanUp();
+          }
+        }
       }
 
       // 14. Run post-process hook
@@ -7224,9 +7249,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     WALKey walKey = null;
     MultiVersionConcurrencyControl.WriteEntry writeEntry = null;
     boolean doRollBackMemstore = false;
+    Pair<RowContext, RowLock> pair = null;
     try {
-//      rowLock = getRowLock(row);
-      Pair<RowContext, RowLock> pair = getRowLockPair(row, false);
+      pair = getRowLockPair(row, false);
       rowLock = pair.getSecond();
       assert rowLock != null;
       try {
@@ -7417,7 +7442,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       } else if (writeEntry != null) {
         mvcc.completeAndWait(writeEntry);
       }
-
+      if (pair != null && pair.getFirst() != null) {
+        pair.getFirst().cleanUp();
+      }
       closeRegionOperation(op);
     }
 
@@ -7471,8 +7498,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     MultiVersionConcurrencyControl.WriteEntry writeEntry = null;
     boolean doRollBackMemstore = false;
     TimeRange tr = mutation.getTimeRange();
+    Pair<RowContext, RowLock> rowLockPair = null;
     try {
-      Pair<RowContext, RowLock> rowLockPair = getRowLockPair(row, false);
+      rowLockPair = getRowLockPair(row, false);
       rowLock = rowLockPair.getSecond();
       assert rowLock != null;
       try {
@@ -7646,6 +7674,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         if (writeEntry != null) mvcc.complete(writeEntry);
       } else if (writeEntry != null) {
         mvcc.completeAndWait(writeEntry);
+      }
+      if (rowLockPair != null && rowLockPair.getFirst() != null) {
+        rowLockPair.getFirst().cleanUp();
       }
       closeRegionOperation(Operation.INCREMENT);
       if (this.metricsRegion != null) {
