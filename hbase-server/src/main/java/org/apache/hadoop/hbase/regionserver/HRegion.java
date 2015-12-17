@@ -5879,9 +5879,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
     startRegionOperation(Operation.INCREMENT);
     this.writeRequestsCount.increment();
     RowLock rowLock = null;
-    WriteEntry w = null;
+//    WriteEntry w = null;
     WALKey walKey = null;
-    long mvccNum = 0;
+//    long mvccNum = 0;
     List<Cell> memstoreCells = new ArrayList<Cell>();
     boolean doRollBackMemstore = false;
     try {
@@ -5891,7 +5891,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
         try {
           // wait for all prior MVCC transactions to finish - while we hold the row lock
           // (so that we are guaranteed to see the latest state)
-          mvcc.waitForPreviousTransactionsComplete();
+//          mvcc.waitForPreviousTransactionsComplete();
           if (this.coprocessorHost != null) {
             Result r = this.coprocessorHost.preIncrementAfterRowLock(increment);
             if (r != null) {
@@ -5899,8 +5899,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
             }
           }
           // now start my own transaction
-          mvccNum = MultiVersionConsistencyControl.getPreAssignedWriteNumber(this.sequenceId);
-          w = mvcc.beginMemstoreInsertWithSeqNum(mvccNum);
+//          mvccNum = MultiVersionConsistencyControl.getPreAssignedWriteNumber(this.sequenceId);
+//          w = mvcc.beginMemstoreInsertWithSeqNum(mvccNum);
           long now = EnvironmentEdgeManager.currentTime();
           // Process each family
           for (Map.Entry<byte [], List<Cell>> family:
@@ -5916,6 +5916,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
             Collections.sort(family.getValue(), store.getComparator());
             // Get previous values for all columns in this family
             Get get = new Get(row);
+            get.setIsolationLevel(IsolationLevel.READ_UNCOMMITTED);
             for (Cell cell: family.getValue()) {
               get.addColumn(family.getKey(),  CellUtil.cloneQualifier(cell));
             }
@@ -5982,7 +5983,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
                 val, 0, val.length,
                 newTags);
 
-              CellUtil.setSequenceId(newKV, mvccNum);
+//              CellUtil.setSequenceId(newKV, mvccNum);
 
               // Give coprocessors a chance to update the new cell
               if (coprocessorHost != null) {
@@ -6055,13 +6056,37 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
           this.updatesLock.readLock().unlock();
         }
       } finally {
-        rowLock.release();
-        rowLock = null;
+//        rowLock.release();
+//        rowLock = null;
       }
       // sync the transaction log outside the rowlock
       if(txid != 0){
         syncOrDefer(txid, durability);
       }
+      // Actually write to Memstore now
+      if (!tempMemstore.isEmpty()) {
+        for (Map.Entry<Store, List<Cell>> entry : tempMemstore.entrySet()) {
+          for (Cell cell : entry.getValue())
+            CellUtil.setSequenceId(cell, walKey.getSequenceId());
+          Store store = entry.getKey();
+          if (store.getFamily().getMaxVersions() == 1) {
+            // upsert if VERSIONS for this CF == 1
+            size += store.upsert(entry.getValue(), getSmallestReadPoint());
+            memstoreCells.addAll(entry.getValue());
+          } else {
+            // otherwise keep older versions around
+            for (Cell cell : entry.getValue()) {
+              Pair<Long, Cell> ret = store.add(cell);
+              size += ret.getFirst();
+              memstoreCells.add(ret.getSecond());
+              doRollBackMemstore = true;
+            }
+          }
+        }
+        size = this.addAndGetGlobalMemstoreSize(size);
+        flush = isFlushSize(size);
+      }
+      // FIX THISSSSSSSSSSSSS NO NEED TO ROLLBACK BECAUSE OF REORDER
       doRollBackMemstore = false;
     } finally {
       if (rowLock != null) {
@@ -6071,8 +6096,14 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver { // 
       if (doRollBackMemstore) {
         rollbackMemstore(memstoreCells);
       }
-      if (w != null) {
-        mvcc.completeMemstoreInsertWithSeqNum(w, walKey);
+//      if (w != null) {
+        WriteEntry we = mvcc.beginMemstoreInsertWithSeqNum(walKey.getSequenceId());
+        mvcc.advanceMemstore(we);
+//        mvcc.completeMemstoreInsertWithSeqNum(w, walKey);
+//      }
+      if (rowLock != null) {
+        rowLock.release();
+        rowLock = null;
       }
       closeRegionOperation(Operation.INCREMENT);
       if (this.metricsRegion != null) {
