@@ -897,13 +897,14 @@ public class LoadIncrementalHFiles extends Configured implements Tool {
       int blocksize = familyDescriptor.getBlocksize();
       Algorithm compression = familyDescriptor.getCompressionType();
       BloomType bloomFilterType = familyDescriptor.getBloomFilterType();
+      HFileContext parentHFileContext = halfReader.getHFileReader().getFileContext();
       HFileContext hFileContext = new HFileContextBuilder()
+                                  .withOtherHFileContext(parentHFileContext)
                                   .withCompression(compression)
                                   .withChecksumType(HStore.getChecksumType(conf))
                                   .withBytesPerCheckSum(HStore.getBytesPerChecksum(conf))
                                   .withBlockSize(blocksize)
                                   .withDataBlockEncoding(familyDescriptor.getDataBlockEncoding())
-                                  .withIncludesTags(true)
                                   .build();
       halfWriter = new StoreFile.WriterBuilder(conf, cacheConf,
           fs)

@@ -115,6 +115,22 @@ public class HFileContextBuilder {
     return this;
   }
 
+  public HFileContextBuilder withOtherHFileContext(HFileContext context) {
+    this.usesHBaseChecksum = context.isUseHBaseChecksum();
+    this.includesMvcc = context.isIncludesMvcc();
+    this.includesTags = context.isIncludesTags();
+    this.compression = context.getCompression();
+    this.compressTags = context.isCompressTags();
+    this.checksumType = context.getChecksumType();
+    this.bytesPerChecksum = context.getBytesPerChecksum();
+    this.blocksize = context.getBlocksize();
+    this.encoding = context.getDataBlockEncoding();
+    this.cryptoContext = context.getEncryptionContext();
+    this.fileCreateTime = context.getFileCreateTime();
+    this.hfileName = context.getHFileName();
+    return this;
+  }
+
   public HFileContext build() {
     return new HFileContext(usesHBaseChecksum, includesMvcc, includesTags, compression,
         compressTags, checksumType, bytesPerChecksum, blocksize, encoding, cryptoContext,
