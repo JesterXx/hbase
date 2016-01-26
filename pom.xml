@@ -164,8 +164,8 @@
       <name>Mikhail Antonov</name>
       <email>antonov@apache.org</email>
       <timezone>-8</timezone>
-      <organization>WANdisco</organization>
-      <organizationUrl>http://www.wandisco.com/</organizationUrl>
+      <organization>Facebook</organization>
+      <organizationUrl>http://www.facebook.com/</organizationUrl>
     </developer>
     <developer>
       <id>busbey</id>
@@ -174,6 +174,14 @@
       <timezone>-6</timezone>
       <organization>Cloudera</organization>
       <organizationUrl>http://www.cloudera.com</organizationUrl>
+    </developer>
+    <developer>
+      <id>chenheng</id>
+      <name>Heng Chen</name>
+      <email>chenheng@apache.org</email>
+      <timezone>+8</timezone>
+      <organization>Yuantiku</organization>
+      <organizationUrl>http://www.yuantiku.com</organizationUrl>
     </developer>
     <developer>
       <id>ddas</id>
@@ -380,8 +388,8 @@
       <name>Nick Dimiduk</name>
       <email>ndimiduk@apache.org</email>
       <timezone>-8</timezone>
-      <organization>Hortonworks</organization>
-      <organizationUrl>http://www.hortonworks.com</organizationUrl>
+      <organization>unaffiliated</organization>
+      <organizationUrl>http://www.n10k.com</organizationUrl>
     </developer>
     <developer>
       <id>nkeywal</id>
@@ -492,8 +500,8 @@
       <name>Duo Zhang</name>
       <email>zhangduo@apache.org</email>
       <timezone>+8</timezone>
-      <organization>Wandoujia</organization>
-      <organizationUrl>http://www.wandoujia.com</organizationUrl>
+      <organization>unaffiliated</organization>
+      <organizationUrl>https://github.com/Apache9</organizationUrl>
     </developer>
     <developer>
       <id>zjushch</id>
@@ -507,6 +515,11 @@
   <build>
     <pluginManagement>
       <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+           <artifactId>maven-javadoc-plugin</artifactId>
+           <version>${javadoc.version}</version>
+        </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-remote-resources-plugin</artifactId>
@@ -564,17 +577,16 @@
           </dependencies>
           <!-- Generic testing configuration for all packages -->
           <configuration>
+            <groups>${surefire.firstPartGroups}</groups>
             <failIfNoTests>false</failIfNoTests>
             <skip>${surefire.skipFirstPart}</skip>
             <forkCount>${surefire.firstPartForkCount}</forkCount>
             <reuseForks>false</reuseForks>
             <testFailureIgnore>${surefire.testFailureIgnore}</testFailureIgnore>
             <forkedProcessTimeoutInSeconds>${surefire.timeout}</forkedProcessTimeoutInSeconds>
-            <!--Allocate some direct memory for direct memory tests-->
-            <argLine>${hbase-surefire.argLine} ${argLine}</argLine>
             <redirectTestOutputToFile>${test.output.tofile}</redirectTestOutputToFile>
             <systemPropertyVariables>
-              <jacoco-agent.destfile>target/jacoco.exec</jacoco-agent.destfile>
+              <test.build.classes>${test.build.classes}</test.build.classes>
             </systemPropertyVariables>
 
             <excludes>
@@ -597,6 +609,7 @@
                 <reuseForks>false</reuseForks>
                 <forkCount>${surefire.secondPartForkCount}</forkCount>
                 <groups>${surefire.secondPartGroups}</groups>
+                <forkedProcessTimeoutInSeconds>${surefire.timeout}</forkedProcessTimeoutInSeconds>
               </configuration>
             </execution>
           </executions>
@@ -813,6 +826,9 @@
               <exclude>.svn/**</exclude>
               <exclude>**/.settings/**</exclude>
               <exclude>**/patchprocess/**</exclude>
+              <exclude>src/main/site/resources/repo/**</exclude>
+              <exclude>**/dependency-reduced-pom.xml</exclude>
+              <exclude>**/rat.txt</exclude>
             </excludes>
           </configuration>
         </plugin>
@@ -837,7 +853,7 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-checkstyle-plugin</artifactId>
-          <version>2.13</version>
+          <version>2.17</version>
           <dependencies>
             <dependency>
               <groupId>org.apache.hbase</groupId>
@@ -909,7 +925,7 @@
             <goals>
               <goal>transform</goal>
             </goals>
-            <phase>pre-site</phase>
+            <phase>site</phase>
           </execution>
         </executions>
         <configuration>
@@ -967,72 +983,6 @@
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-resources-plugin</artifactId>
-        <!--$NO-MVN-MAN-VER$ -->
-        <inherited>false</inherited>
-        <executions>
-          <execution>
-            <id>copy-javadocs</id>
-            <goals>
-              <goal>copy-resources</goal>
-            </goals>
-            <phase>site</phase>
-            <configuration>
-              <outputDirectory>target/site/apidocs</outputDirectory>
-              <resources>
-                <resource>
-                  <directory>${basedir}/target/apidocs</directory>
-                  <includes>
-                    <include>**/**</include>
-                  </includes>
-                </resource>
-              </resources>
-            </configuration>
-          </execution>
-          <execution>
-            <id>copy-htaccess</id>
-            <goals>
-              <goal>copy-resources</goal>
-            </goals>
-            <phase>post-site</phase>
-            <configuration>
-              <outputDirectory>${basedir}/target/site</outputDirectory>
-              <resources>
-                <resource>
-                  <directory>${basedir}/src/main/site/resources/</directory>
-                  <includes>
-                    <include>.htaccess</include>
-                  </includes>
-                </resource>
-              </resources>
-            </configuration>
-          </execution>
-          <!-- needed to make the redirect above work -->
-          <execution>
-            <id>copy-empty-book-dir</id>
-            <goals>
-              <goal>copy-resources</goal>
-            </goals>
-            <phase>post-site</phase>
-            <configuration>
-              <outputDirectory>${basedir}/target/site</outputDirectory>
-              <resources>
-                <resource>
-                  <directory>${basedir}/src/main/site/resources/</directory>
-                  <includes>
-                    <include>book/**</include>
-                  </includes>
-                </resource>
-              </resources>
-            </configuration>
-          </execution>
-        </executions>
-        <configuration>
-          <escapeString>\</escapeString>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-site-plugin</artifactId>
         <version>3.4</version>
         <inherited>false</inherited>
@@ -1043,21 +993,10 @@
             <artifactId>wagon-ssh</artifactId>
             <version>2.2</version>
           </dependency>
-          <dependency>
-            <!-- required for reflow skin (http://andriusvelykis.github.io/reflow-maven-skin/) -->
-            <groupId>lt.velykis.maven.skins</groupId>
-            <artifactId>reflow-velocity-tools</artifactId>
-            <version>1.1.1</version>
-          </dependency>
-          <dependency>
-            <!-- velocity explicitly required by reflow-maven-skin -->
-            <groupId>org.apache.velocity</groupId>
-            <artifactId>velocity</artifactId>
-            <version>1.7</version>
-          </dependency>
         </dependencies>
         <configuration>
           <siteDirectory>${basedir}/src/main/site</siteDirectory>
+          <customBundle>${basedir}/src/main/site/custom/project-info-report.properties</customBundle>
           <inputEncoding>UTF-8</inputEncoding>
           <outputEncoding>UTF-8</outputEncoding>
         </configuration>
@@ -1076,7 +1015,7 @@
           </dependency>
         </dependencies>
         <configuration>
-          <outputDirectory>target/site</outputDirectory>
+          <outputDirectory>${project.reporting.outputDirectory}/</outputDirectory>
           <doctype>book</doctype>
           <imagesDir>images</imagesDir>
           <sourceHighlighter>coderay</sourceHighlighter>
@@ -1118,6 +1057,54 @@
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <!--$NO-MVN-MAN-VER$ -->
+        <inherited>false</inherited>
+        <executions>
+          <execution>
+            <id>copy-htaccess</id>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <phase>site</phase>
+            <configuration>
+              <outputDirectory>${project.reporting.outputDirectory}/</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${basedir}/src/main/site/resources/</directory>
+                  <includes>
+                    <include>.htaccess</include>
+                  </includes>
+                </resource>
+              </resources>
+            </configuration>
+          </execution>
+          <!-- needed to make the redirect above work -->
+          <execution>
+            <id>copy-empty-book-dir</id>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <phase>site</phase>
+            <configuration>
+              <outputDirectory>${project.reporting.outputDirectory}/</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${basedir}/src/main/site/resources/</directory>
+                  <includes>
+                    <include>book/**</include>
+                  </includes>
+                </resource>
+              </resources>
+            </configuration>
+          </execution>
+        </executions>
+        <configuration>
+          <escapeString>\</escapeString>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-antrun-plugin</artifactId>
         <version>${maven.antrun.version}</version>
         <inherited>false</inherited>
@@ -1125,11 +1112,11 @@
         <executions>
           <execution>
             <id>rename-pdf</id>
-            <phase>post-site</phase>
+            <phase>site</phase>
             <configuration>
               <target name="rename file">
-                <move file="${project.basedir}/target/site/book.pdf" tofile="${project.basedir}/target/site/apache_hbase_reference_guide.pdf" />
-                <move file="${project.basedir}/target/site/book.pdfmarks" tofile="${project.basedir}/target/site/apache_hbase_reference_guide.pdfmarks" />
+                <move file="${project.reporting.outputDirectory}/book.pdf" tofile="${project.reporting.outputDirectory}/apache_hbase_reference_guide.pdf" />
+                <move file="${project.reporting.outputDirectory}/book.pdfmarks" tofile="${project.reporting.outputDirectory}/apache_hbase_reference_guide.pdfmarks" />
               </target>
             </configuration>
             <goals>
@@ -1137,32 +1124,6 @@
             </goals>
           </execution>
         </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.jacoco</groupId>
-        <artifactId>jacoco-maven-plugin</artifactId>
-        <version>${jacoco.version}</version>
-        <executions>
-          <execution>
-            <id>prepare-agent</id>
-            <goals>
-              <goal>prepare-agent</goal>
-            </goals>
-          </execution>
-          <execution>
-            <id>report</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>report</goal>
-            </goals>
-          </execution>
-        </executions>
-        <configuration>
-          <skip>${hbase.skip-jacoco}</skip>
-          <excludes>
-            <exclude>**/generated/**/*.class</exclude>
-          </excludes>
-        </configuration>
       </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
@@ -1222,9 +1183,10 @@
     <commons-math.version>2.2</commons-math.version>
     <commons-net.version>3.1</commons-net.version>
     <disruptor.version>3.3.0</disruptor.version>
-    <collections.version>3.2.1</collections.version>
+    <!-- Do not use versions earlier than 3.2.2 due to a security vulnerability -->
+    <collections.version>3.2.2</collections.version>
     <httpclient.version>3.1</httpclient.version>
-    <metrics-core.version>2.2.0</metrics-core.version>
+    <metrics-core.version>3.1.2</metrics-core.version>
     <guava.version>12.0.1</guava.version>
     <jsr305.version>1.3.9</jsr305.version>
     <jackson.version>1.9.13</jackson.version>
@@ -1241,12 +1203,11 @@
     <mockito-all.version>1.10.8</mockito-all.version>
     <protobuf.version>2.5.0</protobuf.version>
     <thrift.path>thrift</thrift.path>
-    <thrift.version>0.9.2</thrift.version>
+    <thrift.version>0.9.3</thrift.version>
     <zookeeper.version>3.4.6</zookeeper.version>
     <slf4j.version>1.7.7</slf4j.version>
-    <hadoop-snappy.version>0.0.1-SNAPSHOT</hadoop-snappy.version>
     <clover.version>4.0.3</clover.version>
-    <jamon-runtime.version>2.3.1</jamon-runtime.version>
+    <jamon-runtime.version>2.4.1</jamon-runtime.version>
     <jettison.version>1.3.3</jettison.version>
     <netty.version>4.0.30.Final</netty.version>
     <netty.hadoop.version>3.6.2.Final</netty.hadoop.version>
@@ -1257,7 +1218,7 @@
     <!-- Plugin Dependencies -->
     <maven.assembly.version>2.4</maven.assembly.version>
     <maven.antrun.version>1.8</maven.antrun.version>
-    <jamon.plugin.version>2.3.4</jamon.plugin.version>
+    <jamon.plugin.version>2.4.1</jamon.plugin.version>
     <findbugs-annotations>1.3.9-1</findbugs-annotations>
     <javadoc.version>2.10.3</javadoc.version>
     <asciidoctor.plugin.version>1.5.2.1</asciidoctor.plugin.version>
@@ -1292,20 +1253,28 @@
     <!-- default Xmx value is 2800m. Use -Dsurefire.Xmx=xxg to run tests with different JVM Xmx value -->
     <surefire.Xmx>2800m</surefire.Xmx>
     <surefire.cygwinXmx>2800m</surefire.cygwinXmx>
-    <!--Mark our test runs with '-Dhbase.test' so we can identify a surefire test as ours in a process listing
+    <!--Mark our test runs with '-Dhbase.build.id' so we can identify a surefire test as ours in a process listing
      -->
-    <hbase-surefire.argLine>-enableassertions -Dhbase.test -Xmx${surefire.Xmx}
+    <hbase-surefire.argLine>-enableassertions -Dhbase.build.id=${build.id} -Xmx${surefire.Xmx}
       -XX:MaxPermSize=256m -Djava.security.egd=file:/dev/./urandom -Djava.net.preferIPv4Stack=true
       -Djava.awt.headless=true
     </hbase-surefire.argLine>
-    <hbase-surefire.cygwin-argline>-enableassertions -Xmx${surefire.cygwinXmx} -XX:MaxPermSize=256m
+    <hbase-surefire.cygwin-argLine>-enableassertions -Xmx${surefire.cygwinXmx} -XX:MaxPermSize=256m
       -Djava.security.egd=file:/dev/./urandom -Djava.net.preferIPv4Stack=true
       "-Djava.library.path=${hadoop.library.path};${java.library.path}"
-    </hbase-surefire.cygwin-argline>
-    <hbase.skip-jacoco>true</hbase.skip-jacoco>
+    </hbase-surefire.cygwin-argLine>
+    <!-- Surefire argLine defaults to Linux, cygwin argLine is used in the os.windows profile -->
+    <argLine>${hbase-surefire.argLine}</argLine>
     <jacoco.version>0.7.5.201505241946</jacoco.version>
     <extra.enforcer.version>1.0-beta-3</extra.enforcer.version>
-  </properties>
+    <!-- Location of test resources -->
+    <test.build.classes>${project.build.directory}/test-classes</test.build.classes>
+    <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ss'Z'</maven.build.timestamp.format>
+    <!--This build.id we'll add as flag so can identify which forked processes belong to our build.
+        Default is the build start timestamp. Up on jenkins pass in the jenkins build id by setting
+        this parameter by invoking mvn with -Dbuild.id=$BUILD_ID-->
+    <build.id>${maven.build.timestamp}</build.id>
+    </properties>
   <!-- Sorted by groups of dependencies then groupId and artifactId -->
   <dependencyManagement>
     <dependencies>
@@ -1465,14 +1434,14 @@
         <version>${log4j.version}</version>
       </dependency>
       <!--This is not used by hbase directly.  Used by thrift,
-          yammer and zk.-->
+          dropwizard and zk.-->
       <dependency>
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-api</artifactId>
         <version>${slf4j.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.yammer.metrics</groupId>
+        <groupId>io.dropwizard.metrics</groupId>
         <artifactId>metrics-core</artifactId>
         <version>${metrics-core.version}</version>
       </dependency>
@@ -1828,6 +1797,26 @@
 
   -->
   <profiles>
+    <profile>
+      <id>build-with-jdk8</id>
+      <activation>
+        <jdk>1.8</jdk>
+      </activation>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-javadoc-plugin</artifactId>
+              <configuration>
+                <!-- TODO HBASE-15041 clean up our javadocs so jdk8 linter can be used -->
+                <additionalparam>-Xdoclint:none</additionalparam>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
     <!-- profile activated by the Jenkins patch testing job -->
     <profile>
       <id>jenkins.patch</id>
@@ -1837,6 +1826,9 @@
             <name>HBasePatchProcess</name>
         </property>
       </activation>
+      <properties>
+        <surefire.rerunFailingTestsCount>2</surefire.rerunFailingTestsCount>
+      </properties>
       <build>
         <plugins>
           <plugin>
@@ -1857,6 +1849,44 @@
                 </configuration>
               </execution>
             </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
+      <id>jacoco</id>
+      <activation>
+        <activeByDefault>false</activeByDefault>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <version>${jacoco.version}</version>
+            <executions>
+              <execution>
+                <id>prepare-agent</id>
+                <goals>
+                  <goal>prepare-agent</goal>
+                </goals>
+              </execution>
+              <execution>
+                <id>report</id>
+                <phase>prepare-package</phase>
+                <goals>
+                  <goal>report</goal>
+                </goals>
+              </execution>
+            </executions>
+            <configuration>
+              <systemPropertyVariables>
+                <jacoco-agent.destfile>target/jacoco.exec</jacoco-agent.destfile>
+              </systemPropertyVariables>
+              <excludes>
+                <exclude>**/generated/**/*.class</exclude>
+              </excludes>
+            </configuration>
           </plugin>
         </plugins>
       </build>
@@ -1893,26 +1923,8 @@
       </activation>
       <properties>
         <build.platform>cygwin</build.platform>
+        <argLine>${hbase-surefire.cygwin-argLine}</argLine>
       </properties>
-      <build>
-        <pluginManagement>
-          <plugins>
-            <plugin>
-              <groupId>org.apache.maven.plugins</groupId>
-              <artifactId>maven-surefire-plugin</artifactId>
-              <configuration>
-                <argLine>${hbase-surefire.cygwin-argline} ${argLine}</argLine>
-                <systemProperties>
-                  <property>
-                    <name>java.net.preferIPv4Stack</name>
-                    <value>true</value>
-                  </property>
-                </systemProperties>
-              </configuration>
-            </plugin>
-          </plugins>
-        </pluginManagement>
-      </build>
     </profile>
     <!-- this profile should be activated for release builds -->
     <profile>
@@ -2304,27 +2316,7 @@
          See as well the properties of the project for the values
          when no profile is active.     -->
     <profile>
-      <!-- Use it to launch the tests without parallelisation -->
-      <id>nonParallelTests</id>
-      <activation>
-        <activeByDefault>false</activeByDefault>
-      </activation>
-      <properties>
-        <surefire.firstPartForkCount>1</surefire.firstPartForkCount>
-      </properties>
-    </profile>
-    <profile>
-      <!-- Use it to launch the tests in parallel in the same JVM  -->
-      <id>parallelTests</id>
-      <activation>
-        <activeByDefault>false</activeByDefault>
-      </activation>
-      <properties>
-        <surefire.firstPartForkCount>1</surefire.firstPartForkCount>
-      </properties>
-    </profile>
-    <profile>
-      <!-- Use it to launch the tests in the same JVM  -->
+      <!-- Use it to launch all tests in the same JVM  -->
       <id>singleJVMTests</id>
       <activation>
         <activeByDefault>false</activeByDefault>
@@ -2771,33 +2763,44 @@
         <reportSets>
           <reportSet>
             <reports>
-              <report>project-team</report>
-              <report>mailing-list</report>
               <report>cim</report>
+              <report>dependencies</report>
+              <report>dependency-convergence</report>
+              <report>dependency-info</report>
+              <report>dependency-management</report>
+              <report>index</report>
               <report>issue-tracking</report>
               <report>license</report>
+              <report>mailing-list</report>
+              <report>plugin-management</report>
+              <report>plugins</report>
+              <report>project-team</report>
               <report>scm</report>
-              <report>index</report>
+              <report>summary</report>
             </reports>
           </reportSet>
         </reportSets>
+        <!-- see src/main/site/site.xml for selected reports -->
         <configuration>
           <dependencyLocationsEnabled>false</dependencyLocationsEnabled>
         </configuration>
       </plugin>
 
+      <!-- This seems to be needed by the surefire plugin.
+           The Javadoc below provide code as well -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jxr-plugin</artifactId>
         <version>2.3</version>
         <configuration>
           <aggregate>true</aggregate>
+          <test-aggregate>true</test-aggregate>
           <linkJavadoc>true</linkJavadoc>
-          <javadocDir>${basedir}/target/site/apidocs</javadocDir>
-          <reportOutputDirectory>${basedir}/target/site/xref</reportOutputDirectory>
-          <destDir>${basedir}/target/site/xref</destDir>
+          <javadocDir>${project.reporting.outputDirectory}/devapidocs</javadocDir>
+          <testJavadocDir>${project.reporting.outputDirectory}/testdevapidocs</testJavadocDir>
+          <destDir>${project.reporting.outputDirectory}/xref</destDir>
           <excludes>
-            <exclude>**/generated/**</exclude>
+            <exclude>**/generated/*</exclude>
           </excludes>
         </configuration>
       </plugin>
@@ -2805,27 +2808,9 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <version>2.10.3</version>
-        <configuration>
-          <sourceFilesExclude>**/generated</sourceFilesExclude>
-          <excludePackageNames>org.apache.hadoop.hbase.generated.master:org.apache.hadoop.hbase.protobuf.generated</excludePackageNames>
-          <maxmemory>2048m</maxmemory>
-          <notimestamp>true</notimestamp>
-          <!-- JDK8 javadoc requires test scope transitive dependencies due to our custom doclet -->
-          <additionalDependencies>
-            <additionalDependency>
-              <groupId>org.mockito</groupId>
-              <artifactId>mockito-all</artifactId>
-              <version>${mockito-all.version}</version>
-            </additionalDependency>
-            <additionalDependency>
-              <groupId>org.hamcrest</groupId>
-              <artifactId>hamcrest-core</artifactId>
-              <version>${hamcrest.version}</version>
-            </additionalDependency>
-          </additionalDependencies>
-        </configuration>
+        <version>${javadoc.version}</version>
         <reportSets>
+          <!-- Dev API -->
           <reportSet>
             <id>devapi</id>
             <reports>
@@ -2833,9 +2818,87 @@
             </reports>
             <configuration>
               <destDir>devapidocs</destDir>
+              <name>Developer API</name>
+              <description>The full HBase API, including private and unstable APIs</description>
+              <sourceFileExcludes>
+                <exclude>**/generated/*</exclude>
+                <exclude>**/protobuf/*</exclude>
+                <exclude>**/*.scala</exclude>
+              </sourceFileExcludes>
+              <excludePackageNames>org.apache.hadoop.hbase.tmpl.common:com.google.protobuf:org.apache.hadoop.hbase.spark:org.apache.hadoop.hbase.generated*</excludePackageNames>
+              <show>private</show> <!-- (shows all classes and members) -->
+              <quiet>true</quiet>
+              <linksource>true</linksource>
+              <sourcetab>2</sourcetab>
+              <validateLinks>true</validateLinks>
+              <fixClassComment>true</fixClassComment>
+              <fixFieldComment>true</fixFieldComment>
+              <fixMethodComment>true</fixMethodComment>
+              <fixTags>all</fixTags>
+              <notimestamp>true</notimestamp>
+              <!-- Pass some options straight to the javadoc executable since it is easier -->
+              <additionalJOption>-J-Xmx2G</additionalJOption>
+              <!-- JDK8 javadoc requires test scope transitive dependencies due to our custom doclet -->
+              <additionalDependencies>
+                <additionalDependency>
+                  <groupId>org.mockito</groupId>
+                  <artifactId>mockito-all</artifactId>
+                  <version>${mockito-all.version}</version>
+                </additionalDependency>
+                <additionalDependency>
+                  <groupId>org.hamcrest</groupId>
+                  <artifactId>hamcrest-core</artifactId>
+                  <version>${hamcrest.version}</version>
+                </additionalDependency>
+              </additionalDependencies>
+              <inherited>false</inherited>
+            </configuration>
+          </reportSet>
+          <reportSet>
+            <id>testdevapi</id>
+            <reports>
+              <report>test-aggregate</report>
+            </reports>
+            <configuration>
+              <destDir>testdevapidocs</destDir>
+              <name>Developer API</name>
+              <description>The full HBase API test code, including private and unstable APIs</description>
+              <sourceFileExcludes>
+                <exclude>**/generated/*</exclude>
+                <exclude>**/protobuf/*</exclude>
+                <exclude>**/*.scala</exclude>
+              </sourceFileExcludes>
+              <excludePackageNames>org.apache.hadoop.hbase.tmpl.common:com.google.protobuf:org.apache.hadoop.hbase.spark:org.apache.hadoop.hbase.generated*</excludePackageNames>
+              <show>private</show> <!-- (shows all classes and members) -->
+              <quiet>true</quiet>
+              <linksource>true</linksource>
+              <sourcetab>2</sourcetab>
+              <validateLinks>true</validateLinks>
+              <fixClassComment>true</fixClassComment>
+              <fixFieldComment>true</fixFieldComment>
+              <fixMethodComment>true</fixMethodComment>
+              <fixTags>all</fixTags>
+              <notimestamp>true</notimestamp>
+              <!-- Pass some options straight to the javadoc executable since it is easier -->
+              <additionalJOption>-J-Xmx2G</additionalJOption>
+              <!-- JDK8 javadoc requires test scope transitive dependencies due to our custom doclet -->
+              <additionalDependencies>
+                <additionalDependency>
+                  <groupId>org.mockito</groupId>
+                  <artifactId>mockito-all</artifactId>
+                  <version>${mockito-all.version}</version>
+                </additionalDependency>
+                <additionalDependency>
+                  <groupId>org.hamcrest</groupId>
+                  <artifactId>hamcrest-core</artifactId>
+                  <version>${hamcrest.version}</version>
+                </additionalDependency>
+              </additionalDependencies>
+              <inherited>false</inherited>
             </configuration>
           </reportSet>
 
+          <!-- User API -->
           <reportSet>
             <id>userapi</id>
             <reports>
@@ -2850,33 +2913,119 @@
                 <artifactId>hbase-annotations</artifactId>
                 <version>${project.version}</version>
               </docletArtifact>
+              <useStandardDocletOptions>true</useStandardDocletOptions>
               <destDir>apidocs</destDir>
               <name>User API</name>
               <description>The HBase Application Programmer's API</description>
               <excludePackageNames>
-                org.apache.hadoop.hbase.backup*:org.apache.hadoop.hbase.catalog:org.apache.hadoop.hbase.client.coprocessor:org.apache.hadoop.hbase.client.metrics:org.apache.hadoop.hbase.codec*:org.apache.hadoop.hbase.constraint:org.apache.hadoop.hbase.coprocessor.*:org.apache.hadoop.hbase.executor:org.apache.hadoop.hbase.fs:*.generated.*:org.apache.hadoop.hbase.io.hfile.*:org.apache.hadoop.hbase.mapreduce.hadoopbackport:org.apache.hadoop.hbase.mapreduce.replication:org.apache.hadoop.hbase.master.*:org.apache.hadoop.hbase.metrics*:org.apache.hadoop.hbase.migration:org.apache.hadoop.hbase.monitoring:org.apache.hadoop.hbase.p*:org.apache.hadoop.hbase.regionserver.compactions:org.apache.hadoop.hbase.regionserver.handler:org.apache.hadoop.hbase.regionserver.snapshot:org.apache.hadoop.hbase.replication.*:org.apache.hadoop.hbase.rest.filter:org.apache.hadoop.hbase.rest.model:org.apache.hadoop.hbase.rest.p*:org.apache.hadoop.hbase.security.*:org.apache.hadoop.hbase.thrift*:org.apache.hadoop.hbase.tmpl.*:org.apache.hadoop.hbase.tool:org.apache.hadoop.hbase.trace:org.apache.hadoop.hbase.util.byterange*:org.apache.hadoop.hbase.util.test:org.apache.hadoop.hbase.util.vint:org.apache.hadoop.hbase.zookeeper.lock:org.apache.hadoop.metrics2*
+                org.apache.hadoop.hbase.backup*:org.apache.hadoop.hbase.catalog:org.apache.hadoop.hbase.client.coprocessor:org.apache.hadoop.hbase.client.metrics:org.apache.hadoop.hbase.codec*:org.apache.hadoop.hbase.constraint:org.apache.hadoop.hbase.coprocessor.*:org.apache.hadoop.hbase.executor:org.apache.hadoop.hbase.fs:*.generated.*:org.apache.hadoop.hbase.io.hfile.*:org.apache.hadoop.hbase.mapreduce.hadoopbackport:org.apache.hadoop.hbase.mapreduce.replication:org.apache.hadoop.hbase.master.*:org.apache.hadoop.hbase.metrics*:org.apache.hadoop.hbase.migration:org.apache.hadoop.hbase.monitoring:org.apache.hadoop.hbase.p*:org.apache.hadoop.hbase.regionserver.compactions:org.apache.hadoop.hbase.regionserver.handler:org.apache.hadoop.hbase.regionserver.snapshot:org.apache.hadoop.hbase.replication.*:org.apache.hadoop.hbase.rest.filter:org.apache.hadoop.hbase.rest.model:org.apache.hadoop.hbase.rest.p*:org.apache.hadoop.hbase.security.*:org.apache.hadoop.hbase.thrift*:org.apache.hadoop.hbase.tmpl.*:org.apache.hadoop.hbase.tool:org.apache.hadoop.hbase.trace:org.apache.hadoop.hbase.util.byterange*:org.apache.hadoop.hbase.util.test:org.apache.hadoop.hbase.util.vint:org.apache.hadoop.hbase.zookeeper.lock:org.apache.hadoop.metrics2*:org.apache.hadoop.hbase.io.compress*
               </excludePackageNames>
               <!-- switch on dependency-driven aggregation -->
               <includeDependencySources>false</includeDependencySources>
-
               <dependencySourceIncludes>
                 <!-- include ONLY dependencies I control -->
                 <dependencySourceInclude>org.apache.hbase:hbase-annotations</dependencySourceInclude>
-             </dependencySourceIncludes>
+              </dependencySourceIncludes>
+              <sourceFilesExclude>**/generated/*</sourceFilesExclude>
+              <show>protected</show> <!-- (shows only public and protected classes and members) -->
+              <quiet>true</quiet>
+              <linksource>true</linksource>
+              <sourcetab>2</sourcetab>
+              <validateLinks>true</validateLinks>
+              <fixClassComment>true</fixClassComment>
+              <fixFieldComment>true</fixFieldComment>
+              <fixMethodComment>true</fixMethodComment>
+              <fixTags>all</fixTags>
+              <notimestamp>true</notimestamp>
+              <!-- Pass some options straight to the javadoc executable since it is easier -->
+              <additionalJOption>-J-Xmx2G</additionalJOption>
+              <!-- JDK8 javadoc requires test scope transitive dependencies due to our custom doclet -->
+              <additionalDependencies>
+                <additionalDependency>
+                  <groupId>org.mockito</groupId>
+                  <artifactId>mockito-all</artifactId>
+                  <version>${mockito-all.version}</version>
+                </additionalDependency>
+                <additionalDependency>
+                  <groupId>org.hamcrest</groupId>
+                  <artifactId>hamcrest-core</artifactId>
+                  <version>${hamcrest.version}</version>
+                </additionalDependency>
+              </additionalDependencies>
+              <inherited>false</inherited>
+            </configuration>
+          </reportSet>
+          <!-- User Test API -->
+          <reportSet>
+            <id>testuserapi</id>
+            <reports>
+              <report>test-aggregate</report>
+            </reports>
+            <configuration>
+              <doclet>
+                org.apache.hadoop.hbase.classification.tools.IncludePublicAnnotationsStandardDoclet
+              </doclet>
+              <docletArtifact>
+                <groupId>org.apache.hbase</groupId>
+                <artifactId>hbase-annotations</artifactId>
+                <version>${project.version}</version>
+              </docletArtifact>
+              <useStandardDocletOptions>true</useStandardDocletOptions>
+              <destDir>testapidocs</destDir>
+              <name>User API</name>
+              <description>The HBase Application Programmer's API</description>
+              <excludePackageNames>
+                org.apache.hadoop.hbase.backup*:org.apache.hadoop.hbase.catalog:org.apache.hadoop.hbase.client.coprocessor:org.apache.hadoop.hbase.client.metrics:org.apache.hadoop.hbase.codec*:org.apache.hadoop.hbase.constraint:org.apache.hadoop.hbase.coprocessor.*:org.apache.hadoop.hbase.executor:org.apache.hadoop.hbase.fs:*.generated.*:org.apache.hadoop.hbase.io.hfile.*:org.apache.hadoop.hbase.mapreduce.hadoopbackport:org.apache.hadoop.hbase.mapreduce.replication:org.apache.hadoop.hbase.master.*:org.apache.hadoop.hbase.metrics*:org.apache.hadoop.hbase.migration:org.apache.hadoop.hbase.monitoring:org.apache.hadoop.hbase.p*:org.apache.hadoop.hbase.regionserver.compactions:org.apache.hadoop.hbase.regionserver.handler:org.apache.hadoop.hbase.regionserver.snapshot:org.apache.hadoop.hbase.replication.*:org.apache.hadoop.hbase.rest.filter:org.apache.hadoop.hbase.rest.model:org.apache.hadoop.hbase.rest.p*:org.apache.hadoop.hbase.security.*:org.apache.hadoop.hbase.thrift*:org.apache.hadoop.hbase.tmpl.*:org.apache.hadoop.hbase.tool:org.apache.hadoop.hbase.trace:org.apache.hadoop.hbase.util.byterange*:org.apache.hadoop.hbase.util.test:org.apache.hadoop.hbase.util.vint:org.apache.hadoop.hbase.zookeeper.lock:org.apache.hadoop.metrics2*:org.apache.hadoop.hbase.io.compress*
+              </excludePackageNames>
+              <!-- switch on dependency-driven aggregation -->
+              <includeDependencySources>false</includeDependencySources>
+              <dependencySourceIncludes>
+                <!-- include ONLY dependencies I control -->
+                <dependencySourceInclude>org.apache.hbase:hbase-annotations</dependencySourceInclude>
+              </dependencySourceIncludes>
+              <sourceFilesExclude>**/generated/*</sourceFilesExclude>
+              <show>protected</show> <!-- (shows only public and protected classes and members) -->
+              <quiet>true</quiet>
+              <linksource>true</linksource>
+              <sourcetab>2</sourcetab>
+              <validateLinks>true</validateLinks>
+              <fixClassComment>true</fixClassComment>
+              <fixFieldComment>true</fixFieldComment>
+              <fixMethodComment>true</fixMethodComment>
+              <fixTags>all</fixTags>
+              <notimestamp>true</notimestamp>
+              <!-- Pass some options straight to the javadoc executable since it is easier -->
+              <additionalJOption>-J-Xmx2G</additionalJOption>
+              <!-- JDK8 javadoc requires test scope transitive dependencies due to our custom doclet -->
+              <additionalDependencies>
+                <additionalDependency>
+                  <groupId>org.mockito</groupId>
+                  <artifactId>mockito-all</artifactId>
+                  <version>${mockito-all.version}</version>
+                </additionalDependency>
+                <additionalDependency>
+                  <groupId>org.hamcrest</groupId>
+                  <artifactId>hamcrest-core</artifactId>
+                  <version>${hamcrest.version}</version>
+                </additionalDependency>
+              </additionalDependencies>
+              <inherited>false</inherited>
             </configuration>
           </reportSet>
         </reportSets>
       </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-checkstyle-plugin</artifactId>
-        <version>2.13</version>
+        <version>2.17</version>
         <configuration>
           <excludes>target/**</excludes>
           <configLocation>hbase/checkstyle.xml</configLocation>
           <suppressionsLocation>hbase/checkstyle-suppressions.xml</suppressionsLocation>
         </configuration>
       </plugin>
+
     </plugins>
   </reporting>
   <distributionManagement>
@@ -2889,4 +3038,11 @@
       <url>file:///tmp</url>
     </site>
   </distributionManagement>
+  <repositories>
+    <repository>
+        <id>project.local</id>
+        <name>project</name>
+        <url>file:${project.basedir}/src/main/site/resources/repo</url>
+    </repository>
+</repositories>
 </project>

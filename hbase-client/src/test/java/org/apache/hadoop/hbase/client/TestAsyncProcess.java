@@ -29,7 +29,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
@@ -42,6 +45,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.CategoryBasedTimeout;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
@@ -62,11 +66,13 @@ import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
-import org.junit.rules.Timeout;
+import org.junit.rules.TestRule;
 import org.mockito.Mockito;
 
 @Category({ClientTests.class, MediumTests.class})
 public class TestAsyncProcess {
+  @Rule public final TestRule timeout = CategoryBasedTimeout.builder().withTimeout(this.getClass()).
+      withLookingForStuckThread(true).build();
   private final static Log LOG = LogFactory.getLog(TestAsyncProcess.class);
   private static final TableName DUMMY_TABLE =
       TableName.valueOf("DUMMY_TABLE");
@@ -137,7 +143,6 @@ public class TestAsyncProcess {
       AsyncRequestFutureImpl<Res> r = super.createAsyncRequestFuture(
           DUMMY_TABLE, actions, nonceGroup, pool, callback, results, needResults);
       allReqs.add(r);
-      callsCt.incrementAndGet();
       return r;
     }
 
@@ -408,9 +413,6 @@ public class TestAsyncProcess {
     }
   }
 
-  @Rule
-  public Timeout timeout = new Timeout(10000); // 10 seconds max per method tested
-
   @Test
   public void testSubmit() throws Exception {
     ClusterConnection hc = createHConnection();
@@ -571,7 +573,7 @@ public class TestAsyncProcess {
     ars = ap.submit(DUMMY_TABLE, puts, false, null, true);
     Assert.assertEquals(0, puts.size());
     ars.waitUntilDone();
-    Assert.assertEquals(2, ap.callsCt.get());
+    Assert.assertEquals(1, ap.callsCt.get());
     verifyResult(ars, true);
   }
 
@@ -699,7 +701,7 @@ public class TestAsyncProcess {
 
     Put put = createPut(1, false);
 
-    Assert.assertEquals(0L, ht.mutator.currentWriteBufferSize);
+    Assert.assertEquals(0L, ht.mutator.currentWriteBufferSize.get());
     try {
       ht.put(put);
       if (bufferOn) {
@@ -708,7 +710,7 @@ public class TestAsyncProcess {
       Assert.fail();
     } catch (RetriesExhaustedException expected) {
     }
-    Assert.assertEquals(0L, ht.mutator.currentWriteBufferSize);
+    Assert.assertEquals(0L, ht.mutator.currentWriteBufferSize.get());
     // The table should have sent one request, maybe after multiple attempts
     AsyncRequestFuture ars = null;
     for (AsyncRequestFuture someReqs : ap.allReqs) {
@@ -760,32 +762,6 @@ public class TestAsyncProcess {
     }
     Assert.assertEquals("the put should not been inserted.", 0, mutator.writeAsyncBuffer.size());
   }
-
-
-/*
-  @Test
-  public void testWithNoClearOnFail() throws IOException {
-    HTable ht = new HTable();
-    ht.ap = new MyAsyncProcess(createHConnection(), conf, true);
-    ht.setAutoFlushTo(false);
-
-    Put p = createPut(1, false);
-    ht.put(p);
-    Assert.assertEquals(0, ht.writeAsyncBuffer.size());
-
-    try {
-      ht.flushCommits();
-    } catch (RetriesExhaustedWithDetailsException expected) {
-    }
-    Assert.assertEquals(1, ht.writeAsyncBuffer.size());
-
-    try {
-      ht.close();
-    } catch (RetriesExhaustedWithDetailsException expected) {
-    }
-    Assert.assertEquals(1, ht.writeAsyncBuffer.size());
-  }
-  */
 
   @Test
   public void testBatch() throws IOException, InterruptedException {
@@ -954,7 +930,7 @@ public class TestAsyncProcess {
     // Main calls fail before replica calls can start - this is currently not handled.
     // It would probably never happen if we can get location (due to retries),
     // and it would require additional synchronization.
-    MyAsyncProcessWithReplicas ap = createReplicaAp(1000, 0, 0, 1);
+    MyAsyncProcessWithReplicas ap = createReplicaAp(1000, 0, 0, 0);
     ap.addFailures(hri1, hri2);
     List<Get> rows = makeTimelineGets(DUMMY_BYTES_1, DUMMY_BYTES_2);
     AsyncRequestFuture ars = ap.submitAll(DUMMY_TABLE, rows, null, new Object[2]);
@@ -966,7 +942,7 @@ public class TestAsyncProcess {
   public void testReplicaReplicaSuccessWithParallelFailures() throws Exception {
     // Main calls fails after replica calls start. For two-replica region, one replica call
     // also fails. Regardless, we get replica results for both regions.
-    MyAsyncProcessWithReplicas ap = createReplicaAp(0, 1000, 1000, 1);
+    MyAsyncProcessWithReplicas ap = createReplicaAp(0, 1000, 1000, 0);
     ap.addFailures(hri1, hri1r2, hri2);
     List<Get> rows = makeTimelineGets(DUMMY_BYTES_1, DUMMY_BYTES_2);
     AsyncRequestFuture ars = ap.submitAll(DUMMY_TABLE, rows, null, new Object[2]);
@@ -978,7 +954,7 @@ public class TestAsyncProcess {
   public void testReplicaAllCallsFailForOneRegion() throws Exception {
     // For one of the region, all 3, main and replica, calls fail. For the other, replica
     // call fails but its exception should not be visible as it did succeed.
-    MyAsyncProcessWithReplicas ap = createReplicaAp(500, 1000, 0, 1);
+    MyAsyncProcessWithReplicas ap = createReplicaAp(500, 1000, 0, 0);
     ap.addFailures(hri1, hri1r1, hri1r2, hri2r1);
     List<Get> rows = makeTimelineGets(DUMMY_BYTES_1, DUMMY_BYTES_2);
     AsyncRequestFuture ars = ap.submitAll(DUMMY_TABLE, rows, null, new Object[2]);
@@ -1002,7 +978,7 @@ public class TestAsyncProcess {
     Configuration conf = new Configuration();
     ClusterConnection conn = createHConnectionWithReplicas();
     conf.setInt(AsyncProcess.PRIMARY_CALL_TIMEOUT_KEY, replicaAfterMs * 1000);
-    if (retries > 0) {
+    if (retries >= 0) {
       conf.setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, retries);
     }
     MyAsyncProcessWithReplicas ap = new MyAsyncProcessWithReplicas(conn, conf);
@@ -1072,8 +1048,45 @@ public class TestAsyncProcess {
         throw new IllegalArgumentException("unknown " + regCnt);
     }
 
-    p.add(DUMMY_BYTES_1, DUMMY_BYTES_1, DUMMY_BYTES_1);
+    p.addColumn(DUMMY_BYTES_1, DUMMY_BYTES_1, DUMMY_BYTES_1);
 
     return p;
   }
+
+  static class MyThreadPoolExecutor extends ThreadPoolExecutor {
+    public MyThreadPoolExecutor(int coreThreads, int maxThreads, long keepAliveTime,
+        TimeUnit timeunit, BlockingQueue<Runnable> blockingqueue) {
+      super(coreThreads, maxThreads, keepAliveTime, timeunit, blockingqueue);
+    }
+
+    @Override
+    public Future submit(Runnable runnable) {
+      throw new OutOfMemoryError("OutOfMemory error thrown by means");
+    }
+  }
+
+  static class AsyncProcessForThrowableCheck extends AsyncProcess {
+    public AsyncProcessForThrowableCheck(ClusterConnection hc, Configuration conf,
+        ExecutorService pool) {
+      super(hc, conf, pool, new RpcRetryingCallerFactory(conf), false, new RpcControllerFactory(
+          conf));
+    }
+  }
+
+  @Test
+  public void testUncheckedException() throws Exception {
+    // Test the case pool.submit throws unchecked exception
+    ClusterConnection hc = createHConnection();
+    MyThreadPoolExecutor myPool =
+        new MyThreadPoolExecutor(1, 20, 60, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<Runnable>(200));
+    AsyncProcess ap = new AsyncProcessForThrowableCheck(hc, conf, myPool);
+
+    List<Put> puts = new ArrayList<Put>();
+    puts.add(createPut(1, true));
+
+    ap.submit(DUMMY_TABLE, puts, false, null, false);
+    Assert.assertTrue(puts.isEmpty());
+  }
+
 }

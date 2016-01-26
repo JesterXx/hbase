@@ -49,7 +49,6 @@ import org.apache.hadoop.hbase.YouAreDeadException;
 import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.ClusterConnection;
-import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.RetriesExhaustedException;
 import org.apache.hadoop.hbase.master.balancer.BaseLoadBalancer;
 import org.apache.hadoop.hbase.master.procedure.ServerCrashProcedure;
@@ -144,10 +143,7 @@ public class ServerManager {
   private final Map<ServerName, AdminService.BlockingInterface> rsAdmins =
     new HashMap<ServerName, AdminService.BlockingInterface>();
 
-  /**
-   * List of region servers <ServerName> that should not get any more new
-   * regions.
-   */
+  /** List of region servers that should not get any more new regions. */
   private final ArrayList<ServerName> drainingServers =
     new ArrayList<ServerName>();
 
@@ -219,7 +215,7 @@ public class ServerManager {
     Configuration c = master.getConfiguration();
     maxSkew = c.getLong("hbase.master.maxclockskew", 30000);
     warningSkew = c.getLong("hbase.master.warningclockskew", 10000);
-    this.connection = connect ? master.getConnection() : null;
+    this.connection = connect ? master.getClusterConnection() : null;
     int pingMaxAttempts = Math.max(1, master.getConfiguration().getInt(
       "hbase.master.maximum.ping.server.attempts", 10));
     int pingSleepInterval = Math.max(1, master.getConfiguration().getInt(

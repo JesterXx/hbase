@@ -33,7 +33,6 @@ import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Waiter.Predicate;
 import org.apache.hadoop.hbase.client.Durability;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
@@ -108,7 +107,7 @@ public class TestRegionServerCoprocessorExceptionWithAbort {
       try {
         final byte[] ROW = Bytes.toBytes("aaa");
         Put put = new Put(ROW);
-        put.add(TEST_FAMILY, ROW, ROW);
+        put.addColumn(TEST_FAMILY, ROW, ROW);
         table.put(put);
       } catch (IOException e) {
         // The region server is going to be aborted.

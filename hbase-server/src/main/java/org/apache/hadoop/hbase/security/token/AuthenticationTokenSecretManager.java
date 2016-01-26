@@ -124,7 +124,7 @@ public class AuthenticationTokenSecretManager
   }
 
   @Override
-  protected byte[] createPassword(AuthenticationTokenIdentifier identifier) {
+  protected synchronized byte[] createPassword(AuthenticationTokenIdentifier identifier) {
     long now = EnvironmentEdgeManager.currentTime();
     AuthenticationKey secretKey = currentKey;
     identifier.setKeyId(secretKey.getKeyId());
@@ -143,6 +143,27 @@ public class AuthenticationTokenSecretManager
       throw new InvalidToken("Token has expired");
     }
     AuthenticationKey masterKey = allKeys.get(identifier.getKeyId());
+    if(masterKey == null) {
+      if(zkWatcher.getWatcher().isAborted()) {
+        LOG.error("ZookeeperWatcher is abort");
+        throw new InvalidToken("Token keys could not be sync from zookeeper"
+            + " because of ZookeeperWatcher abort");
+      }
+      synchronized (this) {
+        if (!leaderElector.isAlive() || leaderElector.isStopped()) {
+          LOG.warn("Thread leaderElector[" + leaderElector.getName() + ":"
+              + leaderElector.getId() + "] is stoped or not alive");
+          leaderElector.start();
+          LOG.info("Thread leaderElector [" + leaderElector.getName() + ":"
+              + leaderElector.getId() + "] is started");
+        }
+      }
+      zkWatcher.refreshKeys();
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Sync token keys from zookeeper");
+      }
+      masterKey = allKeys.get(identifier.getKeyId());
+    }
     if (masterKey == null) {
       throw new InvalidToken("Unknown master key for token (id="+
           identifier.getKeyId()+")");
@@ -208,7 +229,7 @@ public class AuthenticationTokenSecretManager
     return true;
   }
 
-  AuthenticationKey getCurrentKey() {
+  synchronized AuthenticationKey getCurrentKey() {
     return currentKey;
   }
 
@@ -264,6 +285,10 @@ public class AuthenticationTokenSecretManager
     }
   }
 
+  synchronized long getLastKeyUpdate() {
+    return lastKeyUpdate;
+  }
+
   public static SecretKey createSecretKey(byte[] raw) {
     return SecretManager.createSecretKey(raw);
   }
@@ -317,8 +342,8 @@ public class AuthenticationTokenSecretManager
 
         // clear any expired
         removeExpiredKeys();
-
-        if (lastKeyUpdate + keyUpdateInterval < now) {
+        long localLastKeyUpdate = getLastKeyUpdate();
+        if (localLastKeyUpdate + keyUpdateInterval < now) {
           // roll a new master key
           rollCurrentKey();
         }

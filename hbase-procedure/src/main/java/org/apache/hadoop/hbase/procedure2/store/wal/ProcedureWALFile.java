@@ -46,6 +46,8 @@ public class ProcedureWALFile implements Comparable<ProcedureWALFile> {
   private FileSystem fs;
   private Path logFile;
   private long startPos;
+  private long minProcId;
+  private long maxProcId;
 
   public ProcedureWALFile(final FileSystem fs, final FileStatus logStatus) {
     this.fs = fs;
@@ -119,12 +121,25 @@ public class ProcedureWALFile implements Comparable<ProcedureWALFile> {
   }
 
   public long getSize() {
-    return logStatus.getLen();
+    return logStatus != null ? logStatus.getLen() : 0;
   }
 
   public void removeFile() throws IOException {
     close();
     fs.delete(logFile, false);
+  }
+
+  public void setProcIds(long minId, long maxId) {
+    this.minProcId = minId;
+    this.maxProcId = maxId;
+  }
+
+  public long getMinProcId() {
+    return minProcId;
+  }
+
+  public long getMaxProcId() {
+    return maxProcId;
   }
 
   @Override

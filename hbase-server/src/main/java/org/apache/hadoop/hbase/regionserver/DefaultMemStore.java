@@ -40,12 +40,12 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.util.ByteRange;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.CollectionBackedScanner;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
-import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.htrace.Trace;
 
@@ -221,13 +221,12 @@ public class DefaultMemStore implements MemStore {
   /**
    * Write an update
    * @param cell
-   * @return approximate size of the passed KV &amp; newly added KV which maybe different than the
-   *         passed-in KV
+   * @return approximate size of the passed Cell.
    */
   @Override
-  public Pair<Long, Cell> add(Cell cell) {
+  public long add(Cell cell) {
     Cell toAdd = maybeCloneWithAllocator(cell);
-    return new Pair<Long, Cell>(internalAdd(toAdd), toAdd);
+    return internalAdd(toAdd);
   }
 
   @Override
@@ -552,12 +551,19 @@ public class DefaultMemStore implements MemStore {
 
   /**
    * Check if this memstore may contain the required keys
-   * @param scan
+   * @param scan scan
+   * @param store holds reference to cf
+   * @param oldestUnexpiredTS
    * @return False if the key definitely does not exist in this Memstore
    */
-  public boolean shouldSeek(Scan scan, long oldestUnexpiredTS) {
-    return (timeRangeTracker.includesTimeRange(scan.getTimeRange()) ||
-        snapshotTimeRangeTracker.includesTimeRange(scan.getTimeRange()))
+  public boolean shouldSeek(Scan scan, Store store, long oldestUnexpiredTS) {
+    byte[] cf = store.getFamily().getName();
+    TimeRange timeRange = scan.getColumnFamilyTimeRange().get(cf);
+    if (timeRange == null) {
+      timeRange = scan.getTimeRange();
+    }
+    return (timeRangeTracker.includesTimeRange(timeRange) ||
+        snapshotTimeRangeTracker.includesTimeRange(timeRange))
         && (Math.max(timeRangeTracker.getMaximumTimestamp(),
                      snapshotTimeRangeTracker.getMaximumTimestamp()) >=
             oldestUnexpiredTS);
@@ -829,9 +835,8 @@ public class DefaultMemStore implements MemStore {
     }
 
     @Override
-    public boolean shouldUseScanner(Scan scan, SortedSet<byte[]> columns,
-        long oldestUnexpiredTS) {
-      return shouldSeek(scan, oldestUnexpiredTS);
+    public boolean shouldUseScanner(Scan scan, Store store, long oldestUnexpiredTS) {
+      return shouldSeek(scan, store, oldestUnexpiredTS);
     }
 
     /**
@@ -964,21 +969,17 @@ public class DefaultMemStore implements MemStore {
     byte [] empty = new byte[0];
     for (int i = 0; i < count; i++) {
       // Give each its own ts
-      Pair<Long, Cell> ret = memstore1.add(new KeyValue(Bytes.toBytes(i), fam, qf, i, empty));
-      size += ret.getFirst();
+      size += memstore1.add(new KeyValue(Bytes.toBytes(i), fam, qf, i, empty));
     }
     LOG.info("memstore1 estimated size=" + size);
     for (int i = 0; i < count; i++) {
-      Pair<Long, Cell> ret = memstore1.add(new KeyValue(Bytes.toBytes(i), fam, qf, i, empty));
-      size += ret.getFirst();
+      size += memstore1.add(new KeyValue(Bytes.toBytes(i), fam, qf, i, empty));
     }
     LOG.info("memstore1 estimated size (2nd loading of same data)=" + size);
     // Make a variably sized memstore.
     DefaultMemStore memstore2 = new DefaultMemStore();
     for (int i = 0; i < count; i++) {
-      Pair<Long, Cell> ret = memstore2.add(new KeyValue(Bytes.toBytes(i), fam, qf, i,
-        new byte[i]));
-      size += ret.getFirst();
+      size += memstore2.add(new KeyValue(Bytes.toBytes(i), fam, qf, i, new byte[i]));
     }
     LOG.info("memstore2 estimated size=" + size);
     final int seconds = 30;

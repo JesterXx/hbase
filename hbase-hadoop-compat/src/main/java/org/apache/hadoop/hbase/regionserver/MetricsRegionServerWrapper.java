@@ -70,16 +70,21 @@ public interface MetricsRegionServerWrapper {
   /**
    * Get the number of WAL files of this region server.
    */
-  public long getNumWALFiles();
+  long getNumWALFiles();
   
   /**
    * Get the size of WAL files of this region server.
    */
-  public long getWALFileSize();
-  
+  long getWALFileSize();
+
   /**
-   * Get the number of store files hosted on this region server.
+   * Get the number of WAL files with slow appends for this region server.
    */
+  long getNumWALSlowAppend();
+
+    /**
+     * Get the number of store files hosted on this region server.
+     */
   long getNumStoreFiles();
 
   /**
@@ -151,12 +156,12 @@ public interface MetricsRegionServerWrapper {
   /**
    * Get the percent of HFiles' that are local.
    */
-  int getPercentFileLocal();
+  double getPercentFileLocal();
 
   /**
    * Get the percent of HFiles' that are local for secondary region replicas.
    */
-  int getPercentFileLocalSecondaryRegions();
+  double getPercentFileLocalSecondaryRegions();
 
   /**
    * Get the size of the split queue
@@ -231,7 +236,12 @@ public interface MetricsRegionServerWrapper {
   /**
    * Get the percent of requests with the block cache turned on that hit the block cache.
    */
-  int getBlockCacheHitCachingPercent();
+  double getBlockCacheHitCachingPercent();
+
+  /**
+   * Number of cache insertions that failed.
+   */
+  long getBlockCacheFailedInsertions();
 
   /**
    * Force a re-computation of the metrics.
@@ -341,20 +351,20 @@ public interface MetricsRegionServerWrapper {
   /**
    * Gets the hit percent to the mob file cache.
    */
-  int getMobFileCacheHitPercent();
+  double getMobFileCacheHitPercent();
 
   /**
    * @return Count of hedged read operations
    */
-  public long getHedgedReadOps();
+  long getHedgedReadOps();
 
   /**
    * @return Count of times a hedged read beat out the primary read.
    */
-  public long getHedgedReadWins();
+  long getHedgedReadWins();
 
   /**
    * @return Count of requests blocked because the memstore size is larger than blockingMemStoreSize
    */
-  public long getBlockedRequestsCount();
+  long getBlockedRequestsCount();
 }

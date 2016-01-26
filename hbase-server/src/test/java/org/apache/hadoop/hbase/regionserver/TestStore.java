@@ -223,7 +223,7 @@ public class TestStore {
         long size = store.memstore.getFlushableSize();
         Assert.assertEquals(0, size);
         LOG.info("Adding some data");
-        long kvSize = store.add(new KeyValue(row, family, qf1, 1, (byte[])null)).getFirst();
+        long kvSize = store.add(new KeyValue(row, family, qf1, 1, (byte[])null));
         size = store.memstore.getFlushableSize();
         Assert.assertEquals(kvSize, size);
         // Flush.  Bug #1 from HBASE-10466.  Make sure size calculation on failed flush is right.
@@ -638,20 +638,15 @@ public class TestStore {
 
 
     size += this.store.add(new KeyValue(Bytes.toBytes("200909091000"), family, qf1,
-        System.currentTimeMillis(),
-        Bytes.toBytes(newValue))).getFirst();
+        System.currentTimeMillis(), Bytes.toBytes(newValue)));
     size += this.store.add(new KeyValue(Bytes.toBytes("200909091200"), family, qf1,
-        System.currentTimeMillis(),
-        Bytes.toBytes(newValue))).getFirst();
+        System.currentTimeMillis(), Bytes.toBytes(newValue)));
     size += this.store.add(new KeyValue(Bytes.toBytes("200909091300"), family, qf1,
-        System.currentTimeMillis(),
-        Bytes.toBytes(newValue))).getFirst();
+        System.currentTimeMillis(), Bytes.toBytes(newValue)));
     size += this.store.add(new KeyValue(Bytes.toBytes("200909091400"), family, qf1,
-        System.currentTimeMillis(),
-        Bytes.toBytes(newValue))).getFirst();
+        System.currentTimeMillis(), Bytes.toBytes(newValue)));
     size += this.store.add(new KeyValue(Bytes.toBytes("200909091500"), family, qf1,
-        System.currentTimeMillis(),
-        Bytes.toBytes(newValue))).getFirst();
+        System.currentTimeMillis(), Bytes.toBytes(newValue)));
 
 
     for ( int i = 0 ; i < 10000 ; ++i) {
@@ -1035,6 +1030,18 @@ public class TestStore {
     store.getRegionFileSystem().removeStoreFiles(store.getColumnFamilyName(), Lists.newArrayList(sf));
   }
 
+  private void closeCompactedFile(int index) throws IOException {
+    Collection<StoreFile> files =
+        this.store.getStoreEngine().getStoreFileManager().getCompactedfiles();
+    StoreFile sf = null;
+    Iterator<StoreFile> it = files.iterator();
+    for (int i = 0; i <= index; i++) {
+      sf = it.next();
+    }
+    sf.closeReader(true);
+    store.getStoreEngine().getStoreFileManager().removeCompactedFiles(Lists.newArrayList(sf));
+  }
+
   @Test
   public void testRefreshStoreFiles() throws Exception {
     init(name.getMethodName());
@@ -1062,6 +1069,7 @@ public class TestStore {
     store.refreshStoreFiles();
     assertEquals(5, this.store.getStorefilesCount());
 
+    closeCompactedFile(0);
     archiveStoreFile(0);
 
     assertEquals(5, this.store.getStorefilesCount());

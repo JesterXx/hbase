@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.util;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.security.AccessController;
@@ -33,11 +34,14 @@ import sun.nio.ch.DirectBuffer;
 
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
+@edu.umd.cs.findbugs.annotations.SuppressWarnings(value="REC_CATCH_EXCEPTION",
+  justification="If exception, presume unaligned")
 public final class UnsafeAccess {
 
   private static final Log LOG = LogFactory.getLog(UnsafeAccess.class);
 
   static final Unsafe theUnsafe;
+  private static boolean unaligned;
 
   /** The offset to the first element in a byte array. */
   public static final long BYTE_ARRAY_BASE_OFFSET;
@@ -45,6 +49,10 @@ public final class UnsafeAccess {
   static final boolean littleEndian = ByteOrder.nativeOrder()
       .equals(ByteOrder.LITTLE_ENDIAN);
 
+  // This number limits the number of bytes to copy per call to Unsafe's
+  // copyMemory method. A limit is imposed to allow for safepoint polling
+  // during a large copy
+  static final long UNSAFE_COPY_THRESHOLD = 1024L * 1024L;
   static {
     theUnsafe = (Unsafe) AccessController.doPrivileged(new PrivilegedAction<Object>() {
       @Override
@@ -60,20 +68,38 @@ public final class UnsafeAccess {
       }
     });
 
-    if(theUnsafe != null){
+    if (theUnsafe != null) {
       BYTE_ARRAY_BASE_OFFSET = theUnsafe.arrayBaseOffset(byte[].class);
+      try {
+        // Using java.nio.Bits#unaligned() to check for unaligned-access capability
+        Class<?> clazz = Class.forName("java.nio.Bits");
+        Method m = clazz.getDeclaredMethod("unaligned");
+        m.setAccessible(true);
+        unaligned = (boolean) m.invoke(null);
+      } catch (Exception e) {
+        unaligned = false; // FindBugs: Causes REC_CATCH_EXCEPTION. Suppressed.
+      }
     } else{
       BYTE_ARRAY_BASE_OFFSET = -1;
+      unaligned = false;
     }
   }
 
   private UnsafeAccess(){}
 
   /**
-   * @return true when the running JVM is having sun's Unsafe package available in it.
+   * @return true when running JVM is having sun's Unsafe package available in it.
    */
   public static boolean isAvailable() {
     return theUnsafe != null;
+  }
+
+  /**
+   * @return true when running JVM is having sun's Unsafe package available in it and underlying
+   *         system having unaligned-access capability.
+   */
+  public static boolean unaligned() {
+    return unaligned;
   }
 
   // APIs to read primitive data from a byte[] using Unsafe way
@@ -330,7 +356,17 @@ public final class UnsafeAccess {
       destBase = dest.array();
     }
     long srcAddress = srcOffset + BYTE_ARRAY_BASE_OFFSET;
-    theUnsafe.copyMemory(src, srcAddress, destBase, destAddress, length);
+    unsafeCopy(src, srcAddress, destBase, destAddress, length);
+  }
+
+  private static void unsafeCopy(Object src, long srcAddr, Object dst, long destAddr, long len) {
+    while (len > 0) {
+      long size = (len > UNSAFE_COPY_THRESHOLD) ? UNSAFE_COPY_THRESHOLD : len;
+      theUnsafe.copyMemory(src, srcAddr, dst, destAddr, len);
+      len -= size;
+      srcAddr += size;
+      destAddr += size;
+    }
   }
 
   /**
@@ -354,7 +390,7 @@ public final class UnsafeAccess {
       srcBase = src.array();
     }
     long destAddress = destOffset + BYTE_ARRAY_BASE_OFFSET;
-    theUnsafe.copyMemory(srcBase, srcAddress, dest, destAddress, length);
+    unsafeCopy(srcBase, srcAddress, dest, destAddress, length);
   }
 
   /**
@@ -383,8 +419,9 @@ public final class UnsafeAccess {
       destAddress = destOffset + BYTE_ARRAY_BASE_OFFSET + dest.arrayOffset();
       destBase = dest.array();
     }
-    theUnsafe.copyMemory(srcBase, srcAddress, destBase, destAddress, length);
+    unsafeCopy(srcBase, srcAddress, destBase, destAddress, length);
   }
+
   // APIs to add primitives to BBs
   /**
    * Put a short value out to the specified BB position in big-endian format.

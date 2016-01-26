@@ -42,7 +42,6 @@ import org.apache.hadoop.hbase.regionserver.TestHRegionServerBulkLoad;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.FSTableDescriptors;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
 import org.junit.AfterClass;
@@ -197,7 +196,7 @@ public class TestReplicaWithCluster {
         bHdt.getColumnFamilies().length + 1, nHdt.getColumnFamilies().length);
 
     p = new Put(row);
-    p.add(row, row, row);
+    p.addColumn(row, row, row);
     table.put(p);
 
     g = new Get(row);
@@ -254,7 +253,7 @@ public class TestReplicaWithCluster {
     admin.close();
 
     Put p = new Put(row);
-    p.add(row, row, row);
+    p.addColumn(row, row, row);
     final Table table = HTU.getConnection().getTable(hdt.getTableName());
     table.put(p);
 

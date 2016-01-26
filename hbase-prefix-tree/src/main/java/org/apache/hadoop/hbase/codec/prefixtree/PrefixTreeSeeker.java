@@ -90,14 +90,6 @@ public class PrefixTreeSeeker implements EncodedSeeker {
    * currently must do deep copy into new array
    */
   @Override
-  public ByteBuffer getKeyValueBuffer() {
-    return KeyValueUtil.copyToNewByteBuffer(ptSearcher.current());
-  }
-
-  /**
-   * currently must do deep copy into new array
-   */
-  @Override
   public Cell getCell() {
     // The PrefixTreecell is of type BytebufferedCell and the value part of the cell
     // determines whether we are offheap cell or onheap cell.  All other parts of the cell-
@@ -118,7 +110,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
       return new OffheapPrefixTreeCell(cell.getRowArray(), cell.getRowOffset(), cell.getRowLength(),
           cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength(),
           cell.getQualifierArray(), cell.getQualifierOffset(), cell.getQualifierLength(),
-          cell.getValueByteBuffer(), cell.getValuePositionInByteBuffer(), cell.getValueLength(),
+          cell.getValueByteBuffer(), cell.getValuePosition(), cell.getValueLength(),
           cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength(), cell.getTimestamp(),
           cell.getTypeByte(), cell.getSequenceId());
     }
@@ -441,7 +433,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
 
     @Override
     public int getRowOffset() {
-      return getRowPositionInByteBuffer();
+      return getRowPosition();
     }
 
     @Override
@@ -456,7 +448,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
 
     @Override
     public int getFamilyOffset() {
-      return getFamilyPositionInByteBuffer();
+      return getFamilyPosition();
     }
 
     @Override
@@ -471,7 +463,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
 
     @Override
     public int getQualifierOffset() {
-      return getQualifierPositionInByteBuffer();
+      return getQualifierPosition();
     }
 
     @Override
@@ -518,7 +510,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
 
     @Override
     public int getTagsOffset() {
-      return getTagsPositionInByteBuffer();
+      return getTagsPosition();
     }
 
     @Override
@@ -532,7 +524,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
     }
     
     @Override
-    public int getRowPositionInByteBuffer() {
+    public int getRowPosition() {
       return 0;
     }
     
@@ -542,7 +534,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
     }
     
     @Override
-    public int getFamilyPositionInByteBuffer() {
+    public int getFamilyPosition() {
       return 0;
     }
     
@@ -552,7 +544,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
     }
 
     @Override
-    public int getQualifierPositionInByteBuffer() {
+    public int getQualifierPosition() {
       return 0;
     }
 
@@ -562,7 +554,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
     }
 
     @Override
-    public int getTagsPositionInByteBuffer() {
+    public int getTagsPosition() {
       return 0;
     }
 
@@ -572,7 +564,7 @@ public class PrefixTreeSeeker implements EncodedSeeker {
     }
 
     @Override
-    public int getValuePositionInByteBuffer() {
+    public int getValuePosition() {
       return this.valOffset;
     }
 

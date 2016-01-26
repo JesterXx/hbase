@@ -403,8 +403,7 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
         if (this.numNodes < this.wrap) {
           this.wrap = this.numNodes;
         }
-        this.multipleUnevenColumnFamilies =
-            context.getConfiguration().getBoolean(MULTIPLE_UNEVEN_COLUMNFAMILIES_KEY, false);
+        this.multipleUnevenColumnFamilies = isMultiUnevenColumnFamilies(context.getConfiguration());
       }
 
       protected void instantiateHTable() throws IOException {
@@ -523,20 +522,38 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
           // Always add these families. Just skip writing to them when we do not test per CF flush.
           htd.addFamily(new HColumnDescriptor(BIG_FAMILY_NAME));
           htd.addFamily(new HColumnDescriptor(TINY_FAMILY_NAME));
-          int numberOfServers = admin.getClusterStatus().getServers().size();
-          if (numberOfServers == 0) {
-            throw new IllegalStateException("No live regionservers");
+          // if -DuseMob=true force all data through mob path.
+          if (conf.getBoolean("useMob", false)) {
+            for (HColumnDescriptor hcd : htd.getColumnFamilies() ) {
+              hcd.setMobEnabled(true);
+              hcd.setMobThreshold(4);
+            }
           }
-          int regionsPerServer = conf.getInt(HBaseTestingUtility.REGIONS_PER_SERVER_KEY,
-              HBaseTestingUtility.DEFAULT_REGIONS_PER_SERVER);
-          int totalNumberOfRegions = numberOfServers * regionsPerServer;
-          LOG.info("Number of live regionservers: " + numberOfServers + ", " +
-              "pre-splitting table into " + totalNumberOfRegions + " regions " +
-              "(default regions per server: " + regionsPerServer + ")");
 
-          byte[][] splits = new RegionSplitter.UniformSplit().split(totalNumberOfRegions);
+          // If we want to pre-split compute how many splits.
+          if (conf.getBoolean(HBaseTestingUtility.PRESPLIT_TEST_TABLE_KEY,
+              HBaseTestingUtility.PRESPLIT_TEST_TABLE)) {
+            int numberOfServers = admin.getClusterStatus().getServers().size();
+            if (numberOfServers == 0) {
+              throw new IllegalStateException("No live regionservers");
+            }
+            int regionsPerServer = conf.getInt(HBaseTestingUtility.REGIONS_PER_SERVER_KEY,
+                HBaseTestingUtility.DEFAULT_REGIONS_PER_SERVER);
+            int totalNumberOfRegions = numberOfServers * regionsPerServer;
+            LOG.info("Number of live regionservers: " + numberOfServers + ", " +
+                "pre-splitting table into " + totalNumberOfRegions + " regions " +
+                "(default regions per server: " + regionsPerServer + ")");
 
-          admin.createTable(htd, splits);
+
+            byte[][] splits = new RegionSplitter.UniformSplit().split(totalNumberOfRegions);
+
+            admin.createTable(htd, splits);
+          } else {
+            // Looks like we're just letting things play out.
+            // Create a table with on region by default.
+            // This will make the splitting work hard.
+            admin.createTable(htd);
+          }
         }
       } catch (MasterNotRunningException e) {
         LOG.error("Master not running", e);
@@ -592,11 +609,6 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
       job.setOutputFormatClass(NullOutputFormat.class);
 
       job.getConfiguration().setBoolean("mapreduce.map.speculative", false);
-      String multipleUnevenColumnFamiliesStr = System.getProperty(MULTIPLE_UNEVEN_COLUMNFAMILIES_KEY);
-      if (multipleUnevenColumnFamiliesStr != null) {
-        job.getConfiguration().setBoolean(MULTIPLE_UNEVEN_COLUMNFAMILIES_KEY,
-          Boolean.parseBoolean(multipleUnevenColumnFamiliesStr));
-      }
       TableMapReduceUtil.addDependencyJars(job);
       TableMapReduceUtil.addDependencyJars(job.getConfiguration(), AbstractHBaseTool.class);
       TableMapReduceUtil.initCredentials(job);
@@ -811,9 +823,7 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
       protected void setup(
           Mapper<ImmutableBytesWritable, Result, BytesWritable, BytesWritable>.Context context)
           throws IOException, InterruptedException {
-        this.multipleUnevenColumnFamilies =
-            context.getConfiguration().getBoolean(Generator.MULTIPLE_UNEVEN_COLUMNFAMILIES_KEY,
-              false);
+        this.multipleUnevenColumnFamilies = isMultiUnevenColumnFamilies(context.getConfiguration());
       }
 
       @Override
@@ -1082,10 +1092,9 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
       scan.addColumn(FAMILY_NAME, COLUMN_PREV);
       scan.setCaching(10000);
       scan.setCacheBlocks(false);
-      if (isMultiUnevenColumnFamilies()) {
+      if (isMultiUnevenColumnFamilies(getConf())) {
         scan.addColumn(BIG_FAMILY_NAME, BIG_FAMILY_NAME);
         scan.addColumn(TINY_FAMILY_NAME, TINY_FAMILY_NAME);
-        job.getConfiguration().setBoolean(Generator.MULTIPLE_UNEVEN_COLUMNFAMILIES_KEY, true);
       }
 
       TableMapReduceUtil.initTableMapperJob(getTableName(getConf()).getName(), scan,
@@ -1567,16 +1576,15 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
     }
   }
 
-  private static boolean isMultiUnevenColumnFamilies() {
-    return Boolean.TRUE.toString().equalsIgnoreCase(
-      System.getProperty(Generator.MULTIPLE_UNEVEN_COLUMNFAMILIES_KEY));
+  private static boolean isMultiUnevenColumnFamilies(Configuration conf) {
+    return conf.getBoolean(Generator.MULTIPLE_UNEVEN_COLUMNFAMILIES_KEY,true);
   }
 
   @Test
   public void testContinuousIngest() throws IOException, Exception {
     //Loop <num iterations> <num mappers> <num nodes per mapper> <output dir> <num reducers>
     Configuration conf = getTestingUtil(getConf()).getConfiguration();
-    if (isMultiUnevenColumnFamilies()) {
+    if (isMultiUnevenColumnFamilies(getConf())) {
       // make sure per CF flush is on
       conf.set(FlushPolicyFactory.HBASE_FLUSH_POLICY_KEY, FlushLargeStoresPolicy.class.getName());
     }
@@ -1605,6 +1613,19 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
     System.err.println(" loop       Program to Loop through Generator and Verify steps");
     System.err.println(" clean      Program to clean all left over detritus.");
     System.err.println(" search     Search for missing keys.");
+    System.err.println("");
+    System.err.println("General options:");
+    System.err.println(" -D"+ TABLE_NAME_KEY+ "=<tableName>");
+    System.err.println("    Run using the <tableName> as the tablename.  Defaults to "
+        + DEFAULT_TABLE_NAME);
+    System.err.println(" -D"+ HBaseTestingUtility.REGIONS_PER_SERVER_KEY+ "=<# regions>");
+    System.err.println("    Create table with presplit regions per server.  Defaults to "
+        + HBaseTestingUtility.DEFAULT_REGIONS_PER_SERVER);
+
+    System.err.println(" -DuseMob=<true|false>");
+    System.err.println("    Create table so that the mob read/write path is forced.  " +
+        "Defaults to false");
+
     System.err.flush();
   }
 
@@ -1661,7 +1682,7 @@ public class IntegrationTestBigLinkedList extends IntegrationTestBase {
 
   @Override
   protected Set<String> getColumnFamilies() {
-    if (isMultiUnevenColumnFamilies()) {
+    if (isMultiUnevenColumnFamilies(getConf())) {
       return Sets.newHashSet(Bytes.toString(FAMILY_NAME), Bytes.toString(BIG_FAMILY_NAME),
         Bytes.toString(TINY_FAMILY_NAME));
     } else {

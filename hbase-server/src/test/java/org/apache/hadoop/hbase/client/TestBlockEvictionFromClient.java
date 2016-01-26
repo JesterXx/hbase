@@ -74,6 +74,8 @@ public class TestBlockEvictionFromClient {
   private static int NO_OF_THREADS = 3;
   private static byte[] ROW = Bytes.toBytes("testRow");
   private static byte[] ROW1 = Bytes.toBytes("testRow1");
+  private static byte[] ROW2 = Bytes.toBytes("testRow2");
+  private static byte[] ROW3 = Bytes.toBytes("testRow3");
   private static byte[] FAMILY = Bytes.toBytes("testFamily");
   private static byte[][] FAMILIES_1 = new byte[1][0];
   private static byte[] QUALIFIER = Bytes.toBytes("testQualifier");
@@ -103,7 +105,7 @@ public class TestBlockEvictionFromClient {
     conf.setStrings("hbase.bucketcache.ioengine", "heap");
     conf.setFloat("hfile.block.cache.size", 0.2f);
     conf.setFloat("hbase.regionserver.global.memstore.size", 0.1f);
-    conf.setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 1);
+    conf.setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 0);// do not retry
     conf.setInt(HConstants.HBASE_CLIENT_SCANNER_TIMEOUT_PERIOD, 5000);
     FAMILIES_1[0] = FAMILY;
     TEST_UTIL.startMiniCluster(SLAVES);
@@ -183,10 +185,10 @@ public class TestBlockEvictionFromClient {
 
       // insert data. 2 Rows are added
       Put put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       put = new Put(ROW1);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       assertTrue(Bytes.equals(table.get(new Get(ROW)).value(), data));
       // data was in memstore so don't expect any changes
@@ -214,7 +216,7 @@ public class TestBlockEvictionFromClient {
       byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
       byte[] data2 = Bytes.add(data, data);
       put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER2, data2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
       table.put(put);
       Result r = table.get(new Get(ROW));
       assertTrue(Bytes.equals(r.getValue(FAMILY, QUALIFIER), data));
@@ -332,16 +334,16 @@ public class TestBlockEvictionFromClient {
       BlockCache cache = cacheConf.getBlockCache();
 
       Put put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       put = new Put(ROW1);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
       put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER2, data2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
       table.put(put);
       region.flush(true);
       // flush the data
@@ -389,16 +391,16 @@ public class TestBlockEvictionFromClient {
           regionName);
       BlockCache cache = setCacheProperties(region);
       Put put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       put = new Put(ROW1);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       for (int i = 1; i < 10; i++) {
         put = new Put(ROW);
-        put.add(FAMILY, Bytes.toBytes("testQualifier" + i), data2);
+        put.addColumn(FAMILY, Bytes.toBytes("testQualifier" + i), data2);
         table.put(put);
         if (i % 2 == 0) {
           region.flush(true);
@@ -406,7 +408,7 @@ public class TestBlockEvictionFromClient {
       }
       byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
       put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER2, data2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
       table.put(put);
       region.flush(true);
       // flush the data
@@ -483,16 +485,16 @@ public class TestBlockEvictionFromClient {
       BlockCache cache = setCacheProperties(region);
 
       Put put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       put = new Put(ROW1);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       for (int i = 1; i < 10; i++) {
         put = new Put(ROW);
-        put.add(Bytes.toBytes("testFamily" + i), Bytes.toBytes("testQualifier" + i), data2);
+        put.addColumn(Bytes.toBytes("testFamily" + i), Bytes.toBytes("testQualifier" + i), data2);
         table.put(put);
         if (i % 2 == 0) {
           region.flush(true);
@@ -501,7 +503,7 @@ public class TestBlockEvictionFromClient {
       region.flush(true);
       byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
       put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER2, data2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
       table.put(put);
       region.flush(true);
       // flush the data
@@ -554,6 +556,57 @@ public class TestBlockEvictionFromClient {
   }
 
   @Test
+  public void testBlockRefCountAfterSplits() throws IOException, InterruptedException {
+    HTable table = null;
+    try {
+      TableName tableName = TableName.valueOf("testBlockRefCountAfterSplits");
+      table = TEST_UTIL.createTable(tableName, FAMILIES_1, 1, 1024);
+      // get the block cache and region
+      RegionLocator locator = table.getRegionLocator();
+      String regionName = locator.getAllRegionLocations().get(0).getRegionInfo().getEncodedName();
+      Region region =
+          TEST_UTIL.getRSForFirstRegionInTable(tableName).getFromOnlineRegions(regionName);
+      Store store = region.getStores().iterator().next();
+      CacheConfig cacheConf = store.getCacheConfig();
+      cacheConf.setEvictOnClose(true);
+      BlockCache cache = cacheConf.getBlockCache();
+
+      Put put = new Put(ROW);
+      put.addColumn(FAMILY, QUALIFIER, data);
+      table.put(put);
+      region.flush(true);
+      put = new Put(ROW1);
+      put.addColumn(FAMILY, QUALIFIER, data);
+      table.put(put);
+      region.flush(true);
+      byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
+      put = new Put(ROW2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
+      table.put(put);
+      put = new Put(ROW3);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
+      table.put(put);
+      region.flush(true);
+      TEST_UTIL.getAdmin().split(tableName, ROW1);
+      List<HRegionInfo> tableRegions = TEST_UTIL.getAdmin().getTableRegions(tableName);
+      // Wait for splits
+      while (tableRegions.size() != 2) {
+        tableRegions = TEST_UTIL.getAdmin().getTableRegions(tableName);
+        Thread.sleep(100);
+      }
+      region.compact(true);
+      Iterator<CachedBlock> iterator = cache.iterator();
+      // Though the split had created the HalfStorefileReader - the firstkey and lastkey scanners
+      // should be closed inorder to return those blocks
+      iterateBlockCache(cache, iterator);
+    } finally {
+      if (table != null) {
+        table.close();
+      }
+    }
+  }
+
+  @Test
   public void testMultiGets() throws IOException, InterruptedException {
     HTable table = null;
     try {
@@ -577,16 +630,16 @@ public class TestBlockEvictionFromClient {
       BlockCache cache = cacheConf.getBlockCache();
 
       Put put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       put = new Put(ROW1);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
       put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER2, data2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
       table.put(put);
       region.flush(true);
       // flush the data
@@ -656,16 +709,16 @@ public class TestBlockEvictionFromClient {
       BlockCache cache = setCacheProperties(region);
 
       Put put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       put = new Put(ROW1);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       region.flush(true);
       for (int i = 1; i < 10; i++) {
         put = new Put(ROW);
-        put.add(Bytes.toBytes("testFamily" + i), Bytes.toBytes("testQualifier" + i), data2);
+        put.addColumn(Bytes.toBytes("testFamily" + i), Bytes.toBytes("testQualifier" + i), data2);
         table.put(put);
         if (i % 2 == 0) {
           region.flush(true);
@@ -674,7 +727,7 @@ public class TestBlockEvictionFromClient {
       region.flush(true);
       byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
       put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER2, data2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
       table.put(put);
       region.flush(true);
       // flush the data
@@ -827,10 +880,10 @@ public class TestBlockEvictionFromClient {
 
       // insert data. 2 Rows are added
       Put put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       put = new Put(ROW1);
-      put.add(FAMILY, QUALIFIER, data);
+      put.addColumn(FAMILY, QUALIFIER, data);
       table.put(put);
       assertTrue(Bytes.equals(table.get(new Get(ROW)).value(), data));
       // Should create one Hfile with 2 blocks
@@ -842,7 +895,7 @@ public class TestBlockEvictionFromClient {
       byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
       byte[] data2 = Bytes.add(data, data);
       put = new Put(ROW);
-      put.add(FAMILY, QUALIFIER2, data2);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
       table.put(put);
       // flush, one new block
       System.out.println("Flushing cache");
@@ -919,6 +972,138 @@ public class TestBlockEvictionFromClient {
       }
     }
   }
+
+  @Test
+  public void testBlockEvictionAfterHBASE13082WithCompactionAndFlush()
+      throws IOException, InterruptedException {
+    // do flush and scan in parallel
+    HTable table = null;
+    try {
+      latch = new CountDownLatch(1);
+      compactionLatch = new CountDownLatch(1);
+      TableName tableName =
+          TableName.valueOf("testBlockEvictionAfterHBASE13082WithCompactionAndFlush");
+      // Create a table with block size as 1024
+      table = TEST_UTIL.createTable(tableName, FAMILIES_1, 1, 1024,
+          CustomInnerRegionObserverWrapper.class.getName());
+      // get the block cache and region
+      RegionLocator locator = table.getRegionLocator();
+      String regionName = locator.getAllRegionLocations().get(0).getRegionInfo().getEncodedName();
+      Region region = TEST_UTIL.getRSForFirstRegionInTable(tableName).getFromOnlineRegions(
+          regionName);
+      Store store = region.getStores().iterator().next();
+      CacheConfig cacheConf = store.getCacheConfig();
+      cacheConf.setCacheDataOnWrite(true);
+      cacheConf.setEvictOnClose(true);
+      BlockCache cache = cacheConf.getBlockCache();
+
+      // insert data. 2 Rows are added
+      Put put = new Put(ROW);
+      put.addColumn(FAMILY, QUALIFIER, data);
+      table.put(put);
+      put = new Put(ROW1);
+      put.addColumn(FAMILY, QUALIFIER, data);
+      table.put(put);
+      assertTrue(Bytes.equals(table.get(new Get(ROW)).value(), data));
+      // Should create one Hfile with 2 blocks
+      region.flush(true);
+      // read the data and expect same blocks, one new hit, no misses
+      int refCount = 0;
+      // Check how this miss is happening
+      // insert a second column, read the row, no new blocks, 3 new hits
+      byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
+      byte[] data2 = Bytes.add(data, data);
+      put = new Put(ROW);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
+      table.put(put);
+      // flush, one new block
+      System.out.println("Flushing cache");
+      region.flush(true);
+      Iterator<CachedBlock> iterator = cache.iterator();
+      iterateBlockCache(cache, iterator);
+      // Create three sets of scan
+      ScanThread[] scanThreads = initiateScan(table, false);
+      Thread.sleep(100);
+      iterator = cache.iterator();
+      boolean usedBlocksFound = false;
+      while (iterator.hasNext()) {
+        CachedBlock next = iterator.next();
+        BlockCacheKey cacheKey = new BlockCacheKey(next.getFilename(), next.getOffset());
+        if (cache instanceof BucketCache) {
+          refCount = ((BucketCache) cache).getRefCount(cacheKey);
+        } else if (cache instanceof CombinedBlockCache) {
+          refCount = ((CombinedBlockCache) cache).getRefCount(cacheKey);
+        } else {
+          continue;
+        }
+        if (refCount != 0) {
+          // Blocks will be with count 3
+          assertEquals(NO_OF_THREADS, refCount);
+          usedBlocksFound = true;
+        }
+      }
+      // Make a put and do a flush
+      QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
+      data2 = Bytes.add(data, data);
+      put = new Put(ROW1);
+      put.addColumn(FAMILY, QUALIFIER2, data2);
+      table.put(put);
+      // flush, one new block
+      System.out.println("Flushing cache");
+      region.flush(true);
+      assertTrue("Blocks with non zero ref count should be found ", usedBlocksFound);
+      usedBlocksFound = false;
+      System.out.println("Compacting");
+      assertEquals(3, store.getStorefilesCount());
+      store.triggerMajorCompaction();
+      region.compact(true);
+      waitForStoreFileCount(store, 1, 10000); // wait 10 seconds max
+      assertEquals(1, store.getStorefilesCount());
+      // Even after compaction is done we will have some blocks that cannot
+      // be evicted this is because the scan is still referencing them
+      iterator = cache.iterator();
+      while (iterator.hasNext()) {
+        CachedBlock next = iterator.next();
+        BlockCacheKey cacheKey = new BlockCacheKey(next.getFilename(), next.getOffset());
+        if (cache instanceof BucketCache) {
+          refCount = ((BucketCache) cache).getRefCount(cacheKey);
+        } else if (cache instanceof CombinedBlockCache) {
+          refCount = ((CombinedBlockCache) cache).getRefCount(cacheKey);
+        } else {
+          continue;
+        }
+        if (refCount != 0) {
+          // Blocks will be with count 3 as they are not yet cleared
+          assertEquals(NO_OF_THREADS, refCount);
+          usedBlocksFound = true;
+        }
+      }
+      assertTrue("Blocks with non zero ref count should be found ", usedBlocksFound);
+      // Should not throw exception
+      compactionLatch.countDown();
+      latch.countDown();
+      for (ScanThread thread : scanThreads) {
+        thread.join();
+      }
+      // by this time all blocks should have been evicted
+      iterator = cache.iterator();
+      // Since a flush and compaction happened after a scan started
+      // we need to ensure that all the original blocks of the compacted file
+      // is also removed.
+      iterateBlockCache(cache, iterator);
+      Result r = table.get(new Get(ROW));
+      assertTrue(Bytes.equals(r.getValue(FAMILY, QUALIFIER), data));
+      assertTrue(Bytes.equals(r.getValue(FAMILY, QUALIFIER2), data2));
+      // The gets would be working on new blocks
+      iterator = cache.iterator();
+      iterateBlockCache(cache, iterator);
+    } finally {
+      if (table != null) {
+        table.close();
+      }
+    }
+  }
+
 
   @Test
   public void testScanWithException() throws IOException, InterruptedException {
@@ -1042,14 +1227,14 @@ public class TestBlockEvictionFromClient {
 
   private void insertData(HTable table) throws IOException {
     Put put = new Put(ROW);
-    put.add(FAMILY, QUALIFIER, data);
+    put.addColumn(FAMILY, QUALIFIER, data);
     table.put(put);
     put = new Put(ROW1);
-    put.add(FAMILY, QUALIFIER, data);
+    put.addColumn(FAMILY, QUALIFIER, data);
     table.put(put);
     byte[] QUALIFIER2 = Bytes.add(QUALIFIER, QUALIFIER);
     put = new Put(ROW);
-    put.add(FAMILY, QUALIFIER2, data2);
+    put.addColumn(FAMILY, QUALIFIER2, data2);
     table.put(put);
   }
 

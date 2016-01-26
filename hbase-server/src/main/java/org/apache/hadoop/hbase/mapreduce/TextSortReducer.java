@@ -24,16 +24,18 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
+import org.apache.hadoop.hbase.security.visibility.InvalidLabelException;
 import org.apache.hadoop.hbase.util.Base64;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.Text;
@@ -43,7 +45,7 @@ import org.apache.hadoop.util.StringUtils;
 
 /**
  * Emits Sorted KeyValues. Parse the passed text and creates KeyValues. Sorts them before emit.
- * @see HFileOutputFormat
+ * @see HFileOutputFormat2
  * @see KeyValueSortReducer
  * @see PutSortReducer
  */
@@ -168,7 +170,7 @@ public class TextSortReducer extends
           // Add TTL directly to the KV so we can vary them when packing more than one KV
           // into puts
           if (ttl > 0) {
-            tags.add(new Tag(TagType.TTL_TAG_TYPE, Bytes.toBytes(ttl)));
+            tags.add(new ArrayBackedTag(TagType.TTL_TAG_TYPE, Bytes.toBytes(ttl)));
           }
           for (int i = 0; i < parsed.getColumnCount(); i++) {
             if (i == parser.getRowKeyColumnIndex() || i == parser.getTimestampKeyColumnIndex()
@@ -186,21 +188,15 @@ public class TextSortReducer extends
             kvs.add(kv);
             curSize += kv.heapSize();
           }
-        } catch (ImportTsv.TsvParser.BadTsvLineException badLine) {
+        } catch (ImportTsv.TsvParser.BadTsvLineException | IllegalArgumentException
+            | InvalidLabelException badLine) {
           if (skipBadLines) {
             System.err.println("Bad line." + badLine.getMessage());
             incrementBadLineCount(1);
             continue;
           }
           throw new IOException(badLine);
-        } catch (IllegalArgumentException e) {
-          if (skipBadLines) {
-            System.err.println("Bad line." + e.getMessage());
-            incrementBadLineCount(1);
-            continue;
-          } 
-          throw new IOException(e);
-        } 
+        }
       }
       context.setStatus("Read " + kvs.size() + " entries of " + kvs.getClass()
           + "(" + StringUtils.humanReadableInt(curSize) + ")");

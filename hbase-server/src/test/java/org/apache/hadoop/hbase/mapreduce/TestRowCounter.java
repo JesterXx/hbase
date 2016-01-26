@@ -25,34 +25,35 @@ import static org.junit.Assert.fail;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.sql.Time;
 import java.util.ArrayList;
-import java.util.Arrays;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.CategoryBasedTimeout;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.hbase.testclassification.MapReduceTests;
-import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Table;
-import org.apache.hadoop.hbase.mapreduce.RowCounter.RowCounterMapper;
+import org.apache.hadoop.hbase.testclassification.LargeTests;
+import org.apache.hadoop.hbase.testclassification.MapReduceTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.LauncherSecurityManager;
-import org.apache.hadoop.util.ToolRunner;
+import org.apache.hadoop.mapreduce.Counter;
+import org.apache.hadoop.mapreduce.Job;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.rules.TestRule;
 
 /**
  * Test the rowcounter map reduce job.
  */
-@Category({MapReduceTests.class, MediumTests.class})
+@Category({MapReduceTests.class, LargeTests.class})
 public class TestRowCounter {
+  @Rule public final TestRule timeout = CategoryBasedTimeout.builder().
+      withTimeout(this.getClass()).withLookingForStuckThread(true).build();
   private static final Log LOG = LogFactory.getLog(TestRowCounter.class);
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private final static String TABLE_NAME = "testRowCounter";
@@ -69,7 +70,6 @@ public class TestRowCounter {
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
     TEST_UTIL.startMiniCluster();
-    TEST_UTIL.startMiniMapReduceCluster();
     Table table = TEST_UTIL.createTable(TableName.valueOf(TABLE_NAME), Bytes.toBytes(COL_FAM));
     writeRows(table);
     table.close();
@@ -81,7 +81,6 @@ public class TestRowCounter {
   @AfterClass
   public static void tearDownAfterClass() throws Exception {
     TEST_UTIL.shutdownMiniCluster();
-    TEST_UTIL.shutdownMiniMapReduceCluster();
   }
 
   /**
@@ -157,13 +156,13 @@ public class TestRowCounter {
     // clean up content of TABLE_NAME
     Table table = TEST_UTIL.deleteTableData(TableName.valueOf(TABLE_NAME));
     ts = System.currentTimeMillis();
-    put1.add(family, col1, ts, Bytes.toBytes("val1"));
+    put1.addColumn(family, col1, ts, Bytes.toBytes("val1"));
     table.put(put1);
     Thread.sleep(100);
 
     ts = System.currentTimeMillis();
-    put2.add(family, col1, ts, Bytes.toBytes("val2"));
-    put3.add(family, col1, ts, Bytes.toBytes("val3"));
+    put2.addColumn(family, col1, ts, Bytes.toBytes("val2"));
+    put3.addColumn(family, col1, ts, Bytes.toBytes("val3"));
     table.put(put2);
     table.put(put3);
     table.close();
@@ -205,9 +204,11 @@ public class TestRowCounter {
    * @throws Exception
    */
   private void runRowCount(String[] args, int expectedCount) throws Exception {
-    final RowCounter counter = new RowCounter();
-    assertEquals("job failed either due to failure or miscount (see log output).", 0,
-        ToolRunner.run(TEST_UTIL.getConfiguration(), counter, args));
+    Job job = RowCounter.createSubmittableJob(TEST_UTIL.getConfiguration(), args);
+    job.waitForCompletion(true);
+    assertTrue(job.isSuccessful());
+    Counter counter = job.getCounters().findCounter(RowCounter.RowCounterMapper.Counters.ROWS);
+    assertEquals(expectedCount, counter.getValue());
   }
 
   /**
@@ -229,9 +230,9 @@ public class TestRowCounter {
     for (; i < TOTAL_ROWS - ROWS_WITH_ONE_COL; i++) {
       byte[] row = Bytes.toBytes("row" + i);
       Put put = new Put(row);
-      put.add(family, col1, value);
-      put.add(family, col2, value);
-      put.add(family, col3, value);
+      put.addColumn(family, col1, value);
+      put.addColumn(family, col2, value);
+      put.addColumn(family, col3, value);
       rowsUpdate.add(put);
     }
 
@@ -239,7 +240,7 @@ public class TestRowCounter {
     for (; i < TOTAL_ROWS; i++) {
       byte[] row = Bytes.toBytes("row" + i);
       Put put = new Put(row);
-      put.add(family, col2, value);
+      put.addColumn(family, col2, value);
       rowsUpdate.add(put);
     }
     table.put(rowsUpdate);

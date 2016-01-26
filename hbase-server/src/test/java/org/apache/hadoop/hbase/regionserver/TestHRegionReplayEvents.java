@@ -55,6 +55,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.executor.ExecutorService;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
@@ -166,9 +167,17 @@ public class TestHRegionReplayEvents {
     when(rss.getServerName()).thenReturn(ServerName.valueOf("foo", 1, 1));
     when(rss.getConfiguration()).thenReturn(CONF);
     when(rss.getRegionServerAccounting()).thenReturn(new RegionServerAccounting());
-
+    String string = org.apache.hadoop.hbase.executor.EventType.RS_COMPACTED_FILES_DISCHARGER
+        .toString();
+    ExecutorService es = new ExecutorService(string);
+    es.startExecutorService(
+      string+"-"+string, 1);
+    when(rss.getExecutorService()).thenReturn(es);
     primaryRegion = HRegion.createHRegion(primaryHri, rootDir, CONF, htd, walPrimary);
     primaryRegion.close();
+    List<Region> regions = new ArrayList<Region>();
+    regions.add(primaryRegion);
+    when(rss.getOnlineRegions()).thenReturn(regions);
 
     primaryRegion = HRegion.openHRegion(rootDir, primaryHri, htd, walPrimary, CONF, rss, null);
     secondaryRegion = HRegion.openHRegion(secondaryHri, htd, null, CONF, rss, null);
@@ -1078,7 +1087,7 @@ public class TestHRegionReplayEvents {
       long readPoint = region.getMVCC().getReadPoint();
       long origSeqId = readPoint + 100;
 
-      Put put = new Put(row).add(family, row, row);
+      Put put = new Put(row).addColumn(family, row, row);
       put.setDurability(Durability.SKIP_WAL); // we replay with skip wal
       replay(region, put, origSeqId);
 
@@ -1091,7 +1100,7 @@ public class TestHRegionReplayEvents {
       // replay an entry that is smaller than current read point
       // caution: adding an entry below current read point might cause partial dirty reads. Normal
       // replay does not allow reads while replay is going on.
-      put = new Put(row2).add(family, row2, row2);
+      put = new Put(row2).addColumn(family, row2, row2);
       put.setDurability(Durability.SKIP_WAL);
       replay(region, put, origSeqId - 50);
 
@@ -1369,6 +1378,11 @@ public class TestHRegionReplayEvents {
 
     // Test case 3: compact primary files
     primaryRegion.compactStores();
+    List<Region> regions = new ArrayList<Region>();
+    regions.add(primaryRegion);
+    when(rss.getOnlineRegions()).thenReturn(regions);
+    CompactedHFilesDischarger cleaner = new CompactedHFilesDischarger(100, null, rss, false);
+    cleaner.chore();
     secondaryRegion.refreshStoreFiles();
     assertPathListsEqual(primaryRegion.getStoreFileList(families),
       secondaryRegion.getStoreFileList(families));
@@ -1628,7 +1642,7 @@ public class TestHRegionReplayEvents {
       Put put = new Put(Bytes.toBytes("" + i));
       put.setDurability(Durability.SKIP_WAL);
       for (byte[] family : families) {
-        put.add(family, qf, EnvironmentEdgeManager.currentTime(), null);
+        put.addColumn(family, qf, EnvironmentEdgeManager.currentTime(), null);
       }
       replay(region, put, i+1);
     }

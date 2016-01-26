@@ -152,9 +152,9 @@ EOF
         timestamp = nil
       end
       if timestamp
-        p.add(family, qualifier, timestamp, value.to_s.to_java_bytes)
+        p.addColumn(family, qualifier, timestamp, value.to_s.to_java_bytes)
       else
-        p.add(family, qualifier, value.to_s.to_java_bytes)
+        p.addColumn(family, qualifier, value.to_s.to_java_bytes)
       end
       @table.put(p)
     end
@@ -193,7 +193,7 @@ EOF
       end
       if column
         family, qualifier = parse_column_name(column)
-        d.deleteColumns(family, qualifier, timestamp)
+        d.addColumns(family, qualifier, timestamp)
       end
       @table.delete(d)
     end
@@ -359,7 +359,8 @@ EOF
       unless filter.class == String
         get.setFilter(filter)
       else
-        get.setFilter(org.apache.hadoop.hbase.filter.ParseFilter.new.parseFilterString(filter))
+        get.setFilter(
+          org.apache.hadoop.hbase.filter.ParseFilter.new.parseFilterString(filter.to_java_bytes))
       end
 
       get.setConsistency(org.apache.hadoop.hbase.client.Consistency.valueOf(consistency)) if consistency
@@ -458,7 +459,8 @@ EOF
         unless filter.class == String
           scan.setFilter(filter)
         else
-          scan.setFilter(org.apache.hadoop.hbase.filter.ParseFilter.new.parseFilterString(filter))
+          scan.setFilter(
+            org.apache.hadoop.hbase.filter.ParseFilter.new.parseFilterString(filter.to_java_bytes))
         end
 
         scan.setScanMetricsEnabled(enablemetrics) if enablemetrics

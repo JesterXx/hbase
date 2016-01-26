@@ -320,7 +320,7 @@ public class HTableDescriptor implements Comparable<HTableDescriptor> {
   /**
    * Construct a table descriptor specifying a TableName object
    * @param name Table name.
-   * @see <a href="HADOOP-1581">HADOOP-1581 HBASE: Un-openable tablename bug</a>
+   * @see <a href="https://issues.apache.org/jira/browse/HBASE-174">HADOOP-1581 HBASE: (HBASE-174) Un-openable tablename bug</a>
    */
   public HTableDescriptor(final TableName name) {
     super();
@@ -330,7 +330,7 @@ public class HTableDescriptor implements Comparable<HTableDescriptor> {
   /**
    * Construct a table descriptor specifying a byte array table name
    * @param name Table name.
-   * @see <a href="HADOOP-1581">HADOOP-1581 HBASE: Un-openable tablename bug</a>
+   * @see <a href="https://issues.apache.org/jira/browse/HBASE-174">HADOOP-1581 (HBASE-174) HBASE: Un-openable tablename bug</a>
    */
   @Deprecated
   public HTableDescriptor(final byte[] name) {
@@ -340,7 +340,7 @@ public class HTableDescriptor implements Comparable<HTableDescriptor> {
   /**
    * Construct a table descriptor specifying a String table name
    * @param name Table name.
-   * @see <a href="HADOOP-1581">HADOOP-1581 HBASE: Un-openable tablename bug</a>
+   * @see <a href="https://issues.apache.org/jira/browse/HBASE-174">HADOOP-1581 (HBASE-174) HBASE: Un-openable tablename bug</a>
    */
   @Deprecated
   public HTableDescriptor(final String name) {
@@ -355,8 +355,21 @@ public class HTableDescriptor implements Comparable<HTableDescriptor> {
    * @param desc The descriptor.
    */
   public HTableDescriptor(final HTableDescriptor desc) {
+    this(desc.name, desc);
+  }
+
+  /**
+   * Construct a table descriptor by cloning the descriptor passed as a parameter
+   * but using a different table name.
+   * <p>
+   * Makes a deep copy of the supplied descriptor.
+   * Can make a modifiable descriptor from an UnmodifyableHTableDescriptor.
+   * @param name Table name.
+   * @param desc The descriptor.
+   */
+  public HTableDescriptor(final TableName name, final HTableDescriptor desc) {
     super();
-    setName(desc.name);
+    setName(name);
     setMetaFlags(this.name);
     for (HColumnDescriptor c: desc.families.values()) {
       this.families.put(c.getName(), new HColumnDescriptor(c));

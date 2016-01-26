@@ -22,8 +22,6 @@ import static org.junit.Assert.assertEquals;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -45,7 +43,6 @@ import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Result;
@@ -153,28 +150,12 @@ public class OfflineMetaRebuildTestCore {
     for (int i = 0; i < values.length; i++) {
       for (int j = 0; j < values.length; j++) {
         Put put = new Put(new byte[] { values[i], values[j] });
-        put.add(Bytes.toBytes("fam"), new byte[] {}, new byte[] { values[i],
-            values[j] });
+        put.addColumn(Bytes.toBytes("fam"), new byte[]{}, new byte[]{values[i],
+                values[j]});
         puts.add(put);
       }
     }
     tbl.put(puts);
-  }
-
-  /**
-   * delete table in preparation for next test
-   *
-   * @param tablename
-   * @throws IOException
-   */
-  void deleteTable(HBaseAdmin admin, String tablename) throws IOException {
-    try {
-      byte[] tbytes = Bytes.toBytes(tablename);
-      admin.disableTable(tbytes);
-      admin.deleteTable(tbytes);
-    } catch (Exception e) {
-      // Do nothing.
-    }
   }
 
   protected void deleteRegion(Configuration conf, final Table tbl,
@@ -251,7 +232,7 @@ public class OfflineMetaRebuildTestCore {
     List<Delete> dels = new ArrayList<Delete>();
     for (Result r : scanner) {
       HRegionInfo info =
-          HRegionInfo.getHRegionInfo(r);
+          MetaTableAccessor.getHRegionInfo(r);
       if(info != null && !info.getTable().getNamespaceAsString()
           .equals(NamespaceDescriptor.SYSTEM_NAMESPACE_NAME_STR)) {
         Delete d = new Delete(r.getRow());

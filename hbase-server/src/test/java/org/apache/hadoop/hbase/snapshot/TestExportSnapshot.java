@@ -34,20 +34,18 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.CategoryBasedTimeout;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.protobuf.generated.SnapshotProtos.SnapshotFileInfo;
 import org.apache.hadoop.hbase.protobuf.generated.SnapshotProtos.SnapshotRegionManifest;
 import org.apache.hadoop.hbase.snapshot.SnapshotTestingUtils.SnapshotMock;
-import org.apache.hadoop.hbase.testclassification.RegionServerTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.VerySlowRegionServerTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -56,14 +54,18 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.rules.TestRule;
 
 /**
  * Test Export Snapshot Tool
  */
 @Category({VerySlowRegionServerTests.class, MediumTests.class})
 public class TestExportSnapshot {
+  @Rule public final TestRule timeout = CategoryBasedTimeout.builder().
+      withTimeout(this.getClass()).withLookingForStuckThread(true).build();
   private static final Log LOG = LogFactory.getLog(TestExportSnapshot.class);
 
   protected final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
@@ -235,11 +237,12 @@ public class TestExportSnapshot {
     FileSystem fs = TEST_UTIL.getHBaseCluster().getMaster().getMasterFileSystem().getFileSystem();
 
     SnapshotMock snapshotMock = new SnapshotMock(TEST_UTIL.getConfiguration(), fs, rootDir);
-    SnapshotMock.SnapshotBuilder builder = snapshotMock.createSnapshotV2("tableWithRefsV1");
+    SnapshotMock.SnapshotBuilder builder = snapshotMock.createSnapshotV2("tableWithRefsV1",
+      "tableWithRefsV1");
     testSnapshotWithRefsExportFileSystemState(builder);
 
     snapshotMock = new SnapshotMock(TEST_UTIL.getConfiguration(), fs, rootDir);
-    builder = snapshotMock.createSnapshotV2("tableWithRefsV2");
+    builder = snapshotMock.createSnapshotV2("tableWithRefsV2", "tableWithRefsV2");
     testSnapshotWithRefsExportFileSystemState(builder);
   }
 
@@ -341,7 +344,9 @@ public class TestExportSnapshot {
     Configuration conf = new Configuration(TEST_UTIL.getConfiguration());
     conf.setBoolean(ExportSnapshot.CONF_TEST_FAILURE, true);
     conf.setBoolean(ExportSnapshot.CONF_TEST_RETRY, retry);
-
+    if (!retry) {
+      conf.setInt("mapreduce.map.maxattempts", 3);
+    }
     // Export Snapshot
     Path sourceDir = TEST_UTIL.getHBaseCluster().getMaster().getMasterFileSystem().getRootDir();
     int res = ExportSnapshot.innerMain(conf, new String[] {

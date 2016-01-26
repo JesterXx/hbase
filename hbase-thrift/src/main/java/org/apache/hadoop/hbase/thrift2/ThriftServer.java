@@ -61,8 +61,8 @@ import org.apache.hadoop.hbase.thrift.CallQueue;
 import org.apache.hadoop.hbase.thrift.CallQueue.Call;
 import org.apache.hadoop.hbase.thrift.ThriftMetrics;
 import org.apache.hadoop.hbase.thrift2.generated.THBaseService;
+import org.apache.hadoop.hbase.util.DNS;
 import org.apache.hadoop.hbase.util.Strings;
-import org.apache.hadoop.net.DNS;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.SaslRpcServer.SaslGssCallbackHandler;
 import org.apache.hadoop.util.Tool;
@@ -112,6 +112,16 @@ public class ThriftServer extends Configured implements Tool {
 
   public static final int DEFAULT_LISTEN_PORT = 9090;
 
+  private static final String READ_TIMEOUT_OPTION = "readTimeout";
+
+  /**
+   * Amount of time in milliseconds before a server thread will timeout
+   * waiting for client to send data on a connected socket. Currently,
+   * applies only to TBoundedThreadPoolServer
+   */
+  public static final String THRIFT_SERVER_SOCKET_READ_TIMEOUT_KEY =
+    "hbase.thrift.server.socket.read.timeout";
+  public static final int THRIFT_SERVER_SOCKET_READ_TIMEOUT_DEFAULT = 60000;
 
   public ThriftServer() {
   }
@@ -135,7 +145,10 @@ public class ThriftServer extends Configured implements Tool {
     options.addOption("w", "workers", true, "How many worker threads to use.");
     options.addOption("h", "help", false, "Print help information");
     options.addOption(null, "infoport", true, "Port for web UI");
-
+    options.addOption("t", READ_TIMEOUT_OPTION, true,
+      "Amount of time in milliseconds before a server thread will timeout " +
+      "waiting for client to send data on a connected socket. Currently, " +
+      "only applies to TBoundedThreadPoolServer");
     OptionGroup servers = new OptionGroup();
     servers.addOption(
         new Option("nonblocking", false, "Use the TNonblockingServer. This implies the framed transport."));
@@ -245,10 +258,11 @@ public class ThriftServer extends Configured implements Tool {
     log.info("starting HBase HsHA Thrift server on " + inetSocketAddress.toString());
     THsHaServer.Args serverArgs = new THsHaServer.Args(serverTransport);
     if (workerThreads > 0) {
-      serverArgs.workerThreads(workerThreads);
+      // Could support the min & max threads, avoiding to preserve existing functionality.
+      serverArgs.minWorkerThreads(workerThreads).maxWorkerThreads(workerThreads);
     }
     ExecutorService executorService = createExecutor(
-        serverArgs.getWorkerThreads(), metrics);
+        workerThreads, metrics);
     serverArgs.executorService(executorService);
     serverArgs.processor(processor);
     serverArgs.transportFactory(transportFactory);
@@ -274,11 +288,13 @@ public class ThriftServer extends Configured implements Tool {
                                               TTransportFactory transportFactory,
                                               int workerThreads,
                                               InetSocketAddress inetSocketAddress,
-                                              int backlog)
+                                              int backlog,
+                                              int clientTimeout)
       throws TTransportException {
     TServerTransport serverTransport = new TServerSocket(
                                            new TServerSocket.ServerSocketTransportArgs().
-                                               bindAddr(inetSocketAddress).backlog(backlog));
+                                               bindAddr(inetSocketAddress).backlog(backlog).
+                                               clientTimeout(clientTimeout));
     log.info("starting HBase ThreadPool Thrift server on " + inetSocketAddress.toString());
     TThreadPoolServer.Args serverArgs = new TThreadPoolServer.Args(serverTransport);
     serverArgs.processor(processor);
@@ -344,6 +360,19 @@ public class ThriftServer extends Configured implements Tool {
       conf.set("hbase.thrift.info.bindAddress", bindAddress);
     } else {
       bindAddress = conf.get("hbase.thrift.info.bindAddress");
+    }
+
+    // Get read timeout
+    int readTimeout = THRIFT_SERVER_SOCKET_READ_TIMEOUT_DEFAULT;
+    if (cmd.hasOption(READ_TIMEOUT_OPTION)) {
+      try {
+        readTimeout = Integer.parseInt(cmd.getOptionValue(READ_TIMEOUT_OPTION));
+      } catch (NumberFormatException e) {
+        throw new RuntimeException("Could not parse the value provided for the timeout option", e);
+      }
+    } else {
+      readTimeout = conf.getInt(THRIFT_SERVER_SOCKET_READ_TIMEOUT_KEY,
+        THRIFT_SERVER_SOCKET_READ_TIMEOUT_DEFAULT);
     }
 
     // Get port to bind to
@@ -487,7 +516,8 @@ public class ThriftServer extends Configured implements Tool {
           transportFactory,
           workerThreads,
           inetSocketAddress,
-          backlog);
+          backlog,
+          readTimeout);
     }
 
     final TServer tserver = server;

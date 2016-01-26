@@ -515,7 +515,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
 
     @Override
     public int getRowOffset() {
-      return getRowPositionInByteBuffer();
+      return getRowPosition();
     }
 
     @Override
@@ -530,7 +530,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
 
     @Override
     public int getFamilyOffset() {
-      return getFamilyPositionInByteBuffer();
+      return getFamilyPosition();
     }
 
     @Override
@@ -545,7 +545,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
 
     @Override
     public int getQualifierOffset() {
-      return getQualifierPositionInByteBuffer();
+      return getQualifierPosition();
     }
 
     @Override
@@ -604,7 +604,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
     }
 
     @Override
-    public int getRowPositionInByteBuffer() {
+    public int getRowPosition() {
       return Bytes.SIZEOF_SHORT;
     }
 
@@ -614,7 +614,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
     }
 
     @Override
-    public int getFamilyPositionInByteBuffer() {
+    public int getFamilyPosition() {
       return this.familyOffset;
     }
 
@@ -624,7 +624,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
     }
 
     @Override
-    public int getQualifierPositionInByteBuffer() {
+    public int getQualifierPosition() {
       return this.qualifierOffset;
     }
 
@@ -634,7 +634,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
     }
 
     @Override
-    public int getValuePositionInByteBuffer() {
+    public int getValuePosition() {
       return this.valueOffset;
     }
 
@@ -644,7 +644,7 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
     }
 
     @Override
-    public int getTagsPositionInByteBuffer() {
+    public int getTagsPosition() {
       return this.tagsOffset;
     }
 
@@ -673,14 +673,14 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
       // Write key
       out.write(keyBuffer.array());
       // Write value
-      ByteBufferUtils.writeByteBuffer(out, this.valueBuffer, this.valueOffset, this.valueLength);
+      ByteBufferUtils.copyBufferToStream(out, this.valueBuffer, this.valueOffset, this.valueLength);
       if (withTags) {
         // 2 bytes tags length followed by tags bytes
         // tags length is serialized with 2 bytes only(short way) even if the type is int.
         // As this is non -ve numbers, we save the sign bit. See HBASE-11437
         out.write((byte) (0xff & (this.tagsLength >> 8)));
         out.write((byte) (0xff & this.tagsLength));
-        ByteBufferUtils.writeByteBuffer(out, this.tagsBuffer, this.tagsOffset, this.tagsLength);
+        ByteBufferUtils.copyBufferToStream(out, this.tagsBuffer, this.tagsOffset, this.tagsLength);
       }
       return lenToWrite + Bytes.SIZEOF_INT;
     }
@@ -757,38 +757,6 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
       dup.position(tmpPair.getSecond());
       dup.limit(tmpPair.getSecond() + current.valueLength);
       return dup.slice();
-    }
-
-    @Override
-    public ByteBuffer getKeyValueBuffer() {
-      ByteBuffer kvBuffer = createKVBuffer();
-      kvBuffer.putInt(current.keyLength);
-      kvBuffer.putInt(current.valueLength);
-      kvBuffer.put(current.keyBuffer, 0, current.keyLength);
-      currentBuffer.get(kvBuffer, current.valueOffset, current.valueLength);
-      if (current.tagsLength > 0) {
-        // Put short as unsigned
-        kvBuffer.put((byte) (current.tagsLength >> 8 & 0xff));
-        kvBuffer.put((byte) (current.tagsLength & 0xff));
-        if (current.tagsOffset != -1) {
-          // the offset of the tags bytes in the underlying buffer is marked. So the temp
-          // buffer,tagsBuffer was not been used.
-          currentBuffer.get(kvBuffer, current.tagsOffset, current.tagsLength);
-        } else {
-          // When tagsOffset is marked as -1, tag compression was present and so the tags were
-          // uncompressed into temp buffer, tagsBuffer. Let us copy it from there
-          kvBuffer.put(current.tagsBuffer, 0, current.tagsLength);
-        }
-      }
-      kvBuffer.rewind();
-      return kvBuffer;
-    }
-
-    protected ByteBuffer createKVBuffer() {
-      int kvBufSize = (int) KeyValue.getKeyValueDataStructureSize(current.keyLength,
-          current.valueLength, current.tagsLength);
-      ByteBuffer kvBuffer = ByteBuffer.allocate(kvBufSize);
-      return kvBuffer;
     }
 
     @Override
@@ -1034,10 +1002,12 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
         // When tag compression is enabled, tagCompressionContext will have a not null value. Write
         // the tags using Dictionary compression in such a case
         if (tagCompressionContext != null) {
+          // TODO : Make Dictionary interface to work with BBs and then change the corresponding
+          // compress tags code to work with BB
           tagCompressionContext
               .compressTags(out, cell.getTagsArray(), cell.getTagsOffset(), tagsLength);
         } else {
-          out.write(cell.getTagsArray(), cell.getTagsOffset(), tagsLength);
+          CellUtil.writeTags(out, cell, tagsLength);
         }
       }
       size += tagsLength + KeyValue.TAGS_LENGTH_SIZE;

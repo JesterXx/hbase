@@ -462,6 +462,11 @@ ClientProtos.ClientService.BlockingInterface, RegionServerServices {
   }
 
   @Override
+  public List<Region> getOnlineRegions() {
+    return null;
+  }
+
+  @Override
   public OpenRegionResponse openRegion(RpcController controller,
       OpenRegionRequest request) throws ServiceException {
     // TODO Auto-generated method stub
@@ -650,5 +655,11 @@ ClientProtos.ClientService.BlockingInterface, RegionServerServices {
   @Override
   public double getCompactionPressure() {
     return 0;
+  }
+
+  @Override
+  public ClusterConnection getClusterConnection() {
+    // TODO Auto-generated method stub
+    return null;
   }
 }

@@ -21,26 +21,26 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.Key;
-import java.security.KeyException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.ByteBufferedKeyOnlyKeyValue;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
-import org.apache.hadoop.hbase.ByteBufferedKeyOnlyKeyValue;
+import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.OffheapKeyValue;
 import org.apache.hadoop.hbase.ShareableMemory;
 import org.apache.hadoop.hbase.SizeCachedKeyValue;
-import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.SizeCachedNoTagsKeyValue;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.fs.HFileSystem;
 import org.apache.hadoop.hbase.io.FSDataInputStreamWrapper;
 import org.apache.hadoop.hbase.io.compress.Compression;
@@ -49,11 +49,9 @@ import org.apache.hadoop.hbase.io.crypto.Encryption;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoder;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.io.encoding.HFileBlockDecodingContext;
-import org.apache.hadoop.hbase.io.hfile.Cacheable.MemoryType;
 import org.apache.hadoop.hbase.io.hfile.HFile.FileInfo;
 import org.apache.hadoop.hbase.nio.ByteBuff;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
-import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.ByteBufferUtils;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.IdLock;
@@ -476,7 +474,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     private int currMemstoreTSLen;
     private long currMemstoreTS;
     // Updated but never read?
-    protected volatile int blockFetches;
+    protected AtomicInteger blockFetches = new AtomicInteger(0);
     protected final HFile.Reader reader;
     private int currTagsLen;
     // buffer backed keyonlyKV
@@ -510,14 +508,16 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
           block.getOffset() == this.curBlock.getOffset()) {
         return;
       }
-      if (this.curBlock != null) {
+      // We don't have to keep ref to EXCLUSIVE type of block
+      if (this.curBlock != null && this.curBlock.usesSharedMemory()) {
         prevBlocks.add(this.curBlock);
       }
       this.curBlock = block;
     }
 
     void reset() {
-      if (this.curBlock != null) {
+      // We don't have to keep ref to EXCLUSIVE type of block
+      if (this.curBlock != null && this.curBlock.usesSharedMemory()) {
         this.prevBlocks.add(this.curBlock);
       }
       this.curBlock = null;
@@ -857,9 +857,12 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         reader.returnBlock(seekToBlock);
         // It is important that we compute and pass onDiskSize to the block
         // reader so that it does not have to read the header separately to
-        // figure out the size.
+        // figure out the size.  Currently, we do not have a way to do this
+        // correctly in the general case however.
+        // TODO: See https://issues.apache.org/jira/browse/HBASE-14576
+        int prevBlockSize = -1;
         seekToBlock = reader.readBlock(previousBlockOffset,
-            seekToBlock.getOffset() - previousBlockOffset, cacheBlocks,
+            prevBlockSize, cacheBlocks,
             pread, isCompaction, true, BlockType.DATA, getEffectiveDataBlockEncoding());
         // TODO shortcut: seek forward in this block to the last key of the
         // block.
@@ -875,6 +878,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
      * @return the next block, or null if there are no more data blocks
      * @throws IOException
      */
+    @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="NP_NULL_ON_SOME_PATH",
+        justification="Yeah, unnecessary null check; could do w/ clean up")
     protected HFileBlock readNextDataBlock() throws IOException {
       long lastDataBlockOffset = reader.getTrailer().getLastDataBlockOffset();
       if (curBlock == null)
@@ -883,8 +888,9 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       HFileBlock block = this.curBlock;
 
       do {
-        if (block.getOffset() >= lastDataBlockOffset)
+        if (block.getOffset() >= lastDataBlockOffset) {
           return null;
+        }
 
         if (block.getOffset() < 0) {
           throw new IOException("Invalid block file offset: " + block);
@@ -896,7 +902,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
             + block.getOnDiskSizeWithHeader(),
             block.getNextBlockOnDiskSizeWithHeader(), cacheBlocks, pread,
             isCompaction, true, null, getEffectiveDataBlockEncoding());
-        if (block != null && !block.getBlockType().isData()) {
+        if (block != null && !block.getBlockType().isData()) { // Findbugs: NP_NULL_ON_SOME_PATH
           // Whatever block we read we will be returning it unless
           // it is a datablock. Just in case the blocks are non data blocks
           reader.returnBlock(block);
@@ -925,7 +931,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         // TODO : reduce the varieties of KV here. Check if based on a boolean
         // we can handle the 'no tags' case.
         if (currTagsLen > 0) {
-          if (this.curBlock.getMemoryType() == MemoryType.SHARED) {
+          if (this.curBlock.usesSharedMemory()) {
             ret = new ShareableMemoryKeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
               + blockBuffer.position(), getCellBufSize(), seqId);
           } else {
@@ -933,7 +939,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
                     + blockBuffer.position(), cellBufSize, seqId);
           }
         } else {
-          if (this.curBlock.getMemoryType() == MemoryType.SHARED) {
+          if (this.curBlock.usesSharedMemory()) {
             ret = new ShareableMemoryNoTagsKeyValue(blockBuffer.array(), blockBuffer.arrayOffset()
                     + blockBuffer.position(), getCellBufSize(), seqId);
           } else {
@@ -943,11 +949,31 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         }
       } else {
         ByteBuffer buf = blockBuffer.asSubByteBuffer(cellBufSize);
-        if (this.curBlock.getMemoryType() == MemoryType.SHARED) {
-          ret = new ShareableMemoryOffheapKeyValue(buf, buf.position(), cellBufSize,
-            currTagsLen > 0, seqId);
+        if (buf.isDirect()) {
+          if (this.curBlock.usesSharedMemory()) {
+            ret = new ShareableMemoryOffheapKeyValue(buf, buf.position(), cellBufSize,
+                currTagsLen > 0, seqId);
+          } else {
+            ret = new OffheapKeyValue(buf, buf.position(), cellBufSize, currTagsLen > 0, seqId);
+          }
         } else {
-          ret = new OffheapKeyValue(buf, buf.position(), cellBufSize, currTagsLen > 0, seqId);
+          if (this.curBlock.usesSharedMemory()) {
+            if (currTagsLen > 0) {
+              ret = new ShareableMemoryKeyValue(buf.array(), buf.arrayOffset() + buf.position(),
+                  cellBufSize, seqId);
+            } else {
+              ret = new ShareableMemoryNoTagsKeyValue(buf.array(),
+                  buf.arrayOffset() + buf.position(), cellBufSize, seqId);
+            }
+          } else {
+            if (currTagsLen > 0) {
+              ret = new SizeCachedKeyValue(buf.array(), buf.arrayOffset() + buf.position(),
+                  cellBufSize, seqId);
+            } else {
+              ret = new SizeCachedNoTagsKeyValue(buf.array(), buf.arrayOffset() + buf.position(),
+                  cellBufSize, seqId);
+            }
+          }
         }
       }
       return ret;
@@ -964,7 +990,13 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         return new KeyValue.KeyOnlyKeyValue(keyBuf.array(), keyBuf.arrayOffset()
             + keyPair.getSecond(), currKeyLen);
       } else {
-        return new ByteBufferedKeyOnlyKeyValue(keyBuf, keyPair.getSecond(), currKeyLen);
+        // Better to do a copy here instead of holding on to this BB so that
+        // we could release the blocks referring to this key. This key is specifically used 
+        // in HalfStoreFileReader to get the firstkey and lastkey by creating a new scanner
+        // every time. So holding onto the BB (incase of DBB) is not advised here.
+        byte[] key = new byte[currKeyLen];
+        ByteBufferUtils.copyFromBufferToArray(key, keyBuf, keyPair.getSecond(), 0, currKeyLen);
+        return new KeyValue.KeyOnlyKeyValue(key, 0, currKeyLen);
       }
     }
 
@@ -1200,7 +1232,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       updateCurrBlockRef(newBlock);
       blockBuffer = newBlock.getBufferWithoutHeader();
       readKeyValueLen();
-      blockFetches++;
+      blockFetches.incrementAndGet();
 
       // Reset the next indexed key
       this.nextIndexedKey = null;
@@ -1639,7 +1671,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       updateCurrBlockRef(newBlock);
       ByteBuff encodedBuffer = getEncodedBuffer(newBlock);
       seeker.setCurrentBuffer(encodedBuffer);
-      blockFetches++;
+      blockFetches.incrementAndGet();
 
       // Reset the next indexed key
       this.nextIndexedKey = null;
@@ -1793,29 +1825,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     if (keyBytes != null) {
       Encryption.Context cryptoContext = Encryption.newContext(conf);
       Key key;
-      String masterKeyName = conf.get(HConstants.CRYPTO_MASTERKEY_NAME_CONF_KEY,
-        User.getCurrent().getShortName());
-      try {
-        // First try the master key
-        key = EncryptionUtil.unwrapKey(conf, masterKeyName, keyBytes);
-      } catch (KeyException e) {
-        // If the current master key fails to unwrap, try the alternate, if
-        // one is configured
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Unable to unwrap key with current master key '" + masterKeyName + "'");
-        }
-        String alternateKeyName =
-          conf.get(HConstants.CRYPTO_MASTERKEY_ALTERNATE_NAME_CONF_KEY);
-        if (alternateKeyName != null) {
-          try {
-            key = EncryptionUtil.unwrapKey(conf, alternateKeyName, keyBytes);
-          } catch (KeyException ex) {
-            throw new IOException(ex);
-          }
-        } else {
-          throw new IOException(e);
-        }
-      }
+      key = EncryptionUtil.unwrapKey(conf, keyBytes);
       // Use the algorithm the key wants
       Cipher cipher = Encryption.getCipher(conf, key.getAlgorithm());
       if (cipher == null) {

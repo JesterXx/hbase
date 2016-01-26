@@ -34,6 +34,9 @@ public interface MetricsHBaseServerSource extends BaseSource {
   String AUTHENTICATION_FAILURES_NAME = "authenticationFailures";
   String AUTHENTICATION_FAILURES_DESC =
       "Number of authentication failures.";
+  String AUTHENTICATION_FALLBACKS_NAME = "authenticationFallbacks";
+  String AUTHENTICATION_FALLBACKS_DESC =
+      "Number of fallbacks to insecure authentication.";
   String SENT_BYTES_NAME = "sentBytes";
   String SENT_BYTES_DESC = "Number of bytes sent.";
   String RECEIVED_BYTES_NAME = "receivedBytes";
@@ -71,6 +74,9 @@ public interface MetricsHBaseServerSource extends BaseSource {
   String EXCEPTIONS_SANITY_NAME="exceptions.FailedSanityCheckException";
   String EXCEPTIONS_MOVED_NAME="exceptions.RegionMovedException";
   String EXCEPTIONS_NSRE_NAME="exceptions.NotServingRegionException";
+  String EXCEPTIONS_MULTI_TOO_LARGE_NAME = "exceptions.multiResponseTooLarge";
+  String EXCEPTIONS_MULTI_TOO_LARGE_DESC = "A response to a multi request was too large and the " +
+      "rest of the requests will have to be retried.";
 
   void authorizationSuccess();
 
@@ -79,6 +85,8 @@ public interface MetricsHBaseServerSource extends BaseSource {
   void authenticationSuccess();
 
   void authenticationFailure();
+
+  void authenticationFallback();
 
   void exception();
 
@@ -91,6 +99,7 @@ public interface MetricsHBaseServerSource extends BaseSource {
   void notServingRegionException();
   void unknownScannerException();
   void tooBusyException();
+  void multiActionTooLargeException();
 
   void sentBytes(long count);
 
@@ -105,4 +114,6 @@ public interface MetricsHBaseServerSource extends BaseSource {
   void processedCall(int processingTime);
 
   void queuedAndProcessedCall(int totalTime);
-  }
+
+
+}

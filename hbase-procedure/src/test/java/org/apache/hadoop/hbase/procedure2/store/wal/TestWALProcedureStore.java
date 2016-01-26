@@ -22,13 +22,13 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -83,6 +83,7 @@ public class TestWALProcedureStore {
     procStore = ProcedureTestingUtility.createWalStore(htu.getConfiguration(), fs, logDir);
     procStore.start(PROCEDURE_STORE_SLOTS);
     procStore.recoverLease();
+    procStore.load(new LoadCounter());
   }
 
   @After
@@ -96,6 +97,15 @@ public class TestWALProcedureStore {
     procStore.start(PROCEDURE_STORE_SLOTS);
     procStore.recoverLease();
     procStore.load(loader);
+  }
+
+  @Test
+  public void testEmptyRoll() throws Exception {
+    for (int i = 0; i < 10; ++i) {
+      procStore.periodicRollForTesting();
+    }
+    FileStatus[] status = fs.listStatus(logDir);
+    assertEquals(1, status.length);
   }
 
   @Test
@@ -146,6 +156,56 @@ public class TestWALProcedureStore {
       corruptLog(logs[i], 4);
     }
     verifyProcIdsOnRestart(procIds);
+  }
+
+  @Test
+  public void testNoTrailerDoubleRestart() throws Exception {
+    // log-0001: proc 0, 1 and 2 are inserted
+    Procedure proc0 = new TestSequentialProcedure();
+    procStore.insert(proc0, null);
+    Procedure proc1 = new TestSequentialProcedure();
+    procStore.insert(proc1, null);
+    Procedure proc2 = new TestSequentialProcedure();
+    procStore.insert(proc2, null);
+    procStore.rollWriterForTesting();
+
+    // log-0002: proc 1 deleted
+    procStore.delete(proc1.getProcId());
+    procStore.rollWriterForTesting();
+
+    // log-0003: proc 2 is update
+    procStore.update(proc2);
+    procStore.rollWriterForTesting();
+
+    // log-0004: proc 2 deleted
+    procStore.delete(proc2.getProcId());
+
+    // stop the store and remove the trailer
+    procStore.stop(false);
+    FileStatus[] logs = fs.listStatus(logDir);
+    assertEquals(4, logs.length);
+    for (int i = 0; i < logs.length; ++i) {
+      corruptLog(logs[i], 4);
+    }
+
+    // Test Load 1
+    LoadCounter loader = new LoadCounter();
+    storeRestart(loader);
+    assertEquals(1, loader.getLoadedCount());
+    assertEquals(0, loader.getCorruptedCount());
+
+    // Test Load 2
+    assertEquals(5, fs.listStatus(logDir).length);
+    loader = new LoadCounter();
+    storeRestart(loader);
+    assertEquals(1, loader.getLoadedCount());
+    assertEquals(0, loader.getCorruptedCount());
+
+    // remove proc-0
+    procStore.delete(proc0.getProcId());
+    procStore.periodicRollForTesting();
+    assertEquals(1, fs.listStatus(logDir).length);
+    storeRestart(loader);
   }
 
   @Test
@@ -204,14 +264,14 @@ public class TestWALProcedureStore {
       procStore.update(rootProcs[i-1]);
     }
     // insert root-child txn
-    procStore.rollWriter();
+    procStore.rollWriterForTesting();
     for (int i = 1; i <= rootProcs.length; i++) {
       TestProcedure b = new TestProcedure(rootProcs.length + i, i);
       rootProcs[i-1].addStackId(1);
       procStore.insert(rootProcs[i-1], new Procedure[] { b });
     }
     // insert child updates
-    procStore.rollWriter();
+    procStore.rollWriterForTesting();
     for (int i = 1; i <= rootProcs.length; i++) {
       procStore.update(new TestProcedure(rootProcs.length + i, i));
     }
@@ -219,9 +279,10 @@ public class TestWALProcedureStore {
     // Stop the store
     procStore.stop(false);
 
-    // Remove 4 byte from the trailer
+    // the first log was removed,
+    // we have insert-txn and updates in the others so everything is fine
     FileStatus[] logs = fs.listStatus(logDir);
-    assertEquals(3, logs.length);
+    assertEquals(Arrays.toString(logs), 2, logs.length);
     Arrays.sort(logs, new Comparator<FileStatus>() {
       @Override
       public int compare(FileStatus o1, FileStatus o2) {
@@ -229,15 +290,13 @@ public class TestWALProcedureStore {
       }
     });
 
-    // Remove the first log, we have insert-txn and updates in the others so everything is fine.
-    fs.delete(logs[0].getPath(), false);
     LoadCounter loader = new LoadCounter();
     storeRestart(loader);
     assertEquals(rootProcs.length * 2, loader.getLoadedCount());
     assertEquals(0, loader.getCorruptedCount());
 
-    // Remove the second log, we have lost any root/parent references
-    fs.delete(logs[1].getPath(), false);
+    // Remove the second log, we have lost all the root/parent references
+    fs.delete(logs[0].getPath(), false);
     loader.reset();
     storeRestart(loader);
     assertEquals(0, loader.getLoadedCount());
@@ -266,7 +325,7 @@ public class TestWALProcedureStore {
     b.addStackId(1);
     procStore.update(b);
 
-    procStore.rollWriter();
+    procStore.rollWriterForTesting();
 
     a.addStackId(2);
     procStore.update(a);
@@ -280,9 +339,9 @@ public class TestWALProcedureStore {
       @Override
       public void load(ProcedureIterator procIter) throws IOException {
         assertTrue(procIter.hasNext());
-        assertEquals(1, procIter.next().getProcId());
+        assertEquals(1, procIter.nextAsProcedureInfo().getProcId());
         assertTrue(procIter.hasNext());
-        assertEquals(2, procIter.next().getProcId());
+        assertEquals(2, procIter.nextAsProcedureInfo().getProcId());
         assertFalse(procIter.hasNext());
       }
 
@@ -315,7 +374,7 @@ public class TestWALProcedureStore {
     b.addStackId(2);
     procStore.update(b);
 
-    procStore.rollWriter();
+    procStore.rollWriterForTesting();
 
     b.addStackId(3);
     procStore.update(b);
@@ -336,16 +395,16 @@ public class TestWALProcedureStore {
       @Override
       public void load(ProcedureIterator procIter) throws IOException {
         assertTrue(procIter.hasNext());
-        assertEquals(4, procIter.next().getProcId());
+        assertEquals(4, procIter.nextAsProcedureInfo().getProcId());
         // TODO: This will be multiple call once we do fast-start
         //assertFalse(procIter.hasNext());
 
         assertTrue(procIter.hasNext());
-        assertEquals(1, procIter.next().getProcId());
+        assertEquals(1, procIter.nextAsProcedureInfo().getProcId());
         assertTrue(procIter.hasNext());
-        assertEquals(2, procIter.next().getProcId());
+        assertEquals(2, procIter.nextAsProcedureInfo().getProcId());
         assertTrue(procIter.hasNext());
-        assertEquals(3, procIter.next().getProcId());
+        assertEquals(3, procIter.nextAsProcedureInfo().getProcId());
         assertFalse(procIter.hasNext());
       }
 
@@ -354,6 +413,96 @@ public class TestWALProcedureStore {
         assertFalse(procIter.hasNext());
       }
     });
+  }
+
+  @Test
+  public void testInsertUpdateDelete() throws Exception {
+    final int NTHREAD = 2;
+
+    procStore.stop(false);
+    fs.delete(logDir, true);
+
+    org.apache.hadoop.conf.Configuration conf =
+      new org.apache.hadoop.conf.Configuration(htu.getConfiguration());
+    conf.setBoolean("hbase.procedure.store.wal.use.hsync", false);
+    conf.setInt("hbase.procedure.store.wal.periodic.roll.msec", 10000);
+    conf.setInt("hbase.procedure.store.wal.roll.threshold", 128 * 1024);
+
+    fs.mkdirs(logDir);
+    procStore = ProcedureTestingUtility.createWalStore(conf, fs, logDir);
+    procStore.start(NTHREAD);
+    procStore.recoverLease();
+
+    LoadCounter loader = new LoadCounter();
+    procStore.load(loader);
+    assertEquals(0, loader.getMaxProcId());
+    assertEquals(0, loader.getLoadedCount());
+    assertEquals(0, loader.getCorruptedCount());
+
+    final long LAST_PROC_ID = 9999;
+    final Thread[] thread = new Thread[NTHREAD];
+    final AtomicLong procCounter = new AtomicLong((long)Math.round(Math.random() * 100));
+    for (int i = 0; i < thread.length; ++i) {
+      thread[i] = new Thread() {
+        @Override
+        public void run() {
+          Random rand = new Random();
+          TestProcedure proc;
+          do {
+            proc = new TestProcedure(procCounter.addAndGet(1));
+            // Insert
+            procStore.insert(proc, null);
+            // Update
+            for (int i = 0, nupdates = rand.nextInt(10); i <= nupdates; ++i) {
+              try { Thread.sleep(0, rand.nextInt(15)); } catch (InterruptedException e) {}
+              procStore.update(proc);
+            }
+            // Delete
+            procStore.delete(proc.getProcId());
+          } while (proc.getProcId() < LAST_PROC_ID);
+        }
+      };
+      thread[i].start();
+    }
+
+    for (int i = 0; i < thread.length; ++i) {
+      thread[i].join();
+    }
+
+    procStore.getStoreTracker().dump();
+    assertTrue(procCounter.get() >= LAST_PROC_ID);
+    assertTrue(procStore.getStoreTracker().isEmpty());
+    assertEquals(1, procStore.getActiveLogs().size());
+  }
+
+  @Test
+  public void testRollAndRemove() throws IOException {
+    // Insert something in the log
+    Procedure proc1 = new TestSequentialProcedure();
+    procStore.insert(proc1, null);
+
+    Procedure proc2 = new TestSequentialProcedure();
+    procStore.insert(proc2, null);
+
+    // roll the log, now we have 2
+    procStore.rollWriterForTesting();
+    assertEquals(2, procStore.getActiveLogs().size());
+
+    // everything will be up to date in the second log
+    // so we can remove the first one
+    procStore.update(proc1);
+    procStore.update(proc2);
+    assertEquals(1, procStore.getActiveLogs().size());
+
+    // roll the log, now we have 2
+    procStore.rollWriterForTesting();
+    assertEquals(2, procStore.getActiveLogs().size());
+
+    // remove everything active
+    // so we can remove all the logs
+    procStore.delete(proc1.getProcId());
+    procStore.delete(proc2.getProcId());
+    assertEquals(1, procStore.getActiveLogs().size());
   }
 
   private void corruptLog(final FileStatus logFile, final long dropBytes)
@@ -365,7 +514,9 @@ public class TestWALProcedureStore {
     InputStream in = fs.open(logFile.getPath());
     OutputStream out =  fs.create(tmpPath);
     IOUtils.copyBytes(in, out, logFile.getLen() - dropBytes, true);
-    fs.rename(tmpPath, logFile.getPath());
+    if (!fs.rename(tmpPath, logFile.getPath())) {
+      throw new IOException("Unable to rename");
+    }
   }
 
   private void verifyProcIdsOnRestart(final Set<Long> procIds) throws Exception {
@@ -478,7 +629,7 @@ public class TestWALProcedureStore {
     @Override
     public void load(ProcedureIterator procIter) throws IOException {
       while (procIter.hasNext()) {
-        Procedure proc = procIter.next();
+        Procedure proc = procIter.nextAsProcedure();
         LOG.debug("loading procId=" + proc.getProcId() + ": " + proc);
         if (procIds != null) {
           assertTrue("procId=" + proc.getProcId() + " unexpected",
@@ -491,7 +642,7 @@ public class TestWALProcedureStore {
     @Override
     public void handleCorrupted(ProcedureIterator procIter) throws IOException {
       while (procIter.hasNext()) {
-        Procedure proc = procIter.next();
+        Procedure proc = procIter.nextAsProcedure();
         LOG.debug("corrupted procId=" + proc.getProcId() + ": " + proc);
         corrupted.add(proc);
       }

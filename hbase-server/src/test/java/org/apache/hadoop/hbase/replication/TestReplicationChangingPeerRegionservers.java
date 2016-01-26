@@ -92,6 +92,7 @@ public class TestReplicationChangingPeerRegionservers extends TestReplicationBas
 
     LOG.info("testSimplePutDelete");
     MiniHBaseCluster peerCluster = utility2.getMiniHBaseCluster();
+    int numRS = peerCluster.getRegionServerThreads().size();
 
     doPutTest(Bytes.toBytes(1));
 
@@ -100,14 +101,14 @@ public class TestReplicationChangingPeerRegionservers extends TestReplicationBas
     peerCluster.waitOnRegionServer(rsToStop);
 
     // Sanity check
-    assertEquals(1, peerCluster.getRegionServerThreads().size());
+    assertEquals(numRS - 1, peerCluster.getRegionServerThreads().size());
 
     doPutTest(Bytes.toBytes(2));
 
     peerCluster.startRegionServer();
 
     // Sanity check
-    assertEquals(2, peerCluster.getRegionServerThreads().size());
+    assertEquals(numRS, peerCluster.getRegionServerThreads().size());
 
     doPutTest(Bytes.toBytes(3));
 
@@ -115,7 +116,7 @@ public class TestReplicationChangingPeerRegionservers extends TestReplicationBas
 
   private void doPutTest(byte[] row) throws IOException, InterruptedException {
     Put put = new Put(row);
-    put.add(famName, row, row);
+    put.addColumn(famName, row, row);
 
     if (htable1 == null) {
       htable1 = utility1.getConnection().getTable(tableName);

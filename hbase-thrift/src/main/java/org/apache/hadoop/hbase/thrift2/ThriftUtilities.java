@@ -37,13 +37,13 @@ import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HRegionLocator;
 import org.apache.hadoop.hbase.client.Increment;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.RowMutations;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
 import org.apache.hadoop.hbase.filter.ParseFilter;
 import org.apache.hadoop.hbase.security.visibility.Authorizations;
 import org.apache.hadoop.hbase.security.visibility.CellVisibility;
@@ -51,6 +51,7 @@ import org.apache.hadoop.hbase.thrift2.generated.TAppend;
 import org.apache.hadoop.hbase.thrift2.generated.TColumn;
 import org.apache.hadoop.hbase.thrift2.generated.TColumnIncrement;
 import org.apache.hadoop.hbase.thrift2.generated.TColumnValue;
+import org.apache.hadoop.hbase.thrift2.generated.TCompareOp;
 import org.apache.hadoop.hbase.thrift2.generated.TDelete;
 import org.apache.hadoop.hbase.thrift2.generated.TDeleteType;
 import org.apache.hadoop.hbase.thrift2.generated.TDurability;
@@ -268,22 +269,22 @@ public class ThriftUtilities {
           if (column.isSetTimestamp()) {
             if (in.isSetDeleteType() &&
                 in.getDeleteType().equals(TDeleteType.DELETE_COLUMNS))
-              out.deleteColumns(column.getFamily(), column.getQualifier(), column.getTimestamp());
+              out.addColumns(column.getFamily(), column.getQualifier(), column.getTimestamp());
             else
-              out.deleteColumn(column.getFamily(), column.getQualifier(), column.getTimestamp());
+              out.addColumn(column.getFamily(), column.getQualifier(), column.getTimestamp());
           } else {
             if (in.isSetDeleteType() &&
                 in.getDeleteType().equals(TDeleteType.DELETE_COLUMNS))
-              out.deleteColumns(column.getFamily(), column.getQualifier());
+              out.addColumns(column.getFamily(), column.getQualifier());
             else
-              out.deleteColumn(column.getFamily(), column.getQualifier());
+              out.addColumn(column.getFamily(), column.getQualifier());
           }
 
         } else {
           if (column.isSetTimestamp()) {
-            out.deleteFamily(column.getFamily(), column.getTimestamp());
+            out.addFamily(column.getFamily(), column.getTimestamp());
           } else {
-            out.deleteFamily(column.getFamily());
+            out.addFamily(column.getFamily());
           }
         }
       }
@@ -528,6 +529,19 @@ public class ThriftUtilities {
       case 2: return Durability.ASYNC_WAL;
       case 3: return Durability.SYNC_WAL;
       case 4: return Durability.FSYNC_WAL;
+      default: return null;
+    }
+  }
+
+  public static CompareOp compareOpFromThrift(TCompareOp tCompareOp) {
+    switch (tCompareOp.getValue()) {
+      case 0: return CompareOp.LESS;
+      case 1: return CompareOp.LESS_OR_EQUAL;
+      case 2: return CompareOp.EQUAL;
+      case 3: return CompareOp.NOT_EQUAL;
+      case 4: return CompareOp.GREATER_OR_EQUAL;
+      case 5: return CompareOp.GREATER;
+      case 6: return CompareOp.NO_OP;
       default: return null;
     }
   }

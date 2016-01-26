@@ -29,7 +29,6 @@ import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionConfiguration;
@@ -195,6 +194,14 @@ public class TestRegionServerOnlineConfigChange {
     rs1.getConfigurationManager().notifyAllObservers(conf);
     assertEquals(newMaxCompactSize,
                  hstore.getStoreEngine().getCompactionPolicy().getConf().getMaxCompactSize());
+    // Check if the offPeakMaxCompactSize gets updated.
+    long newOffpeakMaxCompactSize =
+            hstore.getStoreEngine().getCompactionPolicy().getConf().getOffPeakMaxCompactSize() - 1;
+    conf.setLong(CompactionConfiguration.HBASE_HSTORE_COMPACTION_MAX_SIZE_OFFPEAK_KEY,
+      newOffpeakMaxCompactSize);
+    rs1.getConfigurationManager().notifyAllObservers(conf);
+    assertEquals(newOffpeakMaxCompactSize,
+                 hstore.getStoreEngine().getCompactionPolicy().getConf().getOffPeakMaxCompactSize());
 
     // Check if majorCompactionPeriod gets updated.
     long newMajorCompactionPeriod =

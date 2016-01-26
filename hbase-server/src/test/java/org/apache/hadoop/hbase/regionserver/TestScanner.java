@@ -33,11 +33,10 @@ import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.CategoryBasedTimeout;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestCase;
-import org.apache.hadoop.hbase.HBaseTestCase.HRegionIncommon;
-import org.apache.hadoop.hbase.HBaseTestCase.ScannerIncommon;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
@@ -49,7 +48,9 @@ import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.filter.InclusiveStopFilter;
 import org.apache.hadoop.hbase.filter.PrefixFilter;
@@ -61,6 +62,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
+import org.junit.rules.TestRule;
 
 /**
  * Test of a long-lived scanner validating as we go.
@@ -68,6 +70,9 @@ import org.junit.rules.TestName;
 @Category({RegionServerTests.class, SmallTests.class})
 public class TestScanner {
   @Rule public TestName name = new TestName();
+  @Rule public final TestRule timeout = CategoryBasedTimeout.builder().
+      withTimeout(this.getClass()).withLookingForStuckThread(true).build();
+
   private static final Log LOG = LogFactory.getLog(TestScanner.class);
   private final static HBaseTestingUtility TEST_UTIL = HBaseTestingUtility.createLocalHTU();
 
@@ -99,11 +104,10 @@ public class TestScanner {
 
   private static final long START_CODE = Long.MAX_VALUE;
 
-  private Region r;
-  private HRegionIncommon region;
+  private HRegion region;
 
   private byte[] firstRowBytes, secondRowBytes, thirdRowBytes;
-  final private byte[] col1, col2;
+  final private byte[] col1;
 
   public TestScanner() {
     super();
@@ -115,7 +119,6 @@ public class TestScanner {
     thirdRowBytes = START_KEY_BYTES.clone();
     thirdRowBytes[START_KEY_BYTES.length - 1] += 2;
     col1 = Bytes.toBytes("column1");
-    col2 = Bytes.toBytes("column2");
   }
 
   /**
@@ -127,14 +130,14 @@ public class TestScanner {
     byte [] startrow = Bytes.toBytes("bbb");
     byte [] stoprow = Bytes.toBytes("ccc");
     try {
-      this.r = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
-      HBaseTestCase.addContent(this.r, HConstants.CATALOG_FAMILY);
+      this.region = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
+      HBaseTestCase.addContent(this.region, HConstants.CATALOG_FAMILY);
       List<Cell> results = new ArrayList<Cell>();
       // Do simple test of getting one row only first.
       Scan scan = new Scan(Bytes.toBytes("abc"), Bytes.toBytes("abd"));
       scan.addFamily(HConstants.CATALOG_FAMILY);
 
-      InternalScanner s = r.getScanner(scan);
+      InternalScanner s = region.getScanner(scan);
       int count = 0;
       while (s.next(results)) {
         count++;
@@ -145,7 +148,7 @@ public class TestScanner {
       scan = new Scan(startrow, stoprow);
       scan.addFamily(HConstants.CATALOG_FAMILY);
 
-      s = r.getScanner(scan);
+      s = region.getScanner(scan);
       count = 0;
       Cell kv = null;
       results = new ArrayList<Cell>();
@@ -162,14 +165,14 @@ public class TestScanner {
       assertTrue(count > 10);
       s.close();
     } finally {
-      HBaseTestingUtility.closeRegionAndWAL(this.r);
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
     }
   }
 
   void rowPrefixFilter(Scan scan) throws IOException {
     List<Cell> results = new ArrayList<Cell>();
     scan.addFamily(HConstants.CATALOG_FAMILY);
-    InternalScanner s = r.getScanner(scan);
+    InternalScanner s = region.getScanner(scan);
     boolean hasMore = true;
     while (hasMore) {
       hasMore = s.next(results);
@@ -185,7 +188,7 @@ public class TestScanner {
   void rowInclusiveStopFilter(Scan scan, byte[] stopRow) throws IOException {
     List<Cell> results = new ArrayList<Cell>();
     scan.addFamily(HConstants.CATALOG_FAMILY);
-    InternalScanner s = r.getScanner(scan);
+    InternalScanner s = region.getScanner(scan);
     boolean hasMore = true;
     while (hasMore) {
       hasMore = s.next(results);
@@ -200,8 +203,8 @@ public class TestScanner {
   @Test
   public void testFilters() throws IOException {
     try {
-      this.r = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
-      HBaseTestCase.addContent(this.r, HConstants.CATALOG_FAMILY);
+      this.region = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
+      HBaseTestCase.addContent(this.region, HConstants.CATALOG_FAMILY);
       byte [] prefix = Bytes.toBytes("ab");
       Filter newFilter = new PrefixFilter(prefix);
       Scan scan = new Scan();
@@ -215,7 +218,7 @@ public class TestScanner {
       rowInclusiveStopFilter(scan, stopRow);
 
     } finally {
-      HBaseTestingUtility.closeRegionAndWAL(this.r);
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
     }
   }
 
@@ -227,10 +230,10 @@ public class TestScanner {
   @Test
   public void testRaceBetweenClientAndTimeout() throws Exception {
     try {
-      this.r = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
-      HBaseTestCase.addContent(this.r, HConstants.CATALOG_FAMILY);
+      this.region = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
+      HBaseTestCase.addContent(this.region, HConstants.CATALOG_FAMILY);
       Scan scan = new Scan();
-      InternalScanner s = r.getScanner(scan);
+      InternalScanner s = region.getScanner(scan);
       List<Cell> results = new ArrayList<Cell>();
       try {
         s.next(results);
@@ -242,7 +245,7 @@ public class TestScanner {
         return;
       }
     } finally {
-      HBaseTestingUtility.closeRegionAndWAL(this.r);
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
     }
   }
 
@@ -252,71 +255,70 @@ public class TestScanner {
   @Test
   public void testScanner() throws IOException {
     try {
-      r = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
-      region = new HRegionIncommon(r);
+      region = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
+      Table table = new RegionAsTable(region);
 
       // Write information to the meta table
 
       Put put = new Put(ROW_KEY, System.currentTimeMillis());
 
-      put.add(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER,
+      put.addColumn(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER,
           REGION_INFO.toByteArray());
-      region.put(put);
+      table.put(put);
 
       // What we just committed is in the memstore. Verify that we can get
       // it back both with scanning and get
 
       scan(false, null);
-      getRegionInfo();
+      getRegionInfo(table);
 
       // Close and re-open
 
-      ((HRegion)r).close();
-      r = HRegion.openHRegion(r, null);
-      region = new HRegionIncommon(r);
+      ((HRegion)region).close();
+      region = HRegion.openHRegion(region, null);
+      table = new RegionAsTable(region);
 
       // Verify we can get the data back now that it is on disk.
 
       scan(false, null);
-      getRegionInfo();
+      getRegionInfo(table);
 
       // Store some new information
 
       String address = HConstants.LOCALHOST_IP + ":" + HBaseTestingUtility.randomFreePort();
 
       put = new Put(ROW_KEY, System.currentTimeMillis());
-      put.add(HConstants.CATALOG_FAMILY, HConstants.SERVER_QUALIFIER,
+      put.addColumn(HConstants.CATALOG_FAMILY, HConstants.SERVER_QUALIFIER,
           Bytes.toBytes(address));
 
 //      put.add(HConstants.COL_STARTCODE, Bytes.toBytes(START_CODE));
 
-      region.put(put);
+      table.put(put);
 
       // Validate that we can still get the HRegionInfo, even though it is in
       // an older row on disk and there is a newer row in the memstore
 
       scan(true, address.toString());
-      getRegionInfo();
+      getRegionInfo(table);
 
       // flush cache
-
-      region.flushcache();
+      this.region.flush(true);
 
       // Validate again
 
       scan(true, address.toString());
-      getRegionInfo();
+      getRegionInfo(table);
 
       // Close and reopen
 
-      ((HRegion)r).close();
-      r = HRegion.openHRegion(r,null);
-      region = new HRegionIncommon(r);
+      ((HRegion)region).close();
+      region = HRegion.openHRegion(region,null);
+      table = new RegionAsTable(region);
 
       // Validate again
 
       scan(true, address.toString());
-      getRegionInfo();
+      getRegionInfo(table);
 
       // Now update the information again
 
@@ -324,38 +326,37 @@ public class TestScanner {
 
       put = new Put(ROW_KEY, System.currentTimeMillis());
 
-      put.add(HConstants.CATALOG_FAMILY, HConstants.SERVER_QUALIFIER,
-          Bytes.toBytes(address));
-      region.put(put);
+      put.addColumn(HConstants.CATALOG_FAMILY, HConstants.SERVER_QUALIFIER, Bytes.toBytes(address));
+      table.put(put);
 
       // Validate again
 
       scan(true, address.toString());
-      getRegionInfo();
+      getRegionInfo(table);
 
       // flush cache
 
-      region.flushcache();
+      region.flush(true);
 
       // Validate again
 
       scan(true, address.toString());
-      getRegionInfo();
+      getRegionInfo(table);
 
       // Close and reopen
 
-      ((HRegion)r).close();
-      r = HRegion.openHRegion(r,null);
-      region = new HRegionIncommon(r);
+      ((HRegion)this.region).close();
+      this.region = HRegion.openHRegion(region, null);
+      table = new RegionAsTable(this.region);
 
       // Validate again
 
       scan(true, address.toString());
-      getRegionInfo();
+      getRegionInfo(table);
 
     } finally {
       // clean up
-      HBaseTestingUtility.closeRegionAndWAL(r);
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
     }
   }
 
@@ -387,7 +388,7 @@ public class TestScanner {
         for (int ii = 0; ii < EXPLICIT_COLS.length; ii++) {
           scan.addColumn(COLS[0],  EXPLICIT_COLS[ii]);
         }
-        scanner = r.getScanner(scan);
+        scanner = region.getScanner(scan);
         while (scanner.next(results)) {
           assertTrue(hasColumn(results, HConstants.CATALOG_FAMILY,
               HConstants.REGIONINFO_QUALIFIER));
@@ -448,10 +449,10 @@ public class TestScanner {
 
 
   /** Use get to retrieve the HRegionInfo and validate it */
-  private void getRegionInfo() throws IOException {
+  private void getRegionInfo(Table table) throws IOException {
     Get get = new Get(ROW_KEY);
     get.addColumn(HConstants.CATALOG_FAMILY, HConstants.REGIONINFO_QUALIFIER);
-    Result result = region.get(get);
+    Result result = table.get(get);
     byte [] bytes = result.value();
     validateRegionInfo(bytes);
   }
@@ -464,10 +465,11 @@ public class TestScanner {
    */
   @Test
   public void testScanAndSyncFlush() throws Exception {
-    this.r = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
-    HRegionIncommon hri = new HRegionIncommon(r);
+    this.region = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
+    Table hri = new RegionAsTable(region);
     try {
-        LOG.info("Added: " + HBaseTestCase.addContent(hri, Bytes.toString(HConstants.CATALOG_FAMILY),
+        LOG.info("Added: " +
+          HBaseTestCase.addContent(hri, Bytes.toString(HConstants.CATALOG_FAMILY),
             Bytes.toString(HConstants.REGIONINFO_QUALIFIER)));
       int count = count(hri, -1, false);
       assertEquals(count, count(hri, 100, false)); // do a sync flush.
@@ -475,7 +477,7 @@ public class TestScanner {
       LOG.error("Failed", e);
       throw e;
     } finally {
-      HBaseTestingUtility.closeRegionAndWAL(this.r);
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
     }
   }
 
@@ -487,10 +489,11 @@ public class TestScanner {
    */
   @Test
   public void testScanAndRealConcurrentFlush() throws Exception {
-    this.r = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
-    HRegionIncommon hri = new HRegionIncommon(r);
+    this.region = TEST_UTIL.createLocalHRegion(TESTTABLEDESC, null, null);
+    Table hri = new RegionAsTable(region);
     try {
-        LOG.info("Added: " + HBaseTestCase.addContent(hri, Bytes.toString(HConstants.CATALOG_FAMILY),
+        LOG.info("Added: " +
+          HBaseTestCase.addContent(hri, Bytes.toString(HConstants.CATALOG_FAMILY),
             Bytes.toString(HConstants.REGIONINFO_QUALIFIER)));
       int count = count(hri, -1, false);
       assertEquals(count, count(hri, 100, true)); // do a true concurrent background thread flush
@@ -498,7 +501,7 @@ public class TestScanner {
       LOG.error("Failed", e);
       throw e;
     } finally {
-      HBaseTestingUtility.closeRegionAndWAL(this.r);
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
     }
   }
 
@@ -512,8 +515,8 @@ public class TestScanner {
   @SuppressWarnings("deprecation")
   public void testScanAndConcurrentMajorCompact() throws Exception {
     HTableDescriptor htd = TEST_UTIL.createTableDescriptor(name.getMethodName());
-    this.r = TEST_UTIL.createLocalHRegion(htd, null, null);
-    HRegionIncommon hri = new HRegionIncommon(r);
+    this.region = TEST_UTIL.createLocalHRegion(htd, null, null);
+    Table hri = new RegionAsTable(region);
 
     try {
       HBaseTestCase.addContent(hri, Bytes.toString(fam1), Bytes.toString(col1),
@@ -523,19 +526,19 @@ public class TestScanner {
 
       Delete dc = new Delete(firstRowBytes);
       /* delete column1 of firstRow */
-      dc.deleteColumns(fam1, col1);
-      r.delete(dc);
-      r.flush(true);
+      dc.addColumns(fam1, col1);
+      region.delete(dc);
+      region.flush(true);
 
       HBaseTestCase.addContent(hri, Bytes.toString(fam1), Bytes.toString(col1),
           secondRowBytes, thirdRowBytes);
       HBaseTestCase.addContent(hri, Bytes.toString(fam2), Bytes.toString(col1),
           secondRowBytes, thirdRowBytes);
-      r.flush(true);
+      region.flush(true);
 
-      InternalScanner s = r.getScanner(new Scan());
+      InternalScanner s = region.getScanner(new Scan());
       // run a major compact, column1 of firstRow will be cleaned.
-      r.compact(true);
+      region.compact(true);
 
       List<Cell> results = new ArrayList<Cell>();
       s.next(results);
@@ -555,7 +558,7 @@ public class TestScanner {
       assertTrue(CellUtil.matchingFamily(results.get(0), fam1));
       assertTrue(CellUtil.matchingFamily(results.get(1), fam2));
     } finally {
-      HBaseTestingUtility.closeRegionAndWAL(this.r);
+      HBaseTestingUtility.closeRegionAndWAL(this.region);
     }
   }
 
@@ -567,19 +570,20 @@ public class TestScanner {
    * @return Count of rows found.
    * @throws IOException
    */
-  private int count(final HRegionIncommon hri, final int flushIndex,
-                    boolean concurrent)
+  private int count(final Table countTable, final int flushIndex, boolean concurrent)
   throws IOException {
     LOG.info("Taking out counting scan");
-    ScannerIncommon s = hri.getScanner(HConstants.CATALOG_FAMILY, EXPLICIT_COLS,
-        HConstants.EMPTY_START_ROW, HConstants.LATEST_TIMESTAMP);
-    List<Cell> values = new ArrayList<Cell>();
+    Scan scan = new Scan();
+    for (byte [] qualifier: EXPLICIT_COLS) {
+      scan.addColumn(HConstants.CATALOG_FAMILY, qualifier);
+    }
+    ResultScanner s = countTable.getScanner(scan);
     int count = 0;
     boolean justFlushed = false;
-    while (s.next(values)) {
+    while (s.next() != null) {
       if (justFlushed) {
         LOG.info("after next() just after next flush");
-        justFlushed=false;
+        justFlushed = false;
       }
       count++;
       if (flushIndex == count) {
@@ -587,7 +591,7 @@ public class TestScanner {
         Thread t = new Thread() {
           public void run() {
             try {
-              hri.flushcache();
+              region.flush(true);
               LOG.info("Finishing flush");
             } catch (IOException e) {
               LOG.info("Failed flush cache");
@@ -607,5 +611,4 @@ public class TestScanner {
     LOG.info("Found " + count + " items");
     return count;
   }
-
 }

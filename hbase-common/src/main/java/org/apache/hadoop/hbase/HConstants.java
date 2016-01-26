@@ -134,10 +134,6 @@ public final class HConstants {
   public static final String HBASE_MASTER_NORMALIZER_CLASS =
     "hbase.master.normalizer.class";
 
-  /** Config for enabling/disabling pluggable region normalizer */
-  public static final String HBASE_NORMALIZER_ENABLED =
-    "hbase.normalizer.enabled";
-
   /** Cluster is standalone or pseudo-distributed */
   public static final boolean CLUSTER_IS_LOCAL = false;
 
@@ -850,6 +846,18 @@ public final class HConstants {
       REPLICATION_SINK_SERVICE_CLASSNAME = "hbase.replication.sink.service";
   public static final String REPLICATION_SERVICE_CLASSNAME_DEFAULT =
     "org.apache.hadoop.hbase.replication.regionserver.Replication";
+  public static final String REPLICATION_BULKLOAD_ENABLE_KEY = "hbase.replication.bulkload.enabled";
+  public static final boolean REPLICATION_BULKLOAD_ENABLE_DEFAULT = false;
+  /** Replication cluster id of source cluster which uniquely identifies itself with peer cluster */
+  public static final String REPLICATION_CLUSTER_ID = "hbase.replication.cluster.id";
+  /**
+   * Directory where the source cluster file system client configuration are placed which is used by
+   * sink cluster to copy HFiles from source cluster file system
+   */
+  public static final String REPLICATION_CONF_DIR = "hbase.replication.conf.dir";
+
+  /** Maximum time to retry for a failed bulk load request */
+  public static final String BULKLOAD_MAX_RETRIES_NUMBER = "hbase.bulkload.retries.number";
 
   /** HBCK special code name used as server name when manipulating ZK nodes */
   public static final String HBCK_CODE_NAME = "HBCKServerName";
@@ -883,12 +891,12 @@ public final class HConstants {
       Pattern.compile("^coprocessor\\$([0-9]+)$", Pattern.CASE_INSENSITIVE);
 
   /**
+   * <pre>
    * Pattern that matches a coprocessor specification. Form is:
-   * <code>
-   *&lt;coprocessor jar file location> '|' &lt<class name> ['|' &lt;priority> ['|' &lt;arguments>]]
-   * </code>
-   * ...where arguments are <code>&lt;KEY> '=' &lt;VALUE> [,...]</code>
-   * <p>For example: <code>hdfs:///foo.jar|com.foo.FooRegionObserver|1001|arg1=1,arg2=2</code>
+   * {@code <coprocessor jar file location> '|' <class name> ['|' <priority> ['|' <arguments>]]}
+   * where arguments are {@code <KEY> '=' <VALUE> [,...]}
+   * For example: {@code hdfs:///foo.jar|com.foo.FooRegionObserver|1001|arg1=1,arg2=2}
+   * </pre>
    */
   public static final Pattern CP_HTD_ATTR_VALUE_PATTERN =
       Pattern.compile("(^[^\\|]*)\\|([^\\|]+)\\|[\\s]*([\\d]*)[\\s]*(\\|.*)?$");
@@ -1241,7 +1249,7 @@ public final class HConstants {
 
   public static final String HBASE_CANARY_WRITE_TABLE_CHECK_PERIOD_KEY =
       "hbase.canary.write.table.check.period";
-  
+
   /**
    * Configuration keys for programmatic JAAS configuration for secured ZK interaction
    */
@@ -1250,7 +1258,7 @@ public final class HConstants {
       "hbase.zookeeper.client.kerberos.principal";
   public static final String ZK_SERVER_KEYTAB_FILE = "hbase.zookeeper.server.keytab.file";
   public static final String ZK_SERVER_KERBEROS_PRINCIPAL =
-      "hbase.zookeeper.server.kerberos.principal";  
+      "hbase.zookeeper.server.kerberos.principal";
 
   private HConstants() {
     // Can't be instantiated with this ctor.

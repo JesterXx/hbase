@@ -30,16 +30,17 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.ChoreService;
 import org.apache.hadoop.hbase.CoordinatedStateManager;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.Server;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.Waiter;
 import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.io.hfile.BlockCache;
 import org.apache.hadoop.hbase.io.hfile.BlockCacheKey;
 import org.apache.hadoop.hbase.io.hfile.CacheStats;
 import org.apache.hadoop.hbase.io.hfile.Cacheable;
 import org.apache.hadoop.hbase.io.hfile.CachedBlock;
-import org.apache.hadoop.hbase.io.hfile.HFileBlock;
 import org.apache.hadoop.hbase.io.hfile.ResizableBlockCache;
 import org.apache.hadoop.hbase.io.util.HeapMemorySizeUtil;
 import org.apache.hadoop.hbase.regionserver.HeapMemoryManager.TunerContext;
@@ -53,6 +54,8 @@ import org.junit.experimental.categories.Category;
 
 @Category({RegionServerTests.class, SmallTests.class})
 public class TestHeapMemoryManager {
+
+  private static final HBaseTestingUtility UTIL = new HBaseTestingUtility();
 
   private long maxHeapSize = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getMax();
 
@@ -130,7 +133,8 @@ public class TestHeapMemoryManager {
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.flushType = FlushType.ABOVE_LOWER_MARK;
     memStoreFlusher.requestFlush(null, false);
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // Allow the tuner to run once and do necessary memory up
+    Thread.sleep(1500);
     // No changes should be made by tuner as we already have lot of empty space
     assertEquals(oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
     assertEquals(oldBlockCacheSize, blockCache.maxSize);
@@ -161,7 +165,8 @@ public class TestHeapMemoryManager {
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // Allow the tuner to run once and do necessary memory up
+    Thread.sleep(1500);
     // No changes should be made by tuner as we already have lot of empty space
     assertEquals(oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
     assertEquals(oldBlockCacheSize, blockCache.maxSize);
@@ -194,7 +199,8 @@ public class TestHeapMemoryManager {
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
     assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
     assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldBlockCacheSize,
@@ -205,7 +211,8 @@ public class TestHeapMemoryManager {
     memStoreFlusher.flushType = FlushType.ABOVE_LOWER_MARK;
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
-    Thread.sleep(1500);
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
     assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
     assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldBlockCacheSize,
@@ -221,6 +228,7 @@ public class TestHeapMemoryManager {
     blockCache.setTestBlockSize((long) (maxHeapSize * 0.4 * 0.8));
     regionServerAccounting.setTestMemstoreSize(0);
     Configuration conf = HBaseConfiguration.create();
+    conf.setFloat(HeapMemorySizeUtil.MEMSTORE_SIZE_LOWER_LIMIT_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.MEMSTORE_SIZE_MAX_RANGE_KEY, 0.75f);
     conf.setFloat(HeapMemoryManager.MEMSTORE_SIZE_MIN_RANGE_KEY, 0.10f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
@@ -232,25 +240,33 @@ public class TestHeapMemoryManager {
         new RegionServerStub(conf), new RegionServerAccountingStub());
     long oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     long oldBlockCacheSize = blockCache.maxSize;
+    long oldMemstoreLowerMarkSize = 7 * oldMemstoreHeapSize / 10;
+    long maxTuneSize = oldMemstoreHeapSize -  (oldMemstoreLowerMarkSize + oldMemstoreHeapSize) / 2;
+    float maxStepValue = (maxTuneSize * 1.0f) / oldMemstoreHeapSize;
+    maxStepValue = maxStepValue > DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE ?
+        DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE:maxStepValue;
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
     heapMemoryManager.start(choreService);
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
-    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldMemstoreHeapSize,
-        memStoreFlusher.memstoreSize);
-    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldBlockCacheSize,
-        blockCache.maxSize);
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
+    assertHeapSpaceDelta(-maxStepValue, oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
+    assertHeapSpaceDelta(maxStepValue, oldBlockCacheSize, blockCache.maxSize);
     oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     oldBlockCacheSize = blockCache.maxSize;
+    oldMemstoreLowerMarkSize = 7 * oldMemstoreHeapSize / 10;
+    maxTuneSize = oldMemstoreHeapSize -  (oldMemstoreLowerMarkSize + oldMemstoreHeapSize) / 2;
+    maxStepValue = (maxTuneSize * 1.0f) / oldMemstoreHeapSize;
+    maxStepValue = maxStepValue > DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE ?
+        DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE:maxStepValue;
     // Do some more evictions before the next run of HeapMemoryTuner
     blockCache.evictBlock(null);
-    Thread.sleep(1500);
-    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldMemstoreHeapSize,
-        memStoreFlusher.memstoreSize);
-    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldBlockCacheSize,
-        blockCache.maxSize);
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
+    assertHeapSpaceDelta(-maxStepValue, oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
+    assertHeapSpaceDelta(maxStepValue, oldBlockCacheSize, blockCache.maxSize);
   }
 
   @Test
@@ -281,7 +297,8 @@ public class TestHeapMemoryManager {
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
     blockCache.evictBlock(null);
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // Allow the tuner to run once and do necessary memory up
+    Thread.sleep(1500);
     // No changes should happen as there is undefined increase in flushes and evictions
     assertEquals(oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
     assertEquals(oldBlockCacheSize, blockCache.maxSize);
@@ -290,7 +307,8 @@ public class TestHeapMemoryManager {
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
-    Thread.sleep(1500);
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
     assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
     assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldBlockCacheSize,
@@ -326,7 +344,8 @@ public class TestHeapMemoryManager {
     memStoreFlusher.requestFlush(null, false);
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // Allow the tuner to run once and do necessary memory up
+    Thread.sleep(1500);
     // No changes should happen as there is undefined increase in flushes and evictions
     assertEquals(oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
     assertEquals(oldBlockCacheSize, blockCache.maxSize);
@@ -337,6 +356,7 @@ public class TestHeapMemoryManager {
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
+    // Allow the tuner to run once and do necessary memory up
     Thread.sleep(1500);
     assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
@@ -365,13 +385,15 @@ public class TestHeapMemoryManager {
     // Now we wants to be in write mode. Set bigger memstore size from CustomHeapMemoryTuner
     CustomHeapMemoryTuner.memstoreSize = 0.78f;
     CustomHeapMemoryTuner.blockCacheSize = 0.02f;
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
     assertHeapSpace(0.78f, memStoreFlusher.memstoreSize);// Memstore
     assertHeapSpace(0.02f, blockCache.maxSize);// BlockCache
     // Now we wants to be in read mode. Set bigger memstore size from CustomHeapMemoryTuner
     CustomHeapMemoryTuner.blockCacheSize = 0.75f;
     CustomHeapMemoryTuner.memstoreSize = 0.05f;
-    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
     assertHeapSpace(0.75f, blockCache.maxSize);// BlockCache
     assertHeapSpace(0.05f, memStoreFlusher.memstoreSize);// Memstore
   }
@@ -423,6 +445,7 @@ public class TestHeapMemoryManager {
     heapMemoryManager.start(choreService);
     CustomHeapMemoryTuner.memstoreSize = 0.7f;
     CustomHeapMemoryTuner.blockCacheSize = 0.3f;
+    // Allow the tuner to run once and do necessary memory up
     Thread.sleep(1500);
     assertEquals(oldMemstoreSize, memStoreFlusher.memstoreSize);
     assertEquals(oldBlockCacheSize, blockCache.maxSize);
@@ -466,14 +489,16 @@ public class TestHeapMemoryManager {
     heapMemoryManager.start(choreService);
     CustomHeapMemoryTuner.memstoreSize = 0.4f;
     CustomHeapMemoryTuner.blockCacheSize = 0.4f;
-    Thread.sleep(1500);
+    // Allow the tuner to run once and do necessary memory up
+   Thread.sleep(1500);
     // The size should not get changes as the collection of memstore size and L1 and L2 block cache
     // size will cross the ax allowed 80% mark
     assertEquals(oldMemstoreSize, memStoreFlusher.memstoreSize);
     assertEquals(oldBlockCacheSize, blockCache.maxSize);
     CustomHeapMemoryTuner.memstoreSize = 0.1f;
     CustomHeapMemoryTuner.blockCacheSize = 0.5f;
-    Thread.sleep(1500);
+    // Allow the tuner to run once and do necessary memory up
+    waitForTune(memStoreFlusher, memStoreFlusher.memstoreSize);
     assertHeapSpace(0.1f, memStoreFlusher.memstoreSize);
     assertHeapSpace(0.5f, blockCache.maxSize);
   }
@@ -486,7 +511,7 @@ public class TestHeapMemoryManager {
   private void assertHeapSpaceDelta(double expectedDeltaPercent, long oldHeapSpace, long newHeapSpace) {
     double expctedMinDelta = (double) (this.maxHeapSize * expectedDeltaPercent);
     // Tolerable error
-    double error = 0.999;
+    double error = 0.95;
     if (expectedDeltaPercent > 0) {
       assertTrue(expctedMinDelta*error <= (double)(newHeapSpace - oldHeapSpace));
       assertTrue(expctedMinDelta/error >= (double)(newHeapSpace - oldHeapSpace));
@@ -494,6 +519,18 @@ public class TestHeapMemoryManager {
       assertTrue(-expctedMinDelta*error <= (double)(oldHeapSpace - newHeapSpace));
       assertTrue(-expctedMinDelta/error >= (double)(oldHeapSpace - newHeapSpace));
     }
+  }
+
+
+  private void waitForTune(final MemstoreFlusherStub memStoreFlusher,
+                           final long oldMemstoreHeapSize) throws Exception {
+    // Allow the tuner to run once and do necessary memory up
+    UTIL.waitFor(10000, new Waiter.Predicate<Exception>() {
+      @Override
+      public boolean evaluate() throws Exception {
+        return oldMemstoreHeapSize != memStoreFlusher.memstoreSize;
+      }
+    });
   }
 
   private static class BlockCacheStub implements ResizableBlockCache {
@@ -686,6 +723,12 @@ public class TestHeapMemoryManager {
 
     @Override
     public ChoreService getChoreService() {
+      return null;
+    }
+
+    @Override
+    public ClusterConnection getClusterConnection() {
+      // TODO Auto-generated method stub
       return null;
     }
   }

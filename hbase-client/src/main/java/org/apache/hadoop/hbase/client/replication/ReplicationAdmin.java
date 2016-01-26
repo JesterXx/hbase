@@ -53,7 +53,6 @@ import org.apache.hadoop.hbase.replication.ReplicationPeerZKImpl;
 import org.apache.hadoop.hbase.replication.ReplicationPeers;
 import org.apache.hadoop.hbase.replication.ReplicationQueuesClient;
 import org.apache.hadoop.hbase.util.Pair;
-import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
@@ -125,11 +124,12 @@ public class ReplicationAdmin implements Closeable {
     try {
       zkw = createZooKeeperWatcher();
       try {
-        this.replicationPeers = ReplicationFactory.getReplicationPeers(zkw, conf, this.connection);
-        this.replicationPeers.init();
         this.replicationQueuesClient =
             ReplicationFactory.getReplicationQueuesClient(zkw, conf, this.connection);
         this.replicationQueuesClient.init();
+        this.replicationPeers = ReplicationFactory.getReplicationPeers(zkw, conf,
+          this.replicationQueuesClient, this.connection);
+        this.replicationPeers.init();
       } catch (Exception exception) {
         if (zkw != null) {
           zkw.close();
@@ -187,7 +187,7 @@ public class ReplicationAdmin implements Closeable {
     this.replicationPeers.addPeer(id,
       new ReplicationPeerConfig().setClusterKey(clusterKey), tableCFs);
   }
-
+  
   /**
    * Add a new remote slave cluster for replication.
    * @param id a short name that identifies the cluster
@@ -599,7 +599,17 @@ public class ReplicationAdmin implements Closeable {
     if (repPeers == null || repPeers.size() <= 0) {
       throw new IllegalArgumentException("Found no peer cluster for replication.");
     }
+    
+    final TableName onlyTableNameQualifier = TableName.valueOf(tableName.getQualifierAsString());
+    
     for (ReplicationPeer repPeer : repPeers) {
+      Map<TableName, List<String>> tableCFMap = repPeer.getTableCFs();
+      // TODO Currently peer TableCFs will not include namespace so we need to check only for table
+      // name without namespace in it. Need to correct this logic once we fix HBASE-11386.
+      if (tableCFMap != null && !tableCFMap.containsKey(onlyTableNameQualifier)) {
+        continue;
+      }
+
       Configuration peerConf = repPeer.getConfiguration();
       HTableDescriptor htd = null;
       try (Connection conn = ConnectionFactory.createConnection(peerConf);
@@ -625,7 +635,8 @@ public class ReplicationAdmin implements Closeable {
     }
   }
 
-  private List<ReplicationPeer> listValidReplicationPeers() {
+  @VisibleForTesting
+  List<ReplicationPeer> listValidReplicationPeers() {
     Map<String, ReplicationPeerConfig> peers = listPeerConfigs();
     if (peers == null || peers.size() <= 0) {
       return null;
@@ -633,18 +644,17 @@ public class ReplicationAdmin implements Closeable {
     List<ReplicationPeer> validPeers = new ArrayList<ReplicationPeer>(peers.size());
     for (Entry<String, ReplicationPeerConfig> peerEntry : peers.entrySet()) {
       String peerId = peerEntry.getKey();
-      String clusterKey = peerEntry.getValue().getClusterKey();
-      Configuration peerConf = new Configuration(this.connection.getConfiguration());
       Stat s = null;
       try {
-        ZKUtil.applyClusterKeyToConf(peerConf, clusterKey);
         Pair<ReplicationPeerConfig, Configuration> pair = this.replicationPeers.getPeerConf(peerId);
-        ReplicationPeer peer = new ReplicationPeerZKImpl(peerConf, peerId, pair.getFirst());
+        Configuration peerConf = pair.getSecond();
+        ReplicationPeer peer = new ReplicationPeerZKImpl(peerConf, peerId, pair.getFirst(),
+            parseTableCFsFromConfig(this.getPeerTableCFs(peerId)));
         s =
             zkw.getRecoverableZooKeeper().exists(peerConf.get(HConstants.ZOOKEEPER_ZNODE_PARENT),
               null);
         if (null == s) {
-          LOG.info(peerId + ' ' + clusterKey + " is invalid now.");
+          LOG.info(peerId + ' ' + pair.getFirst().getClusterKey() + " is invalid now.");
           continue;
         }
         validPeers.add(peer);
@@ -662,10 +672,6 @@ public class ReplicationAdmin implements Closeable {
         LOG.warn("Failed to get valid replication peers due to InterruptedException.");
         LOG.debug("Failure details to get valid replication peers.", e);
         Thread.currentThread().interrupt();
-        continue;
-      } catch (IOException e) {
-        LOG.warn("Failed to get valid replication peers due to IOException.");
-        LOG.debug("Failure details to get valid replication peers.", e);
         continue;
       }
     }

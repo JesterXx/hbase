@@ -29,7 +29,6 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.protobuf.generated.ClusterStatusProtos.RegionStoreSequenceIds;
@@ -74,7 +73,8 @@ public class TestGetLastFlushedSequenceId {
     testUtil.getHBaseAdmin().createNamespace(
       NamespaceDescriptor.create(tableName.getNamespaceAsString()).build());
     Table table = testUtil.createTable(tableName, families);
-    table.put(new Put(Bytes.toBytes("k")).add(family, Bytes.toBytes("q"), Bytes.toBytes("v")));
+    table.put(new Put(Bytes.toBytes("k"))
+            .addColumn(family, Bytes.toBytes("q"), Bytes.toBytes("v")));
     MiniHBaseCluster cluster = testUtil.getMiniHBaseCluster();
     List<JVMClusterUtil.RegionServerThread> rsts = cluster.getRegionServerThreads();
     Region region = null;

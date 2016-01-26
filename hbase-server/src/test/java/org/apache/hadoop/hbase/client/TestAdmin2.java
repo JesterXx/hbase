@@ -218,7 +218,7 @@ public class TestAdmin2 {
     byte[] value = Bytes.toBytes("somedata");
     // This used to use an empty row... That must have been a bug
     Put put = new Put(value);
-    put.add(HConstants.CATALOG_FAMILY, HConstants.CATALOG_FAMILY, value);
+    put.addColumn(HConstants.CATALOG_FAMILY, HConstants.CATALOG_FAMILY, value);
     table.put(put);
     table.close();
   }
@@ -465,10 +465,10 @@ public class TestAdmin2 {
         onlineRegions.contains(info));
   }
 
-  private HBaseAdmin createTable(byte[] TABLENAME) throws IOException {
+  private HBaseAdmin createTable(TableName tableName) throws IOException {
     HBaseAdmin admin = TEST_UTIL.getHBaseAdmin();
 
-    HTableDescriptor htd = new HTableDescriptor(TableName.valueOf(TABLENAME));
+    HTableDescriptor htd = new HTableDescriptor(tableName);
     HColumnDescriptor hcd = new HColumnDescriptor("value");
 
     htd.addFamily(hcd);
@@ -517,10 +517,10 @@ public class TestAdmin2 {
 
   @Test (timeout=300000)
   public void testMoveToPreviouslyAssignedRS() throws IOException, InterruptedException {
-    byte[] tableName = Bytes.toBytes("testMoveToPreviouslyAssignedRS");
     MiniHBaseCluster cluster = TEST_UTIL.getHBaseCluster();
     HMaster master = cluster.getMaster();
-    HBaseAdmin localAdmin = createTable(tableName);
+    TableName tableName = TableName.valueOf("testMoveToPreviouslyAssignedRS");
+    Admin localAdmin = createTable(tableName);
     List<HRegionInfo> tableRegions = localAdmin.getTableRegions(tableName);
     HRegionInfo hri = tableRegions.get(0);
     AssignmentManager am = master.getAssignmentManager();
@@ -614,7 +614,7 @@ public class TestAdmin2 {
     HRegionServer regionServer = TEST_UTIL.getRSForFirstRegionInTable(tableName);
     for (int i = 1; i <= 256; i++) { // 256 writes should cause 8 log rolls
       Put put = new Put(Bytes.toBytes("row" + String.format("%1$04d", i)));
-      put.add(HConstants.CATALOG_FAMILY, null, value);
+      put.addColumn(HConstants.CATALOG_FAMILY, null, value);
       table.put(put);
       if (i % 32 == 0) {
         // After every 32 writes sleep to let the log roller run

@@ -41,10 +41,7 @@ import org.apache.hadoop.hbase.coprocessor.ObserverContext;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
-import org.apache.hadoop.hbase.util.JVMClusterUtil.RegionServerThread;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.FSUtils;
-import org.apache.hadoop.hbase.util.FSVisitor;
 import org.apache.hadoop.hbase.util.TestTableName;
 
 import org.junit.AfterClass;
@@ -138,7 +135,7 @@ public class TestScannerRetriableFailure {
       byte[] row = Bytes.toBytes(String.format("%09d", i));
       Put put = new Put(row);
       put.setDurability(Durability.SKIP_WAL);
-      put.add(FAMILY_NAME, null, row);
+      put.addColumn(FAMILY_NAME, null, row);
       table.put(put);
     }
   }

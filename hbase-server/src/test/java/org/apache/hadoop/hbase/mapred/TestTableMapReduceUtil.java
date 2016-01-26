@@ -90,12 +90,10 @@ public class TestTableMapReduceUtil {
   public static void beforeClass() throws Exception {
     UTIL.startMiniCluster();
     presidentsTable = createAndFillTable(TableName.valueOf(TABLE_NAME));
-    UTIL.startMiniMapReduceCluster();
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    UTIL.shutdownMiniMapReduceCluster();
     UTIL.shutdownMiniCluster();
   }
 
@@ -116,8 +114,7 @@ public class TestTableMapReduceUtil {
     for (String president : presidentsRowKeys) {
       if (presidentNames.hasNext()) {
         Put p = new Put(Bytes.toBytes(president));
-        p.add(COLUMN_FAMILY, COLUMN_QUALIFIER,
-            Bytes.toBytes(presidentNames.next()));
+        p.addColumn(COLUMN_FAMILY, COLUMN_QUALIFIER, Bytes.toBytes(presidentNames.next()));
         table.put(p);
       }
     }
@@ -125,7 +122,7 @@ public class TestTableMapReduceUtil {
     for (String actor : actorsRowKeys) {
       if (actorNames.hasNext()) {
         Put p = new Put(Bytes.toBytes(actor));
-        p.add(COLUMN_FAMILY, COLUMN_QUALIFIER, Bytes.toBytes(actorNames.next()));
+        p.addColumn(COLUMN_FAMILY, COLUMN_QUALIFIER, Bytes.toBytes(actorNames.next()));
         table.put(p);
       }
     }
@@ -267,8 +264,9 @@ public class TestTableMapReduceUtil {
 
       String name = Bytes.toString(result.getValue(COLUMN_FAMILY,
           COLUMN_QUALIFIER));
-      outCollector.collect(outKey, new Put(Bytes.toBytes("rowKey2")).add(
-          COLUMN_FAMILY, COLUMN_QUALIFIER, Bytes.toBytes(name)));
+      outCollector.collect(outKey,
+              new Put(Bytes.toBytes("rowKey2"))
+              .addColumn(COLUMN_FAMILY, COLUMN_QUALIFIER, Bytes.toBytes(name)));
     }
   }
 }

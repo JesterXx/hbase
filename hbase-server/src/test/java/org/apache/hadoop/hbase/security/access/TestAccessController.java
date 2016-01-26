@@ -56,6 +56,7 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Connection;
@@ -920,7 +921,7 @@ public class TestAccessController extends SecureTestUtil {
       @Override
       public Object run() throws Exception {
         Put p = new Put(TEST_ROW);
-        p.add(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes(1));
+        p.addColumn(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes(1));
         try(Connection conn = ConnectionFactory.createConnection(conf);
             Table t = conn.getTable(TEST_TABLE)) {
           t.put(p);
@@ -935,7 +936,7 @@ public class TestAccessController extends SecureTestUtil {
       @Override
       public Object run() throws Exception {
         Delete d = new Delete(TEST_ROW);
-        d.deleteFamily(TEST_FAMILY);
+        d.addFamily(TEST_FAMILY);
         try(Connection conn = ConnectionFactory.createConnection(conf);
             Table t = conn.getTable(TEST_TABLE)) {
           t.delete(d);
@@ -968,7 +969,7 @@ public class TestAccessController extends SecureTestUtil {
       @Override
       public Object run() throws Exception {
         Delete d = new Delete(TEST_ROW);
-        d.deleteFamily(TEST_FAMILY);
+        d.addFamily(TEST_FAMILY);
         try(Connection conn = ConnectionFactory.createConnection(conf);
             Table t = conn.getTable(TEST_TABLE);) {
           t.checkAndDelete(TEST_ROW, TEST_FAMILY, TEST_QUALIFIER,
@@ -984,7 +985,7 @@ public class TestAccessController extends SecureTestUtil {
       @Override
       public Object run() throws Exception {
         Put p = new Put(TEST_ROW);
-        p.add(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes(1));
+        p.addColumn(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes(1));
         try(Connection conn = ConnectionFactory.createConnection(conf);
             Table t = conn.getTable(TEST_TABLE);) {
           t.checkAndPut(TEST_ROW, TEST_FAMILY, TEST_QUALIFIER,
@@ -1122,7 +1123,7 @@ public class TestAccessController extends SecureTestUtil {
         byte[] row = TEST_ROW;
         byte[] qualifier = TEST_QUALIFIER;
         Put put = new Put(row);
-        put.add(TEST_FAMILY, qualifier, Bytes.toBytes(1));
+        put.addColumn(TEST_FAMILY, qualifier, Bytes.toBytes(1));
         Append append = new Append(row);
         append.add(TEST_FAMILY, qualifier, Bytes.toBytes(2));
         try(Connection conn = ConnectionFactory.createConnection(conf);
@@ -1251,8 +1252,8 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Put p = new Put(Bytes.toBytes("a"));
-          p.add(family1, qualifier, Bytes.toBytes("v1"));
-          p.add(family2, qualifier, Bytes.toBytes("v2"));
+          p.addColumn(family1, qualifier, Bytes.toBytes("v1"));
+          p.addColumn(family2, qualifier, Bytes.toBytes("v2"));
 
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName);) {
@@ -1266,7 +1267,7 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Put p = new Put(Bytes.toBytes("a"));
-          p.add(family1, qualifier, Bytes.toBytes("v1"));
+          p.addColumn(family1, qualifier, Bytes.toBytes("v1"));
 
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName)) {
@@ -1280,7 +1281,7 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Put p = new Put(Bytes.toBytes("a"));
-          p.add(family2, qualifier, Bytes.toBytes("v2"));
+          p.addColumn(family2, qualifier, Bytes.toBytes("v2"));
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName);) {
             t.put(p);
@@ -1333,8 +1334,8 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Delete d = new Delete(TEST_ROW);
-          d.deleteFamily(family1);
-          d.deleteFamily(family2);
+          d.addFamily(family1);
+          d.addFamily(family2);
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName)) {
             t.delete(d);
@@ -1347,7 +1348,7 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Delete d = new Delete(TEST_ROW);
-          d.deleteFamily(family1);
+          d.addFamily(family1);
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName)) {
             t.delete(d);
@@ -1360,7 +1361,7 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Delete d = new Delete(TEST_ROW);
-          d.deleteFamily(family2);
+          d.addFamily(family2);
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName)) {
             t.delete(d);
@@ -1515,7 +1516,7 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Put p = new Put(TEST_ROW);
-          p.add(family1, qualifier, Bytes.toBytes("v1"));
+          p.addColumn(family1, qualifier, Bytes.toBytes("v1"));
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName)) {
             t.put(p);
@@ -1528,7 +1529,7 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Delete d = new Delete(TEST_ROW);
-          d.deleteColumn(family1, qualifier);
+          d.addColumn(family1, qualifier);
           // d.deleteFamily(family1);
           try (Connection conn = ConnectionFactory.createConnection(conf);
               Table t = conn.getTable(tableName)) {
@@ -2145,7 +2146,7 @@ public class TestAccessController extends SecureTestUtil {
         @Override
         public Object run() throws Exception {
           Put put = new Put(Bytes.toBytes("test"));
-          put.add(TEST_FAMILY, Bytes.toBytes("qual"), Bytes.toBytes("value"));
+          put.addColumn(TEST_FAMILY, Bytes.toBytes("qual"), Bytes.toBytes("value"));
           table.put(put);
           return null;
         }
@@ -2516,7 +2517,7 @@ public class TestAccessController extends SecureTestUtil {
             Table t = conn.getTable(TEST_TABLE);) {
           KeyValue kv = new KeyValue(TEST_ROW, TEST_FAMILY, TEST_QUALIFIER,
             HConstants.LATEST_TIMESTAMP, HConstants.EMPTY_BYTE_ARRAY,
-            new Tag[] { new Tag(AccessControlLists.ACL_TAG_TYPE,
+            new Tag[] { new ArrayBackedTag(AccessControlLists.ACL_TAG_TYPE,
               ProtobufUtil.toUsersAndPermissions(USER_OWNER.getShortName(),
                 new Permission(Permission.Action.READ)).toByteArray()) });
           t.put(new Put(TEST_ROW).add(kv));

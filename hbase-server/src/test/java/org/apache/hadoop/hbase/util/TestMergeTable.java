@@ -34,7 +34,6 @@ import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.regionserver.HRegion;
-import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.MiscTests;
 import org.junit.Test;
@@ -147,7 +146,7 @@ public class TestMergeTable {
     for(int i = firstRow; i < firstRow + nrows; i++) {
       Put put = new Put(Bytes.toBytes("row_" + String.format("%1$05d", i)));
       put.setDurability(Durability.SKIP_WAL);
-      put.add(COLUMN_NAME, null,  VALUE);
+      put.addColumn(COLUMN_NAME, null, VALUE);
       region.put(put);
       if (i % 10000 == 0) {
         LOG.info("Flushing write #" + i);

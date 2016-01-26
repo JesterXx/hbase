@@ -192,12 +192,13 @@ public class ModifyNamespaceProcedure
 
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
-    return getTableNamespaceManager(env).acquireExclusiveLock();
+    if (env.waitInitialized(this)) return false;
+    return env.getProcedureQueue().tryAcquireNamespaceExclusiveLock(this, getNamespaceName());
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    getTableNamespaceManager(env).releaseExclusiveLock();
+    env.getProcedureQueue().releaseNamespaceExclusiveLock(this, getNamespaceName());
   }
 
   @Override
@@ -208,6 +209,10 @@ public class ModifyNamespaceProcedure
   @Override
   public TableOperationType getTableOperationType() {
     return TableOperationType.EDIT;
+  }
+
+  private String getNamespaceName() {
+    return newNsDescriptor.getName();
   }
 
   /**
@@ -266,8 +271,9 @@ public class ModifyNamespaceProcedure
   }
 
   private TableNamespaceManager getTableNamespaceManager(final MasterProcedureEnv env) {
-    return env.getMasterServices().getTableNamespaceManager();
+    return env.getMasterServices().getClusterSchema().getTableNamespaceManager();
   }
+
   /**
    * The procedure could be restarted from a different machine. If the variable is null, we need to
    * retrieve it.

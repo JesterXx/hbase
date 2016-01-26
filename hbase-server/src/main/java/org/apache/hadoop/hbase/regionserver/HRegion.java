@@ -69,6 +69,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellScanner;
@@ -93,6 +94,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagRewriteCell;
 import org.apache.hadoop.hbase.TagType;
+import org.apache.hadoop.hbase.TagUtil;
 import org.apache.hadoop.hbase.UnknownScannerException;
 import org.apache.hadoop.hbase.backup.HFileArchiver;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
@@ -156,6 +158,7 @@ import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.ReplayHLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.regionserver.wal.WALUtil;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.snapshot.SnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotManifest;
 import org.apache.hadoop.hbase.util.ByteStringer;
@@ -296,6 +299,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   protected final Configuration conf;
   private final Configuration baseConf;
   private final int rowLockWaitDuration;
+  private CompactedHFilesDischarger compactedFileDischarger;
   static final int DEFAULT_ROWLOCK_WAIT_DURATION = 30000;
 
   // The internal wait duration to acquire a lock before read/update
@@ -389,7 +393,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     // Set when a flush has been requested.
     volatile boolean flushRequested = false;
     // Number of compactions running.
-    volatile int compacting = 0;
+    AtomicInteger compacting = new AtomicInteger(0);
     // Gets set in close. If set, cannot compact or flush again.
     volatile boolean writesEnabled = true;
     // Set if region is read-only
@@ -820,7 +824,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
     this.writestate.setReadOnly(ServerRegionReplicaUtil.isReadOnly(this));
     this.writestate.flushRequested = false;
-    this.writestate.compacting = 0;
+    this.writestate.compacting.set(0);
 
     if (this.writestate.writesEnabled) {
       // Remove temporary data left over from old regions
@@ -959,16 +963,26 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     initializeStores(reporter, status);
   }
 
-  private void writeRegionOpenMarker(WAL wal, long openSeqId) throws IOException {
-    Map<byte[], List<Path>> storeFiles = new TreeMap<byte[], List<Path>>(Bytes.BYTES_COMPARATOR);
+  /**
+   * @return Map of StoreFiles by column family
+   */
+  private NavigableMap<byte[], List<Path>> getStoreFiles() {
+    NavigableMap<byte[], List<Path>> allStoreFiles =
+      new TreeMap<byte[], List<Path>>(Bytes.BYTES_COMPARATOR);
     for (Store store: getStores()) {
-      ArrayList<Path> storeFileNames = new ArrayList<Path>();
-      for (StoreFile storeFile: store.getStorefiles()) {
+      Collection<StoreFile> storeFiles = store.getStorefiles();
+      if (storeFiles == null) continue;
+      List<Path> storeFileNames = new ArrayList<Path>();
+      for (StoreFile storeFile: storeFiles) {
         storeFileNames.add(storeFile.getPath());
       }
-      storeFiles.put(store.getFamily().getName(), storeFileNames);
+      allStoreFiles.put(store.getFamily().getName(), storeFileNames);
     }
+    return allStoreFiles;
+  }
 
+  private void writeRegionOpenMarker(WAL wal, long openSeqId) throws IOException {
+    Map<byte[], List<Path>> storeFiles = getStoreFiles();
     RegionEventDescriptor regionOpenDesc = ProtobufUtil.toRegionEventDescriptor(
       RegionEventDescriptor.EventType.REGION_OPEN, getRegionInfo(), openSeqId,
       getRegionServerServices().getServerName(), storeFiles);
@@ -976,15 +990,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   }
 
   private void writeRegionCloseMarker(WAL wal) throws IOException {
-    Map<byte[], List<Path>> storeFiles = new TreeMap<byte[], List<Path>>(Bytes.BYTES_COMPARATOR);
-    for (Store store: getStores()) {
-      ArrayList<Path> storeFileNames = new ArrayList<Path>();
-      for (StoreFile storeFile: store.getStorefiles()) {
-        storeFileNames.add(storeFile.getPath());
-      }
-      storeFiles.put(store.getFamily().getName(), storeFileNames);
-    }
-
+    Map<byte[], List<Path>> storeFiles = getStoreFiles();
     RegionEventDescriptor regionEventDesc = ProtobufUtil.toRegionEventDescriptor(
       RegionEventDescriptor.EventType.REGION_CLOSE, getRegionInfo(), mvcc.getReadPoint(),
       getRegionServerServices().getServerName(), storeFiles);
@@ -1015,7 +1021,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       new HDFSBlocksDistribution();
     synchronized (this.stores) {
       for (Store store : this.stores.values()) {
-        for (StoreFile sf : store.getStorefiles()) {
+        Collection<StoreFile> storeFiles = store.getStorefiles();
+        if (storeFiles == null) continue;
+        for (StoreFile sf : storeFiles) {
           HDFSBlocksDistribution storeFileBlocksDistribution =
             sf.getHDFSBlockDistribution();
           hdfsBlocksDistribution.add(storeFileBlocksDistribution);
@@ -1058,9 +1066,12 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     for (HColumnDescriptor family: tableDescriptor.getFamilies()) {
       Collection<StoreFileInfo> storeFiles = regionFs.getStoreFiles(family.getNameAsString());
       if (storeFiles == null) continue;
-
       for (StoreFileInfo storeFileInfo : storeFiles) {
-        hdfsBlocksDistribution.add(storeFileInfo.computeHDFSBlocksDistribution(fs));
+        try {
+          hdfsBlocksDistribution.add(storeFileInfo.computeHDFSBlocksDistribution(fs));
+        } catch (IOException ioe) {
+          LOG.warn("Error getting hdfs block distribution for " + storeFileInfo);
+        }
       }
     }
     return hdfsBlocksDistribution;
@@ -1302,7 +1313,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       "hbase.regionserver.optionalcacheflushinterval";
   /** Default interval for the memstore flush */
   public static final int DEFAULT_CACHE_FLUSH_INTERVAL = 3600000;
-  public static final int META_CACHE_FLUSH_INTERVAL = 300000; // 5 minutes
+  /** Default interval for System tables memstore flush */
+  public static final int SYSTEM_CACHE_FLUSH_INTERVAL = 300000; // 5 minutes
 
   /** Conf key to force a flush if there are already enough changes for one region in memstore */
   public static final String MEMSTORE_FLUSH_PER_CHANGES =
@@ -1356,6 +1368,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     this.closing.set(closing);
   }
 
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="UL_UNRELEASED_LOCK_EXCEPTION_PATH",
+      justification="I think FindBugs is confused")
   private Map<byte[], List<StoreFile>> doClose(final boolean abort, MonitoredTask status)
       throws IOException {
     if (isClosed()) {
@@ -1392,10 +1406,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       }
     }
 
+    // block waiting for the lock for closing
+    lock.writeLock().lock(); // FindBugs: Complains UL_UNRELEASED_LOCK_EXCEPTION_PATH but seems fine
     this.closing.set(true);
     status.setStatus("Disabling writes for close");
-    // block waiting for the lock for closing
-    lock.writeLock().lock();
     try {
       if (this.isClosed()) {
         status.abort("Already got closed by another process");
@@ -1504,6 +1518,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       if (this.metricsRegionWrapper != null) {
         Closeables.closeQuietly(this.metricsRegionWrapper);
       }
+      // stop the Compacted hfile discharger
+      if (this.compactedFileDischarger != null) this.compactedFileDischarger.cancel(true);
+
       status.markComplete("Closed");
       LOG.info("Closed " + this);
       return result;
@@ -1522,7 +1539,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       }
       boolean interrupted = false;
       try {
-        while (writestate.compacting > 0 || writestate.flushing) {
+        while (writestate.compacting.get() > 0 || writestate.flushing) {
           LOG.debug("waiting for " + writestate.compacting + " compactions"
             + (writestate.flushing ? " & cache flush" : "") + " to complete for region " + this);
           try {
@@ -1633,10 +1650,16 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   public long getOldestHfileTs(boolean majorCompactioOnly) throws IOException {
     long result = Long.MAX_VALUE;
     for (Store store : getStores()) {
-      for (StoreFile file : store.getStorefiles()) {
-        HFile.Reader reader = file.getReader().getHFileReader();
+      Collection<StoreFile> storeFiles = store.getStorefiles();
+      if (storeFiles == null) continue;
+      for (StoreFile file : storeFiles) {
+        StoreFile.Reader sfReader = file.getReader();
+        if (sfReader == null) continue;
+        HFile.Reader reader = sfReader.getHFileReader();
+        if (reader == null) continue;
         if (majorCompactioOnly) {
           byte[] val = reader.loadFileInfo().get(StoreFile.MAJOR_COMPACTION_KEY);
+          if (val == null) continue;
           if (val == null || !Bytes.toBoolean(val)) {
             continue;
           }
@@ -1711,7 +1734,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         if (controller == null) {
           controller = NoLimitCompactionThroughputController.INSTANCE;
         }
-        compact(compaction, s, controller);
+        compact(compaction, s, controller, null);
       }
     }
   }
@@ -1726,7 +1749,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     for (Store s : getStores()) {
       CompactionContext compaction = s.requestCompaction();
       if (compaction != null) {
-        compact(compaction, s, NoLimitCompactionThroughputController.INSTANCE);
+        compact(compaction, s, NoLimitCompactionThroughputController.INSTANCE, null);
       }
     }
   }
@@ -1743,7 +1766,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     Store s = getStore(family);
     CompactionContext compaction = s.requestCompaction();
     if (compaction != null) {
-      compact(compaction, s, throughputController);
+      compact(compaction, s, throughputController, null);
     }
   }
 
@@ -1759,10 +1782,16 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * server does them sequentially and not in parallel.
    *
    * @param compaction Compaction details, obtained by requestCompaction()
+   * @param throughputController
    * @return whether the compaction completed
    */
   public boolean compact(CompactionContext compaction, Store store,
       CompactionThroughputController throughputController) throws IOException {
+    return compact(compaction, store, throughputController, null);
+  }
+
+  public boolean compact(CompactionContext compaction, Store store,
+      CompactionThroughputController throughputController, User user) throws IOException {
     assert compaction != null && compaction.hasSelection();
     assert !compaction.getRequest().getFiles().isEmpty();
     if (this.closing.get() || this.closed.get()) {
@@ -1772,8 +1801,80 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     }
     MonitoredTask status = null;
     boolean requestNeedsCancellation = true;
-    // block waiting for the lock for compaction
-    lock.readLock().lock();
+    /*
+     * We are trying to remove / relax the region read lock for compaction.
+     * Let's see what are the potential race conditions among the operations (user scan,
+     * region split, region close and region bulk load).
+     *
+     *  user scan ---> region read lock
+     *  region split --> region close first --> region write lock
+     *  region close --> region write lock
+     *  region bulk load --> region write lock
+     *
+     * read lock is compatible with read lock. ---> no problem with user scan/read
+     * region bulk load does not cause problem for compaction (no consistency problem, store lock
+     *  will help the store file accounting).
+     * They can run almost concurrently at the region level.
+     *
+     * The only remaining race condition is between the region close and compaction.
+     * So we will evaluate, below, how region close intervenes with compaction if compaction does
+     * not acquire region read lock.
+     *
+     * Here are the steps for compaction:
+     * 1. obtain list of StoreFile's
+     * 2. create StoreFileScanner's based on list from #1
+     * 3. perform compaction and save resulting files under tmp dir
+     * 4. swap in compacted files
+     *
+     * #1 is guarded by store lock. This patch does not change this --> no worse or better
+     * For #2, we obtain smallest read point (for region) across all the Scanners (for both default
+     * compactor and stripe compactor).
+     * The read points are for user scans. Region keeps the read points for all currently open
+     * user scanners.
+     * Compaction needs to know the smallest read point so that during re-write of the hfiles,
+     * it can remove the mvcc points for the cells if their mvccs are older than the smallest
+     * since they are not needed anymore.
+     * This will not conflict with compaction.
+     * For #3, it can be performed in parallel to other operations.
+     * For #4 bulk load and compaction don't conflict with each other on the region level
+     *   (for multi-family atomicy).
+     * Region close and compaction are guarded pretty well by the 'writestate'.
+     * In HRegion#doClose(), we have :
+     * synchronized (writestate) {
+     *   // Disable compacting and flushing by background threads for this
+     *   // region.
+     *   canFlush = !writestate.readOnly;
+     *   writestate.writesEnabled = false;
+     *   LOG.debug("Closing " + this + ": disabling compactions & flushes");
+     *   waitForFlushesAndCompactions();
+     * }
+     * waitForFlushesAndCompactions() would wait for writestate.compacting to come down to 0.
+     * and in HRegion.compact()
+     *  try {
+     *    synchronized (writestate) {
+     *    if (writestate.writesEnabled) {
+     *      wasStateSet = true;
+     *      ++writestate.compacting;
+     *    } else {
+     *      String msg = "NOT compacting region " + this + ". Writes disabled.";
+     *      LOG.info(msg);
+     *      status.abort(msg);
+     *      return false;
+     *    }
+     *  }
+     * Also in compactor.performCompaction():
+     * check periodically to see if a system stop is requested
+     * if (closeCheckInterval > 0) {
+     *   bytesWritten += len;
+     *   if (bytesWritten > closeCheckInterval) {
+     *     bytesWritten = 0;
+     *     if (!store.areWritesEnabled()) {
+     *       progress.cancel();
+     *       return false;
+     *     }
+     *   }
+     * }
+     */
     try {
       byte[] cf = Bytes.toBytes(store.getColumnFamilyName());
       if (stores.get(cf) != store) {
@@ -1795,7 +1896,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         synchronized (writestate) {
           if (writestate.writesEnabled) {
             wasStateSet = true;
-            ++writestate.compacting;
+            writestate.compacting.incrementAndGet();
           } else {
             String msg = "NOT compacting region " + this + ". Writes disabled.";
             LOG.info(msg);
@@ -1811,7 +1912,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           // We no longer need to cancel the request on the way out of this
           // method because Store#compact will clean up unconditionally
           requestNeedsCancellation = false;
-          store.compact(compaction, throughputController);
+          store.compact(compaction, throughputController, user);
         } catch (InterruptedIOException iioe) {
           String msg = "compaction interrupted";
           LOG.info(msg, iioe);
@@ -1821,8 +1922,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       } finally {
         if (wasStateSet) {
           synchronized (writestate) {
-            --writestate.compacting;
-            if (writestate.compacting <= 0) {
+            writestate.compacting.decrementAndGet();
+            if (writestate.compacting.get() <= 0) {
               writestate.notifyAll();
             }
           }
@@ -1831,12 +1932,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       status.markComplete("Compaction complete");
       return true;
     } finally {
-      try {
-        if (requestNeedsCancellation) store.cancelRequestedCompaction(compaction);
-        if (status != null) status.cleanup();
-      } finally {
-        lock.readLock().unlock();
-      }
+      if (requestNeedsCancellation) store.cancelRequestedCompaction(compaction);
+      if (status != null) status.cleanup();
     }
   }
 
@@ -1984,9 +2081,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       return true;
     }
     long modifiedFlushCheckInterval = flushCheckInterval;
-    if (getRegionInfo().isMetaRegion() &&
+    if (getRegionInfo().isSystemTable() &&
         getRegionInfo().getReplicaId() == HRegionInfo.DEFAULT_REPLICA_ID) {
-      modifiedFlushCheckInterval = META_CACHE_FLUSH_INTERVAL;
+      modifiedFlushCheckInterval = SYSTEM_CACHE_FLUSH_INTERVAL;
     }
     if (modifiedFlushCheckInterval <= 0) { //disabled
       return false;
@@ -2069,6 +2166,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     }
   }
 
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="DLS_DEAD_LOCAL_STORE",
+      justification="FindBugs seems confused about trxId")
   protected PrepareFlushResult internalPrepareFlushCache(final WAL wal, final long myseqid,
       final Collection<Store> storesToFlush, MonitoredTask status, boolean writeFlushWalMarker)
   throws IOException {
@@ -2300,6 +2399,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     return false;
   }
 
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="NN_NAKED_NOTIFY",
+      justification="Intentional; notify is about completed flush")
   protected FlushResult internalFlushCacheAndCommit(
         final WAL wal, MonitoredTask status, final PrepareFlushResult prepareResult,
         final Collection<Store> storesToFlush)
@@ -2462,6 +2563,12 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   @Override
   public RegionScanner getScanner(Scan scan) throws IOException {
    return getScanner(scan, true);
+  }
+
+  @Override
+  public RegionScanner getScanner(Scan scan, List<KeyValueScanner> additionalScanners)
+      throws IOException {
+    return getScanner(scan, additionalScanners, true);
   }
 
   public RegionScanner getScanner(Scan scan, boolean copyCellsFromSharedMem) throws IOException {
@@ -2953,7 +3060,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         }
         if (rowLock == null) {
           // We failed to grab another lock
-          assert false: "Should never fail to get lock when blocking";
           break; // stop acquiring more rows for this batch
         } else {
           acquiredRowLocks.add(rowLock);
@@ -3559,8 +3665,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       for (int i = 0; i < listSize; i++) {
         Cell cell = cells.get(i);
         List<Tag> newTags = new ArrayList<Tag>();
-        Iterator<Tag> tagIterator = CellUtil.tagsIterator(cell.getTagsArray(),
-          cell.getTagsOffset(), cell.getTagsLength());
+        Iterator<Tag> tagIterator = CellUtil.tagsIterator(cell);
 
         // Carry forward existing tags
 
@@ -3577,11 +3682,11 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         // above may change when there are more tag based features in core.
         if (m.getTTL() != Long.MAX_VALUE) {
           // Add a cell TTL tag
-          newTags.add(new Tag(TagType.TTL_TAG_TYPE, Bytes.toBytes(m.getTTL())));
+          newTags.add(new ArrayBackedTag(TagType.TTL_TAG_TYPE, Bytes.toBytes(m.getTTL())));
         }
 
         // Rewrite the cell with the updated set of tags
-        cells.set(i, new TagRewriteCell(cell, Tag.fromList(newTags)));
+        cells.set(i, new TagRewriteCell(cell, TagUtil.fromList(newTags)));
       }
     }
   }
@@ -3673,15 +3778,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       int listSize = cells.size();
       for (int i=0; i < listSize; i++) {
         Cell cell = cells.get(i);
-        if (cell.getSequenceId() == 0) {
+        if (cell.getSequenceId() == 0 || isInReplay) {
           CellUtil.setSequenceId(cell, mvccNum);
         }
-        Pair<Long, Cell> ret = store.add(cell);
-        size += ret.getFirst();
-        if(isInReplay) {
-          // set memstore newly added cells with replay mvcc number
-          CellUtil.setSequenceId(ret.getSecond(), mvccNum);
-        }
+        size += store.add(cell);
       }
     }
 
@@ -4027,11 +4127,11 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
               continue;
             }
           }
+          boolean checkRowWithinBoundary = false;
           // Check this edit is for this region.
           if (!Bytes.equals(key.getEncodedRegionName(),
               this.getRegionInfo().getEncodedNameAsBytes())) {
-            skippedEdits++;
-            continue;
+            checkRowWithinBoundary = true;
           }
 
           boolean flush = false;
@@ -4039,11 +4139,14 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             // Check this edit is for me. Also, guard against writing the special
             // METACOLUMN info such as HBASE::CACHEFLUSH entries
             if (CellUtil.matchingFamily(cell, WALEdit.METAFAMILY)) {
-              //this is a special edit, we should handle it
-              CompactionDescriptor compaction = WALEdit.getCompaction(cell);
-              if (compaction != null) {
-                //replay the compaction
-                replayWALCompactionMarker(compaction, false, true, Long.MAX_VALUE);
+              // if region names don't match, skipp replaying compaction marker
+              if (!checkRowWithinBoundary) {
+                //this is a special edit, we should handle it
+                CompactionDescriptor compaction = WALEdit.getCompaction(cell);
+                if (compaction != null) {
+                  //replay the compaction
+                  replayWALCompactionMarker(compaction, false, true, Long.MAX_VALUE);
+                }
               }
               skippedEdits++;
               continue;
@@ -4056,6 +4159,12 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
               // This should never happen.  Perhaps schema was changed between
               // crash and redeploy?
               LOG.warn("No family for " + cell);
+              skippedEdits++;
+              continue;
+            }
+            if (checkRowWithinBoundary && !rowIsInRange(this.getRegionInfo(),
+              cell.getRowArray(), cell.getRowOffset(), cell.getRowLength())) {
+              LOG.warn("Row of " + cell + " is not within region boundary");
               skippedEdits++;
               continue;
             }
@@ -4129,8 +4238,16 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   void replayWALCompactionMarker(CompactionDescriptor compaction, boolean pickCompactionFiles,
       boolean removeFiles, long replaySeqId)
       throws IOException {
-    checkTargetRegion(compaction.getEncodedRegionName().toByteArray(),
-      "Compaction marker from WAL ", compaction);
+    try {
+      checkTargetRegion(compaction.getEncodedRegionName().toByteArray(),
+        "Compaction marker from WAL ", compaction);
+    } catch (WrongRegionException wre) {
+      if (RegionReplicaUtil.isDefaultReplica(this.getRegionInfo())) {
+        // skip the compaction marker since it is not for this region
+        return;
+      }
+      throw wre;
+    }
 
     synchronized (writestate) {
       if (replaySeqId < lastReplayedOpenRegionSeqId) {
@@ -4337,6 +4454,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   }
 
   @VisibleForTesting
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="NN_NAKED_NOTIFY",
+    justification="Intentional; post memstore flush")
   void replayWALFlushCommitMarker(FlushDescriptor flush) throws IOException {
     MonitoredTask status = TaskMonitor.get().createStatus("Committing flush " + this);
 
@@ -4573,6 +4692,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     return prepareFlushResult;
   }
 
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="NN_NAKED_NOTIFY",
+      justification="Intentional; cleared the memstore")
   void replayWALRegionEventMarker(RegionEventDescriptor regionEvent) throws IOException {
     checkTargetRegion(regionEvent.getEncodedRegionName().toByteArray(),
       "RegionEvent marker from WAL ", regionEvent);
@@ -4803,6 +4924,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     return refreshStoreFiles(false);
   }
 
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="NN_NAKED_NOTIFY",
+      justification="Notify is about post replay. Intentional")
   protected boolean refreshStoreFiles(boolean force) throws IOException {
     if (!force && ServerRegionReplicaUtil.isDefaultReplica(this.getRegionInfo())) {
       return false; // if primary nothing to do
@@ -4890,7 +5013,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     if (LOG.isTraceEnabled()) {
       LOG.trace(getRegionInfo().getEncodedName() + " : Store files for region: ");
       for (Store s : stores.values()) {
-        for (StoreFile sf : s.getStorefiles()) {
+        Collection<StoreFile> storeFiles = s.getStorefiles();
+        if (storeFiles == null) continue;
+        for (StoreFile sf : storeFiles) {
           LOG.trace(getRegionInfo().getEncodedName() + " : " + sf);
         }
       }
@@ -4924,7 +5049,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * @return True if we should flush.
    */
   protected boolean restoreEdit(final Store s, final Cell cell) {
-    long kvSize = s.add(cell).getFirst();
+    long kvSize = s.add(cell);
     if (this.rsAccounting != null) {
       rsAccounting.addAndGetRegionReplayEditsSize(getRegionInfo().getRegionName(), kvSize);
     }
@@ -4998,7 +5123,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           throw new IllegalArgumentException("No column family : " +
               new String(column) + " available");
         }
-        for (StoreFile storeFile: store.getStorefiles()) {
+        Collection<StoreFile> storeFiles = store.getStorefiles();
+        if (storeFiles == null) continue;
+        for (StoreFile storeFile: storeFiles) {
           storeFileNames.add(storeFile.getPath().toString());
         }
 
@@ -5215,7 +5342,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * Determines whether multiple column families are present
    * Precondition: familyPaths is not null
    *
-   * @param familyPaths List of Pair<byte[] column family, String hfilePath>
+   * @param familyPaths List of (column family, hfilePath)
    */
   private static boolean hasMultipleColumnFamilies(Collection<Pair<byte[], String>> familyPaths) {
     boolean multipleFamilies = false;
@@ -5928,10 +6055,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
     /**
      * This function is to maintain backward compatibility for 0.94 filters. HBASE-6429 combines
-     * both filterRow & filterRow(List<KeyValue> kvs) functions. While 0.94 code or older, it may
-     * not implement hasFilterRow as HBase-6429 expects because 0.94 hasFilterRow() only returns
-     * true when filterRow(List<KeyValue> kvs) is overridden not the filterRow(). Therefore, the
-     * filterRow() will be skipped.
+     * both filterRow & filterRow({@code List<KeyValue> kvs}) functions. While 0.94 code or older,
+     * it may not implement hasFilterRow as HBase-6429 expects because 0.94 hasFilterRow() only
+     * returns true when filterRow({@code List<KeyValue> kvs}) is overridden not the filterRow().
+     * Therefore, the filterRow() will be skipped.
      */
     private boolean filterRow() throws IOException {
       // when hasFilterRow returns true, filter.filterRow() will be called automatically inside
@@ -6483,6 +6610,15 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             (Bytes.compareTo(info.getEndKey(), row) > 0));
   }
 
+  public static boolean rowIsInRange(HRegionInfo info, final byte [] row, final int offset,
+      final short length) {
+    return ((info.getStartKey().length == 0) ||
+        (Bytes.compareTo(info.getStartKey(), 0, info.getStartKey().length,
+          row, offset, length) <= 0)) &&
+        ((info.getEndKey().length == 0) ||
+          (Bytes.compareTo(info.getEndKey(), 0, info.getEndKey().length, row, offset, length) > 0));
+  }
+
   /**
    * Merge two HRegions.  The regions must be adjacent and must not overlap.
    *
@@ -6571,6 +6707,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       dstRegion.getRegionFileSystem().logFileSystemState(LOG);
     }
 
+    // clear the compacted files if any
+    for (Store s : dstRegion.getStores()) {
+      s.closeAndArchiveCompactedFiles();
+    }
     if (dstRegion.getRegionFileSystem().hasReferences(dstRegion.getTableDesc())) {
       throw new IOException("Merged region " + dstRegion
           + " still has references after the compaction, is compaction canceled?");
@@ -6697,6 +6837,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     stats.setMemstoreLoad((int) (Math.min(100, (this.memstoreSize.get() * 100) / this
         .memstoreFlushSize)));
     stats.setHeapOccupancy((int)rsServices.getHeapMemoryManager().getHeapOccupancyPercent()*100);
+    stats.setCompactionPressure((int)rsServices.getCompactionPressure()*100 > 100 ? 100 :
+                (int)rsServices.getCompactionPressure()*100);
     return stats.build();
   }
 
@@ -6815,8 +6957,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
                 checkFamily(CellUtil.cloneFamily(cell));
                 // unreachable
               }
-              Pair<Long, Cell> ret = store.add(cell);
-              addedSize += ret.getFirst();
+              addedSize += store.add(cell);
             }
           }
 
@@ -6930,27 +7071,19 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   }
 
   /**
-   * @param cell
-   * @param tags
-   * @return The passed-in List<Tag> but with the tags from <code>cell</code> added.
+   * @return The passed-in {@code tags} but with the tags from {@code cell} added.
    */
   private static List<Tag> carryForwardTags(final Cell cell, final List<Tag> tags) {
     if (cell.getTagsLength() <= 0) return tags;
-    List<Tag> newTags = tags == null? new ArrayList<Tag>(): /*Append Tags*/tags; 
-    Iterator<Tag> i =
-        CellUtil.tagsIterator(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
+    List<Tag> newTags = tags == null? new ArrayList<Tag>(): /*Append Tags*/tags;
+    Iterator<Tag> i = CellUtil.tagsIterator(cell);
     while (i.hasNext()) newTags.add(i.next());
     return newTags;
   }
 
   /**
    * Run a Get against passed in <code>store</code> on passed <code>row</code>, etc.
-   * @param store
-   * @param row
-   * @param family
-   * @param tr
    * @return Get result.
-   * @throws IOException
    */
   private List<Cell> doGet(final Store store, final byte [] row,
       final Map.Entry<byte[], List<Cell>> family, final TimeRange tr)
@@ -6982,6 +7115,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     Operation op = Operation.APPEND;
     byte[] row = mutate.getRow();
     checkRow(row, op.toString());
+    checkFamilies(mutate.getFamilyCellMap().keySet());
     boolean flush = false;
     Durability durability = getEffectiveDurability(mutate.getDurability());
     boolean writeToWAL = durability != Durability.SKIP_WAL;
@@ -7046,11 +7180,12 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
                 if (mutate.getTTL() != Long.MAX_VALUE) {
                   // Add the new TTL tag
-                  newTags.add(new Tag(TagType.TTL_TAG_TYPE, Bytes.toBytes(mutate.getTTL())));
+                  newTags.add(
+                      new ArrayBackedTag(TagType.TTL_TAG_TYPE, Bytes.toBytes(mutate.getTTL())));
                 }
 
                 // Rebuild tags
-                byte[] tagBytes = Tag.fromList(newTags);
+                byte[] tagBytes = TagUtil.fromList(newTags);
 
                 // allocate an empty cell once
                 newCell = new KeyValue(row.length, cell.getFamilyLength(),
@@ -7084,9 +7219,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
                 if (mutate.getTTL() != Long.MAX_VALUE) {
                   List<Tag> newTags = new ArrayList<Tag>(1);
-                  newTags.add(new Tag(TagType.TTL_TAG_TYPE, Bytes.toBytes(mutate.getTTL())));
+                  newTags.add(
+                      new ArrayBackedTag(TagType.TTL_TAG_TYPE, Bytes.toBytes(mutate.getTTL())));
                   // Add the new TTL tag
-                  newCell = new TagRewriteCell(cell, Tag.fromList(newTags));
+                  newCell = new TagRewriteCell(cell, TagUtil.fromList(newTags));
                 } else {
                   newCell = cell;
                 }
@@ -7153,8 +7289,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
                 // otherwise keep older versions around
                 for (Cell cell: entry.getValue()) {
                   CellUtil.setSequenceId(cell, writeEntry.getWriteNumber());
-                  Pair<Long, Cell> ret = store.add(cell);
-                  size += ret.getFirst();
+                  size += store.add(cell);
                   doRollBackMemstore = true;
                 }
               }
@@ -7216,7 +7351,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
   // They are subtley different in quiet a few ways. This came out only
   // after study. I am not sure that many of the differences are intentional.
-  // TODO: St.Ack 20150907 
+  // TODO: St.Ack 20150907
 
   @Override
   public Result increment(Increment mutation, long nonceGroup, long nonce)
@@ -7224,12 +7359,13 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     Operation op = Operation.INCREMENT;
     byte [] row = mutation.getRow();
     checkRow(row, op.toString());
+    checkFamilies(mutation.getFamilyCellMap().keySet());
     boolean flush = false;
     Durability durability = getEffectiveDurability(mutation.getDurability());
     boolean writeToWAL = durability != Durability.SKIP_WAL;
     WALEdit walEdits = null;
     List<Cell> allKVs = new ArrayList<Cell>(mutation.size());
-    
+
     Map<Store, List<Cell>> tempMemstore = new HashMap<Store, List<Cell>>();
     long size = 0;
     long txid = 0;
@@ -7307,7 +7443,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
               // Add the TTL tag if the mutation carried one
               if (mutation.getTTL() != Long.MAX_VALUE) {
-                newTags.add(new Tag(TagType.TTL_TAG_TYPE, Bytes.toBytes(mutation.getTTL())));
+                newTags.add(
+                    new ArrayBackedTag(TagType.TTL_TAG_TYPE, Bytes.toBytes(mutation.getTTL())));
               }
 
               Cell newKV = new KeyValue(row, 0, row.length,
@@ -7383,8 +7520,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
                 // otherwise keep older versions around
                 for (Cell cell : entry.getValue()) {
                   CellUtil.setSequenceId(cell, writeEntry.getWriteNumber());
-                  Pair<Long, Cell> ret = store.add(cell);
-                  size += ret.getFirst();
+                  size += store.add(cell);
                   doRollBackMemstore = true;
                 }
               }
@@ -7446,7 +7582,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   public static final long FIXED_OVERHEAD = ClassSize.align(
       ClassSize.OBJECT +
       ClassSize.ARRAY +
-      43 * ClassSize.REFERENCE + 3 * Bytes.SIZEOF_INT +
+      44 * ClassSize.REFERENCE + 3 * Bytes.SIZEOF_INT +
       (14 * Bytes.SIZEOF_LONG) +
       5 * Bytes.SIZEOF_BOOLEAN);
 
@@ -7714,6 +7850,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   }
 
   @Override
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="SF_SWITCH_FALLTHROUGH",
+    justification="Intentional")
   public void startRegionOperation(Operation op) throws IOException {
     switch (op) {
     case GET:  // read operations
@@ -8032,7 +8170,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     WALKey key = new HLogKey(getRegionInfo().getEncodedNameAsBytes(),
       getRegionInfo().getTable(), WALKey.NO_SEQUENCE_ID, 0, null,
       HConstants.NO_NONCE, HConstants.NO_NONCE, getMVCC());
-    
+
     // Call append but with an empty WALEdit.  The returned sequence id will not be associated
     // with any edit and we can be sure it went in after all outstanding appends.
     try {
@@ -8077,5 +8215,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   public CellComparator getCellCompartor() {
     return this.getRegionInfo().isMetaRegion() ? CellComparator.META_COMPARATOR
         : CellComparator.COMPARATOR;
+  }
+
+  public long getMemstoreFlushSize() {
+    return this.memstoreFlushSize;
   }
 }

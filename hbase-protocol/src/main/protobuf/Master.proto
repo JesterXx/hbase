@@ -43,6 +43,7 @@ message AddColumnRequest {
 }
 
 message AddColumnResponse {
+  optional uint64 proc_id = 1;
 }
 
 message DeleteColumnRequest {
@@ -53,6 +54,7 @@ message DeleteColumnRequest {
 }
 
 message DeleteColumnResponse {
+  optional uint64 proc_id = 1;
 }
 
 message ModifyColumnRequest {
@@ -63,6 +65,7 @@ message ModifyColumnRequest {
 }
 
 message ModifyColumnResponse {
+  optional uint64 proc_id = 1;
 }
 
 /* Region-level Protos */
@@ -183,6 +186,7 @@ message CreateNamespaceRequest {
 }
 
 message CreateNamespaceResponse {
+  optional uint64 proc_id = 1;
 }
 
 message DeleteNamespaceRequest {
@@ -192,6 +196,7 @@ message DeleteNamespaceRequest {
 }
 
 message DeleteNamespaceResponse {
+  optional uint64 proc_id = 1;
 }
 
 message ModifyNamespaceRequest {
@@ -201,6 +206,7 @@ message ModifyNamespaceRequest {
 }
 
 message ModifyNamespaceResponse {
+  optional uint64 proc_id = 1;
 }
 
 message GetNamespaceDescriptorRequest {

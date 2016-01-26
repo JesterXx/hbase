@@ -22,7 +22,6 @@ import java.util.Random;
 
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.TableName;
 
 /**
@@ -41,6 +40,11 @@ public class TruncateTableAction extends Action {
   public void perform() throws Exception {
     HBaseTestingUtility util = context.getHBaseIntegrationTestingUtility();
     Admin admin = util.getHBaseAdmin();
+
+    // Don't try the truncate if we're stopping
+    if (context.isStopping()) {
+      return;
+    }
 
     boolean preserveSplits = random.nextBoolean();
     LOG.info("Performing action: Truncate table " + tableName.getNameAsString() +

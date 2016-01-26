@@ -36,7 +36,6 @@ import org.apache.hadoop.hbase.ClusterStatus;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.RegionLoad;
 import org.apache.hadoop.hbase.ServerLoad;
 import org.apache.hadoop.hbase.ServerName;
@@ -95,6 +94,8 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
  * so that the balancer gets the full picture of all loads on the cluster.</p>
  */
 @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.CONFIG)
+@edu.umd.cs.findbugs.annotations.SuppressWarnings(value="IS2_INCONSISTENT_SYNC",
+  justification="Complaint is about costFunctions not being synchronized; not end of the world")
 public class StochasticLoadBalancer extends BaseLoadBalancer {
 
   protected static final String STEPS_PER_REGION_KEY =
@@ -120,7 +121,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
 
   private CandidateGenerator[] candidateGenerators;
   private CostFromRegionLoadFunction[] regionLoadFunctions;
-  private CostFunction[] costFunctions;
+  private CostFunction[] costFunctions; // FindBugs: Wants this protected; IS2_INCONSISTENT_SYNC
 
   // to save and report costs to JMX
   private Double curOverallCost = 0d;
@@ -1027,7 +1028,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
         return 1000000;   // return a number much greater than any of the other cost
       }
 
-      return scale(0, cluster.numRegions, moveCost);
+      return scale(0, Math.min(cluster.numRegions, maxMoves), moveCost);
     }
   }
 

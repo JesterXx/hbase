@@ -17,114 +17,102 @@
  * under the License.
  */
 
-a.externalLink, a.externalLink:link, a.externalLink:visited, a.externalLink:active, a.externalLink:hover {
-  background: none;
-  padding-right: 0;
+/*@import(https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/2.3.2/css/bootstrap.min.css);
+@import(https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/2.3.2/css/bootstrap-responsive.css);*/
+html {
+  background-color: #fff;
+}
+body {
+  font-size: 16px;
+}
+li {
+  line-height: 120%;
 }
 
-/*
-body ul {
-  list-style-type: square;
+div#topbar,
+div#banner,
+div#breadcrumbs,
+div#bodyColumn,
+footer {
+  width: initial;
+  padding-left: 20px;
+  padding-right: 20px;
+  clear: both;
 }
-*/
-
-#downloadbox {
-  float: right;
-  margin: 0 10px 20px 20px;
-  padding: 5px;
-  border: 1px solid #999;
-  background-color: #eee;
+footer {
+  background-color: #e5e5e5;
 }
-
-#downloadbox h5 {
+footer .row, footer p, footer .pull-right {
+  margin: 5px;
+}
+div#search-form.navbar-search.pull-right {
+  width: 290px;
+  margin-right: 0;
+  margin-top: -5px;
+  margin-left: 0;
+  position: initial;
+}
+li#publishDate.pull-right {
+  list-style: none;
+}
+.container,
+.navbar-static-top .container,
+.navbar-fixed-top .container,
+.navbar-fixed-bottom .container,
+.navbar-inner {
+  width: initial;
+}
+/* Change the color and effect when clicking in menus */
+.dropdown-menu>li>a:hover,
+.dropdown-menu>li>a:focus,
+.dropdown-submenu:hover>a,
+.dropdown-submenu:focus>a {
+  background-color: #e5e5e5;
+  background-image: none;
   color: #000;
-  margin: 0;
-  border-bottom: 1px solid #aaaaaa;
-  font-size: smaller;
-  padding: 0;
+  font-weight: bolder;
 }
 
-#downloadbox p {
-  margin-top: 1em;
-  margin-bottom: 0;
+.dropdown-backdrop {
+  position: static;
 }
 
-#downloadbox ul {
-  margin-top: 0;
-  margin-bottom: 1em;
-  list-style-type: disc;
+@media only screen and (max-width: 979px) {
+  body {
+    padding-left: 0;
+    padding-right: 0;
+    width: initial;
+    margin: 0;
+  }
+  /* Without this rule, drop-down divs are a fixed height
+   * the first time they are expanded */
+  .collapse.in {
+      height: auto !important;
+  }
+  div#search-form.navbar-search.pull-right {
+    padding: 0;
+    margin-left: ;
+    width: initial;
+    clear: both;
+  }
 }
 
-#downloadbox li {
-  font-size: smaller;
+/* Fix Google Custom Search results on very narrow screens */
+@media(max-width: 480px) {
+    .gsc-overflow-hidden .nav-collapse {
+        -webkit-transform: none;
+    }
 }
 
-/*
-h4 {
-  padding: 0;
-  border: none;
-  color: #000;
-  margin: 0;
-  font-size: larger;
-  font-weight: bold;
-}
-*/
-
-#banner {
-  background: none;
-  padding: 10px;
+/* Override weird body padding thing that causes scrolling */
+@media (max-width: 767px)
+body {
+    padding-right: 0;
+    padding-left: 0;
 }
 
-/*
-#banner img {
-  padding: 10px;
-  margin: auto;
-  display: block;
-  background: none;
-  float: center;
-  height:;
+@media (max-width: 767px)
+.navbar-fixed-top, .navbar-fixed-bottom, .navbar-static-top {
+  margin-left: 0;
+  margin-right: 0;
 }
-  */
-
-#breadcrumbs {
-  background-image: url();
-}
-
-#footer {
-  border-top: 0px;
-}
-
-.frontpagebox {
-  float: left;
-  text-align: center;
-  width: 15em;
-  margin-left: 0.5em;
-  margin-right: 0.5em;
-  margin-top: 2em;
-}
-
-.headline {
-  font-size: 120%;
-  font-weight: bold;
-  padding-top: 1px;
-  padding-bottom: 5px;
-  background-image: url(../images/breadcrumbs.jpg);
-  background-repeat: repeat-x;
-}
-
-.section {
-  padding-bottom: 0;
-  padding-top: 0;
-}
-
-/*
-#leftColumn {
-  display: none !important
-}
-
-#bodyColumn {
-  margin-left: 1.5em;
-}
-*/
-
-

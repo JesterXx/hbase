@@ -47,6 +47,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -68,7 +69,7 @@ import org.apache.hadoop.hbase.nio.ByteBuff;
 import org.apache.hadoop.hbase.util.ConcurrentIndex;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.HasThread;
-import org.apache.hadoop.hbase.util.IdLock;
+import org.apache.hadoop.hbase.util.IdReadWriteLock;
 import org.apache.hadoop.util.StringUtils;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -152,7 +153,6 @@ public class BucketCache implements BlockCache, HeapSize {
   private final AtomicLong heapSize = new AtomicLong(0);
   /** Current number of cached elements */
   private final AtomicLong blockNumber = new AtomicLong(0);
-  private final AtomicLong failedBlockAdditions = new AtomicLong(0);
 
   /** Cache access count (sequential ID) */
   private final AtomicLong accessCount = new AtomicLong(0);
@@ -180,14 +180,11 @@ public class BucketCache implements BlockCache, HeapSize {
   private volatile long ioErrorStartTime = -1;
 
   /**
-   * A "sparse lock" implementation allowing to lock on a particular block
-   * identified by offset. The purpose of this is to avoid freeing the block
-   * which is being read.
-   *
-   * TODO:We could extend the IdLock to IdReadWriteLock for better.
+   * A ReentrantReadWriteLock to lock on a particular block identified by offset.
+   * The purpose of this is to avoid freeing the block which is being read.
    */
   @VisibleForTesting
-  final IdLock offsetLock = new IdLock();
+  final IdReadWriteLock offsetLock = new IdReadWriteLock();
 
   private final ConcurrentIndex<String, BlockCacheKey> blocksByHFile =
       new ConcurrentIndex<String, BlockCacheKey>(new Comparator<BlockCacheKey>() {
@@ -379,7 +376,7 @@ public class BucketCache implements BlockCache, HeapSize {
     }
     if (!successfulAddition) {
       ramCache.remove(cacheKey);
-      failedBlockAdditions.incrementAndGet();
+      cacheStats.failInsert();
     } else {
       this.blockNumber.incrementAndGet();
       this.heapSize.addAndGet(cachedItem.heapSize());
@@ -412,9 +409,9 @@ public class BucketCache implements BlockCache, HeapSize {
     BucketEntry bucketEntry = backingMap.get(key);
     if (bucketEntry != null) {
       long start = System.nanoTime();
-      IdLock.Entry lockEntry = null;
+      ReentrantReadWriteLock lock = offsetLock.getLock(bucketEntry.offset());
       try {
-        lockEntry = offsetLock.getLockEntry(bucketEntry.offset());
+        lock.readLock().lock();
         // We can not read here even if backingMap does contain the given key because its offset
         // maybe changed. If we lock BlockCacheKey instead of offset, then we can only check
         // existence here.
@@ -442,9 +439,7 @@ public class BucketCache implements BlockCache, HeapSize {
         LOG.error("Failed reading block " + key + " from bucket cache", ioex);
         checkIOErrorIsTolerated();
       } finally {
-        if (lockEntry != null) {
-          offsetLock.releaseLockEntry(lockEntry);
-        }
+        lock.readLock().unlock();
       }
     }
     if (!repeat && updateCacheMetrics) {
@@ -484,21 +479,16 @@ public class BucketCache implements BlockCache, HeapSize {
         return false;
       }
     }
-    IdLock.Entry lockEntry = null;
+    ReentrantReadWriteLock lock = offsetLock.getLock(bucketEntry.offset());
     try {
-      lockEntry = offsetLock.getLockEntry(bucketEntry.offset());
+      lock.writeLock().lock();
       if (backingMap.remove(cacheKey, bucketEntry)) {
         blockEvicted(cacheKey, bucketEntry, removedBlock == null);
       } else {
         return false;
       }
-    } catch (IOException ie) {
-      LOG.warn("Failed evicting block " + cacheKey);
-      return false;
     } finally {
-      if (lockEntry != null) {
-        offsetLock.releaseLockEntry(lockEntry);
-      }
+      lock.writeLock().unlock();
     }
     cacheStats.evicted(bucketEntry.getCachedTime(), cacheKey.isPrimary());
     return true;
@@ -527,9 +517,9 @@ public class BucketCache implements BlockCache, HeapSize {
         return false;
       }
     }
-    IdLock.Entry lockEntry = null;
+    ReentrantReadWriteLock lock = offsetLock.getLock(bucketEntry.offset());
     try {
-      lockEntry = offsetLock.getLockEntry(bucketEntry.offset());
+      lock.writeLock().lock();
       int refCount = bucketEntry.refCount.get();
       if(refCount == 0) {
         if (backingMap.remove(cacheKey, bucketEntry)) {
@@ -553,13 +543,8 @@ public class BucketCache implements BlockCache, HeapSize {
           bucketEntry.markedForEvict = true;
         }
       }
-    } catch (IOException ie) {
-      LOG.warn("Failed evicting block " + cacheKey);
-      return false;
     } finally {
-      if (lockEntry != null) {
-        offsetLock.releaseLockEntry(lockEntry);
-      }
+      lock.writeLock().unlock();
     }
     cacheStats.evicted(bucketEntry.getCachedTime(), cacheKey.isPrimary());
     return true;
@@ -588,7 +573,7 @@ public class BucketCache implements BlockCache, HeapSize {
     long usedSize = bucketAllocator.getUsedSize();
     long freeSize = totalSize - usedSize;
     long cacheSize = getRealCacheSize();
-    LOG.info("failedBlockAdditions=" + getFailedBlockAdditions() + ", " +
+    LOG.info("failedBlockAdditions=" + cacheStats.getFailedInserts() + ", " +
         "totalSize=" + StringUtils.byteDesc(totalSize) + ", " +
         "freeSize=" + StringUtils.byteDesc(freeSize) + ", " +
         "usedSize=" + StringUtils.byteDesc(usedSize) +", " +
@@ -607,10 +592,6 @@ public class BucketCache implements BlockCache, HeapSize {
         "evicted=" + cacheStats.getEvictedCount() + ", " +
         "evictedPerRun=" + cacheStats.evictedPerEviction());
     cacheStats.reset();
-  }
-
-  public long getFailedBlockAdditions() {
-    return this.failedBlockAdditions.get();
   }
 
   public long getRealCacheSize() {
@@ -825,7 +806,7 @@ public class BucketCache implements BlockCache, HeapSize {
      * Process all that are passed in even if failure being sure to remove from ramCache else we'll
      * never undo the references and we'll OOME.
      * @param entries Presumes list passed in here will be processed by this invocation only. No
-     * interference expected.
+     *   interference expected.
      * @throws InterruptedException
      */
     @VisibleForTesting
@@ -909,18 +890,14 @@ public class BucketCache implements BlockCache, HeapSize {
           heapSize.addAndGet(-1 * entries.get(i).getData().heapSize());
         } else if (bucketEntries[i] != null){
           // Block should have already been evicted. Remove it and free space.
-          IdLock.Entry lockEntry = null;
+          ReentrantReadWriteLock lock = offsetLock.getLock(bucketEntries[i].offset());
           try {
-            lockEntry = offsetLock.getLockEntry(bucketEntries[i].offset());
+            lock.writeLock().lock();
             if (backingMap.remove(key, bucketEntries[i])) {
               blockEvicted(key, bucketEntries[i], false);
             }
-          } catch (IOException e) {
-            LOG.warn("failed to free space for " + key, e);
           } finally {
-            if (lockEntry != null) {
-              offsetLock.releaseLockEntry(lockEntry);
-            }
+            lock.writeLock().unlock();
           }
         }
       }
@@ -934,23 +911,23 @@ public class BucketCache implements BlockCache, HeapSize {
   }
 
   /**
-   * Blocks until elements available in <code>q</code> then tries to grab as many as possible
+   * Blocks until elements available in {@code q} then tries to grab as many as possible
    * before returning.
-   * @param recepticle Where to stash the elements taken from queue. We clear before we use it
-   * just in case.
+   * @param receptacle Where to stash the elements taken from queue. We clear before we use it
+   *     just in case.
    * @param q The queue to take from.
-   * @return <code>receptical laden with elements taken from the queue or empty if none found.
+   * @return {@code receptacle} laden with elements taken from the queue or empty if none found.
    */
   @VisibleForTesting
   static List<RAMQueueEntry> getRAMQueueEntries(final BlockingQueue<RAMQueueEntry> q,
-      final List<RAMQueueEntry> receptical)
+      final List<RAMQueueEntry> receptacle)
   throws InterruptedException {
     // Clear sets all entries to null and sets size to 0. We retain allocations. Presume it
     // ok even if list grew to accommodate thousands.
-    receptical.clear();
-    receptical.add(q.take());
-    q.drainTo(receptical);
-    return receptical;
+    receptacle.clear();
+    receptacle.add(q.take());
+    q.drainTo(receptacle);
+    return receptacle;
   }
 
   private void persistToFile() throws IOException {

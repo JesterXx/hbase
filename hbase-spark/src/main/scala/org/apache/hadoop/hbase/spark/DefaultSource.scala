@@ -20,10 +20,13 @@ package org.apache.hadoop.hbase.spark
 import java.util
 import java.util.concurrent.ConcurrentLinkedQueue
 
-import org.apache.hadoop.hbase.client.{ConnectionFactory, Get, Result, Scan}
+import org.apache.hadoop.hbase.client._
+import org.apache.hadoop.hbase.spark.datasources.HBaseSparkConf
+import org.apache.hadoop.hbase.spark.datasources.HBaseTableScanRDD
+import org.apache.hadoop.hbase.spark.datasources.SerializableConfiguration
 import org.apache.hadoop.hbase.types._
-import org.apache.hadoop.hbase.util.{SimplePositionedMutableByteRange, PositionedByteRange, Bytes}
-import org.apache.hadoop.hbase.{TableName, HBaseConfiguration}
+import org.apache.hadoop.hbase.util.{Bytes, PositionedByteRange, SimplePositionedMutableByteRange}
+import org.apache.hadoop.hbase.{HBaseConfiguration, TableName}
 import org.apache.spark.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.DataType
@@ -44,14 +47,13 @@ import scala.collection.mutable
  * - Type conversions of basic SQL types.  All conversions will be
  *   Through the HBase Bytes object commands.
  */
-class DefaultSource extends RelationProvider {
+class DefaultSource extends RelationProvider with Logging {
 
   val TABLE_KEY:String = "hbase.table"
   val SCHEMA_COLUMNS_MAPPING_KEY:String = "hbase.columns.mapping"
-  val BATCHING_NUM_KEY:String = "hbase.batching.num"
-  val CACHING_NUM_KEY:String = "hbase.caching.num"
   val HBASE_CONFIG_RESOURCES_LOCATIONS:String = "hbase.config.resources"
   val USE_HBASE_CONTEXT:String = "hbase.use.hbase.context"
+  val PUSH_DOWN_COLUMN_FILTER:String = "hbase.push.down.column.filter"
 
   /**
    * Is given input from SparkSQL to construct a BaseRelation
@@ -69,33 +71,16 @@ class DefaultSource extends RelationProvider {
       new IllegalArgumentException("Invalid value for " + TABLE_KEY +" '" + tableName + "'")
 
     val schemaMappingString = parameters.getOrElse(SCHEMA_COLUMNS_MAPPING_KEY, "")
-    val batchingNumStr = parameters.getOrElse(BATCHING_NUM_KEY, "1000")
-    val cachingNumStr = parameters.getOrElse(CACHING_NUM_KEY, "1000")
     val hbaseConfigResources = parameters.getOrElse(HBASE_CONFIG_RESOURCES_LOCATIONS, "")
     val useHBaseReources = parameters.getOrElse(USE_HBASE_CONTEXT, "true")
-
-    val batchingNum:Int = try {
-      batchingNumStr.toInt
-    } catch {
-      case e:NumberFormatException => throw
-        new IllegalArgumentException("Invalid value for " + BATCHING_NUM_KEY +" '"
-            + batchingNumStr + "'", e)
-    }
-
-    val cachingNum:Int = try {
-      cachingNumStr.toInt
-    } catch {
-      case e:NumberFormatException => throw
-        new IllegalArgumentException("Invalid value for " + CACHING_NUM_KEY +" '"
-            + cachingNumStr + "'", e)
-    }
+    val usePushDownColumnFilter = parameters.getOrElse(PUSH_DOWN_COLUMN_FILTER, "true")
 
     new HBaseRelation(tableName.get,
       generateSchemaMappingMap(schemaMappingString),
-      batchingNum.toInt,
-      cachingNum.toInt,
       hbaseConfigResources,
-      useHBaseReources.equalsIgnoreCase("true"))(sqlContext)
+      useHBaseReources.equalsIgnoreCase("true"),
+      usePushDownColumnFilter.equalsIgnoreCase("true"),
+      parameters)(sqlContext)
   }
 
   /**
@@ -144,10 +129,6 @@ class DefaultSource extends RelationProvider {
  * @param tableName               HBase table that we plan to read from
  * @param schemaMappingDefinition SchemaMapping information to map HBase
  *                                Qualifiers to SparkSQL columns
- * @param batchingNum             The batching number to be applied to the
- *                                scan object
- * @param cachingNum              The caching number to be applied to the
- *                                scan object
  * @param configResources         Optional comma separated list of config resources
  *                                to get based on their URI
  * @param useHBaseContext         If true this will look to see if
@@ -155,15 +136,32 @@ class DefaultSource extends RelationProvider {
  *                                connection information
  * @param sqlContext              SparkSQL context
  */
-class HBaseRelation (val tableName:String,
+case class HBaseRelation (val tableName:String,
                      val schemaMappingDefinition:
                      java.util.HashMap[String, SchemaQualifierDefinition],
-                     val batchingNum:Int,
-                     val cachingNum:Int,
                      val configResources:String,
-                     val useHBaseContext:Boolean) (
+                     val useHBaseContext:Boolean,
+                     val usePushDownColumnFilter:Boolean,
+                     @transient parameters: Map[String, String] ) (
   @transient val sqlContext:SQLContext)
   extends BaseRelation with PrunedFilteredScan with Logging {
+
+  // The user supplied per table parameter will overwrite global ones in SparkConf
+  val blockCacheEnable = parameters.get(HBaseSparkConf.BLOCK_CACHE_ENABLE).map(_.toBoolean)
+    .getOrElse(
+      sqlContext.sparkContext.getConf.getBoolean(
+        HBaseSparkConf.BLOCK_CACHE_ENABLE, HBaseSparkConf.defaultBlockCacheEnable))
+  val cacheSize = parameters.get(HBaseSparkConf.CACHE_SIZE).map(_.toInt)
+    .getOrElse(
+      sqlContext.sparkContext.getConf.getInt(
+      HBaseSparkConf.CACHE_SIZE, HBaseSparkConf.defaultCachingSize))
+  val batchNum = parameters.get(HBaseSparkConf.BATCH_NUM).map(_.toInt)
+    .getOrElse(sqlContext.sparkContext.getConf.getInt(
+    HBaseSparkConf.BATCH_NUM,  HBaseSparkConf.defaultBatchNum))
+
+  val bulkGetSize =  parameters.get(HBaseSparkConf.BULKGET_SIZE).map(_.toInt)
+    .getOrElse(sqlContext.sparkContext.getConf.getInt(
+    HBaseSparkConf.BULKGET_SIZE,  HBaseSparkConf.defaultBulkGetSize))
 
   //create or get latest HBaseContext
   @transient val hbaseContext:HBaseContext = if (useHBaseContext) {
@@ -173,6 +171,9 @@ class HBaseRelation (val tableName:String,
     configResources.split(",").foreach( r => config.addResource(r))
     new HBaseContext(sqlContext.sparkContext, config)
   }
+
+  val wrappedConf = new SerializableConfiguration(hbaseContext.config)
+  def hbaseConf = wrappedConf.value
 
   /**
    * Generates a Spark SQL schema object so Spark SQL knows what is being
@@ -217,151 +218,79 @@ class HBaseRelation (val tableName:String,
    */
   override def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
 
-    val columnFilterCollection = buildColumnFilterCollection(filters)
 
-    val requiredQualifierDefinitionArray = new mutable.MutableList[SchemaQualifierDefinition]
+    val pushDownTuple = buildPushDownPredicatesResource(filters)
+    val pushDownRowKeyFilter = pushDownTuple._1
+    var pushDownDynamicLogicExpression = pushDownTuple._2
+    val valueArray = pushDownTuple._3
+
+    if (!usePushDownColumnFilter) {
+      pushDownDynamicLogicExpression = null
+    }
+
+    logDebug("pushDownRowKeyFilter:           " + pushDownRowKeyFilter.ranges)
+    if (pushDownDynamicLogicExpression != null) {
+      logDebug("pushDownDynamicLogicExpression: " +
+        pushDownDynamicLogicExpression.toExpressionString)
+    }
+    logDebug("valueArray:                     " + valueArray.length)
+
+    val requiredQualifierDefinitionList =
+      new mutable.MutableList[SchemaQualifierDefinition]
+
     requiredColumns.foreach( c => {
       val definition = schemaMappingDefinition.get(c)
-      if (definition.columnFamilyBytes.length > 0) {
-        requiredQualifierDefinitionArray += definition
-      }
+      requiredQualifierDefinitionList += definition
     })
 
     //Create a local variable so that scala doesn't have to
     // serialize the whole HBaseRelation Object
     val serializableDefinitionMap = schemaMappingDefinition
 
-
     //retain the information for unit testing checks
-    DefaultSourceStaticUtils.populateLatestExecutionRules(columnFilterCollection,
-      requiredQualifierDefinitionArray)
-    var resultRDD: RDD[Row] = null
+    DefaultSourceStaticUtils.populateLatestExecutionRules(pushDownRowKeyFilter,
+      pushDownDynamicLogicExpression)
 
-    if (columnFilterCollection != null) {
-      val pushDownFilterJava =
-        new SparkSQLPushDownFilter(
-          columnFilterCollection.generateFamilyQualifiterFilterMap(schemaMappingDefinition))
+    val getList = new util.ArrayList[Get]()
+    val rddList = new util.ArrayList[RDD[Row]]()
 
-      val getList = new util.ArrayList[Get]()
-      val rddList = new util.ArrayList[RDD[Row]]()
+    //add points to getList
+    pushDownRowKeyFilter.points.foreach(p => {
+      val get = new Get(p)
+      requiredQualifierDefinitionList.foreach( d => {
+        if (d.columnFamilyBytes.length > 0)
+          get.addColumn(d.columnFamilyBytes, d.qualifierBytes)
+      })
+      getList.add(get)
+    })
 
-      val it = columnFilterCollection.columnFilterMap.iterator
-      while (it.hasNext) {
-        val e = it.next()
-        val columnDefinition = schemaMappingDefinition.get(e._1)
-        //check is a rowKey
-        if (columnDefinition != null && columnDefinition.columnFamily.isEmpty) {
-          //add points to getList
-          e._2.points.foreach(p => {
-            val get = new Get(p)
-            requiredQualifierDefinitionArray.foreach( d =>
-              get.addColumn(d.columnFamilyBytes, d.qualifierBytes))
-            getList.add(get)
-          })
-
-          val rangeIt = e._2.ranges.iterator
-
-          while (rangeIt.hasNext) {
-            val r = rangeIt.next()
-
-            val scan = new Scan()
-            scan.setBatch(batchingNum)
-            scan.setCaching(cachingNum)
-            requiredQualifierDefinitionArray.foreach( d =>
-              scan.addColumn(d.columnFamilyBytes, d.qualifierBytes))
-
-            if (pushDownFilterJava.columnFamilyQualifierFilterMap.size() > 0) {
-              scan.setFilter(pushDownFilterJava)
-            }
-
-            //Check if there is a lower bound
-            if (r.lowerBound != null && r.lowerBound.length > 0) {
-
-              if (r.isLowerBoundEqualTo) {
-                //HBase startRow is inclusive: Therefore it acts like  isLowerBoundEqualTo
-                // by default
-                scan.setStartRow(r.lowerBound)
-              } else {
-                //Since we don't equalTo we want the next value we need
-                // to add another byte to the start key.  That new byte will be
-                // the min byte value.
-                val newArray = new Array[Byte](r.lowerBound.length + 1)
-                System.arraycopy(r.lowerBound, 0, newArray, 0, r.lowerBound.length)
-
-                //new Min Byte
-                newArray(r.lowerBound.length) = Byte.MinValue
-                scan.setStartRow(newArray)
-              }
-            }
-
-            //Check if there is a upperBound
-            if (r.upperBound != null && r.upperBound.length > 0) {
-              if (r.isUpperBoundEqualTo) {
-                //HBase stopRow is exclusive: therefore it DOESN'T ast like isUpperBoundEqualTo
-                // by default.  So we need to add a new max byte to the stopRow key
-                val newArray = new Array[Byte](r.upperBound.length + 1)
-                System.arraycopy(r.upperBound, 0, newArray, 0, r.upperBound.length)
-
-                //New Max Bytes
-                newArray(r.upperBound.length) = Byte.MaxValue
-
-                scan.setStopRow(newArray)
-              } else {
-                //Here equalTo is false for Upper bound which is exclusive and
-                // HBase stopRow acts like that by default so no need to mutate the
-                // rowKey
-                scan.setStopRow(r.upperBound)
-              }
-            }
-
-            val rdd = hbaseContext.hbaseRDD(TableName.valueOf(tableName), scan).map(r => {
-              Row.fromSeq(requiredColumns.map(c =>
-                DefaultSourceStaticUtils.getValue(c, serializableDefinitionMap, r._2)))
-            })
-            rddList.add(rdd)
-          }
-        }
+    val pushDownFilterJava = if (usePushDownColumnFilter && pushDownDynamicLogicExpression != null) {
+        Some(new SparkSQLPushDownFilter(pushDownDynamicLogicExpression,
+          valueArray, requiredQualifierDefinitionList))
+    } else {
+      None
+    }
+    val hRdd = new HBaseTableScanRDD(this, pushDownFilterJava, requiredQualifierDefinitionList.seq)
+    pushDownRowKeyFilter.points.foreach(hRdd.addPoint(_))
+    pushDownRowKeyFilter.ranges.foreach(hRdd.addRange(_))
+    var resultRDD: RDD[Row] = {
+      val tmp = hRdd.map{ r =>
+        Row.fromSeq(requiredColumns.map(c =>
+          DefaultSourceStaticUtils.getValue(c, serializableDefinitionMap, r)))
       }
-
-      //If there is more then one RDD then we have to union them together
-      for (i <- 0 until rddList.size()) {
-        if (resultRDD == null) resultRDD = rddList.get(i)
-        else resultRDD = resultRDD.union(rddList.get(i))
-
-      }
-
-      //If there are gets then we can get them from the driver and union that rdd in
-      // with the rest of the values.
-      if (getList.size() > 0) {
-        val connection = ConnectionFactory.createConnection(hbaseContext.tmpHdfsConfiguration)
-        try {
-          val table = connection.getTable(TableName.valueOf(tableName))
-          try {
-            val results = table.get(getList)
-            val rowList = mutable.MutableList[Row]()
-            for (i <- 0 until results.length) {
-              val rowArray = requiredColumns.map(c =>
-                DefaultSourceStaticUtils.getValue(c, schemaMappingDefinition, results(i)))
-              rowList += Row.fromSeq(rowArray)
-            }
-            val getRDD = sqlContext.sparkContext.parallelize(rowList)
-            if (resultRDD == null) resultRDD = getRDD
-            else {
-              resultRDD = resultRDD.union(getRDD)
-            }
-          } finally {
-            table.close()
-          }
-        } finally {
-          connection.close()
-        }
+      if (tmp.partitions.size > 0) {
+        tmp
+      } else {
+        null
       }
     }
+
     if (resultRDD == null) {
       val scan = new Scan()
-      scan.setBatch(batchingNum)
-      scan.setCaching(cachingNum)
-      requiredQualifierDefinitionArray.foreach( d =>
+      scan.setCacheBlocks(blockCacheEnable)
+      scan.setBatch(batchNum)
+      scan.setCaching(cacheSize)
+      requiredQualifierDefinitionList.foreach( d =>
         scan.addColumn(d.columnFamilyBytes, d.qualifierBytes))
 
       val rdd = hbaseContext.hbaseRDD(TableName.valueOf(tableName), scan).map(r => {
@@ -373,79 +302,135 @@ class HBaseRelation (val tableName:String,
     resultRDD
   }
 
-  /**
-   * Root recursive function that will loop over the filters provided by
-   * SparkSQL.  Some filters are AND or OR functions and contain additional filters
-   * hence the need for recursion.
-   *
-   * @param filters Filters provided by SparkSQL.
-   *                Filters are joined with the AND operater
-   * @return        A ColumnFilterCollection whish is a consolidated construct to
-   *                hold the high level filter information
-   */
-  def buildColumnFilterCollection(filters: Array[Filter]): ColumnFilterCollection = {
-    var superCollection: ColumnFilterCollection = null
+  def buildPushDownPredicatesResource(filters: Array[Filter]):
+  (RowKeyFilter, DynamicLogicExpression, Array[Array[Byte]]) = {
+    var superRowKeyFilter:RowKeyFilter = null
+    val queryValueList = new mutable.MutableList[Array[Byte]]
+    var superDynamicLogicExpression: DynamicLogicExpression = null
 
     filters.foreach( f => {
-      val parentCollection = new ColumnFilterCollection
-      buildColumnFilterCollection(parentCollection, f)
-      if (superCollection == null)
-        superCollection = parentCollection
-      else
-        superCollection.mergeIntersect(parentCollection)
+      val rowKeyFilter = new RowKeyFilter()
+      val logicExpression = transverseFilterTree(rowKeyFilter, queryValueList, f)
+      if (superDynamicLogicExpression == null) {
+        superDynamicLogicExpression = logicExpression
+        superRowKeyFilter = rowKeyFilter
+      } else {
+        superDynamicLogicExpression =
+          new AndLogicExpression(superDynamicLogicExpression, logicExpression)
+        superRowKeyFilter.mergeIntersect(rowKeyFilter)
+      }
+
     })
-    superCollection
+
+    val queryValueArray = queryValueList.toArray
+
+    if (superRowKeyFilter == null) {
+      superRowKeyFilter = new RowKeyFilter
+    }
+
+    (superRowKeyFilter, superDynamicLogicExpression, queryValueArray)
   }
 
-  /**
-   * Recursive function that will work to convert Spark Filter
-   * objects to ColumnFilterCollection
-   *
-   * @param parentFilterCollection Parent ColumnFilterCollection
-   * @param filter                 Current given filter from SparkSQL
-   */
-  def buildColumnFilterCollection(parentFilterCollection:ColumnFilterCollection,
-                                  filter:Filter): Unit = {
+  def transverseFilterTree(parentRowKeyFilter:RowKeyFilter,
+                                  valueArray:mutable.MutableList[Array[Byte]],
+                                  filter:Filter): DynamicLogicExpression = {
     filter match {
 
       case EqualTo(attr, value) =>
-        parentFilterCollection.mergeUnion(attr,
-          new ColumnFilter(DefaultSourceStaticUtils.getByteValue(attr,
-            schemaMappingDefinition, value.toString)))
-
+        val columnDefinition = schemaMappingDefinition.get(attr)
+        if (columnDefinition != null) {
+          if (columnDefinition.columnFamily.isEmpty) {
+            parentRowKeyFilter.mergeIntersect(new RowKeyFilter(
+              DefaultSourceStaticUtils.getByteValue(attr,
+                schemaMappingDefinition, value.toString), null))
+          }
+          val byteValue =
+            DefaultSourceStaticUtils.getByteValue(attr,
+              schemaMappingDefinition, value.toString)
+          valueArray += byteValue
+        }
+        new EqualLogicExpression(attr, valueArray.length - 1, false)
       case LessThan(attr, value) =>
-        parentFilterCollection.mergeUnion(attr, new ColumnFilter(null,
-          new ScanRange(DefaultSourceStaticUtils.getByteValue(attr,
-            schemaMappingDefinition, value.toString), false,
-            new Array[Byte](0), true)))
-
+        val columnDefinition = schemaMappingDefinition.get(attr)
+        if (columnDefinition != null) {
+          if (columnDefinition.columnFamily.isEmpty) {
+            parentRowKeyFilter.mergeIntersect(new RowKeyFilter(null,
+              new ScanRange(DefaultSourceStaticUtils.getByteValue(attr,
+                schemaMappingDefinition, value.toString), false,
+                new Array[Byte](0), true)))
+          }
+          val byteValue =
+            DefaultSourceStaticUtils.getByteValue(attr,
+              schemaMappingDefinition, value.toString)
+          valueArray += byteValue
+        }
+        new LessThanLogicExpression(attr, valueArray.length - 1)
       case GreaterThan(attr, value) =>
-        parentFilterCollection.mergeUnion(attr, new ColumnFilter(null,
-        new ScanRange(null, true, DefaultSourceStaticUtils.getByteValue(attr,
-          schemaMappingDefinition, value.toString), false)))
-
+        val columnDefinition = schemaMappingDefinition.get(attr)
+        if (columnDefinition != null) {
+          if (columnDefinition.columnFamily.isEmpty) {
+            parentRowKeyFilter.mergeIntersect(new RowKeyFilter(null,
+              new ScanRange(null, true, DefaultSourceStaticUtils.getByteValue(attr,
+                schemaMappingDefinition, value.toString), false)))
+          }
+          val byteValue =
+            DefaultSourceStaticUtils.getByteValue(attr,
+              schemaMappingDefinition, value.toString)
+          valueArray += byteValue
+        }
+        new GreaterThanLogicExpression(attr, valueArray.length - 1)
       case LessThanOrEqual(attr, value) =>
-        parentFilterCollection.mergeUnion(attr, new ColumnFilter(null,
-        new ScanRange(DefaultSourceStaticUtils.getByteValue(attr,
-          schemaMappingDefinition, value.toString), true,
-          new Array[Byte](0), true)))
-
+        val columnDefinition = schemaMappingDefinition.get(attr)
+        if (columnDefinition != null) {
+          if (columnDefinition.columnFamily.isEmpty) {
+            parentRowKeyFilter.mergeIntersect(new RowKeyFilter(null,
+              new ScanRange(DefaultSourceStaticUtils.getByteValue(attr,
+                schemaMappingDefinition, value.toString), true,
+                new Array[Byte](0), true)))
+          }
+          val byteValue =
+            DefaultSourceStaticUtils.getByteValue(attr,
+              schemaMappingDefinition, value.toString)
+          valueArray += byteValue
+        }
+        new LessThanOrEqualLogicExpression(attr, valueArray.length - 1)
       case GreaterThanOrEqual(attr, value) =>
-        parentFilterCollection.mergeUnion(attr, new ColumnFilter(null,
-        new ScanRange(null, true, DefaultSourceStaticUtils.getByteValue(attr,
-          schemaMappingDefinition, value.toString), true)))
+        val columnDefinition = schemaMappingDefinition.get(attr)
+        if (columnDefinition != null) {
+          if (columnDefinition.columnFamily.isEmpty) {
+            parentRowKeyFilter.mergeIntersect(new RowKeyFilter(null,
+              new ScanRange(null, true, DefaultSourceStaticUtils.getByteValue(attr,
+                schemaMappingDefinition, value.toString), true)))
+          }
+          val byteValue =
+            DefaultSourceStaticUtils.getByteValue(attr,
+              schemaMappingDefinition, value.toString)
+          valueArray += byteValue
 
+        }
+        new GreaterThanOrEqualLogicExpression(attr, valueArray.length - 1)
       case Or(left, right) =>
-        buildColumnFilterCollection(parentFilterCollection, left)
-        val rightSideCollection = new ColumnFilterCollection
-        buildColumnFilterCollection(rightSideCollection, right)
-        parentFilterCollection.mergeUnion(rightSideCollection)
+        val leftExpression = transverseFilterTree(parentRowKeyFilter, valueArray, left)
+        val rightSideRowKeyFilter = new RowKeyFilter
+        val rightExpression = transverseFilterTree(rightSideRowKeyFilter, valueArray, right)
+
+        parentRowKeyFilter.mergeUnion(rightSideRowKeyFilter)
+
+        new OrLogicExpression(leftExpression, rightExpression)
       case And(left, right) =>
-        buildColumnFilterCollection(parentFilterCollection, left)
-        val rightSideCollection = new ColumnFilterCollection
-        buildColumnFilterCollection(rightSideCollection, right)
-        parentFilterCollection.mergeIntersect(rightSideCollection)
-      case _ => //nothing
+
+        val leftExpression = transverseFilterTree(parentRowKeyFilter, valueArray, left)
+        val rightSideRowKeyFilter = new RowKeyFilter
+        val rightExpression = transverseFilterTree(rightSideRowKeyFilter, valueArray, right)
+        parentRowKeyFilter.mergeIntersect(rightSideRowKeyFilter)
+
+        new AndLogicExpression(leftExpression, rightExpression)
+      case IsNull(attr) =>
+        new IsNullLogicExpression(attr, false)
+      case IsNotNull(attr) =>
+        new IsNullLogicExpression(attr, true)
+      case _ =>
+        new PassThroughLogicExpression
     }
   }
 }
@@ -472,7 +457,7 @@ case class SchemaQualifierDefinition(columnName:String,
     else if (colType.equals("DOUBLE")) DoubleType
     else if (colType.equals("STRING")) StringType
     else if (colType.equals("TIMESTAMP")) TimestampType
-    else if (colType.equals("DECIMAL")) StringType //DataTypes.createDecimalType(precision, scale)
+    else if (colType.equals("DECIMAL")) StringType
     else throw new IllegalArgumentException("Unsupported column type :" + colType)
 }
 
@@ -524,11 +509,11 @@ class ScanRange(var upperBound:Array[Byte], var isUpperBoundEqualTo:Boolean,
 
     isLowerBoundEqualTo = if (lowerBoundCompare == 0)
       isLowerBoundEqualTo || other.isLowerBoundEqualTo
-    else isLowerBoundEqualTo
+    else if (lowerBoundCompare < 0) isLowerBoundEqualTo else other.isLowerBoundEqualTo
 
     isUpperBoundEqualTo = if (upperBoundCompare == 0)
       isUpperBoundEqualTo || other.isUpperBoundEqualTo
-    else isUpperBoundEqualTo
+    else if (upperBoundCompare < 0) other.isUpperBoundEqualTo else isUpperBoundEqualTo
   }
 
   /**
@@ -551,14 +536,15 @@ class ScanRange(var upperBound:Array[Byte], var isUpperBoundEqualTo:Boolean,
    * @param other Other scan object
    * @return      True is overlap false is not overlap
    */
-  def doesOverLap(other:ScanRange): Boolean = {
+  def getOverLapScanRange(other:ScanRange): ScanRange = {
 
     var leftRange:ScanRange = null
     var rightRange:ScanRange = null
 
     //First identify the Left range
     // Also lower bound can't be null
-    if (Bytes.compareTo(lowerBound, other.lowerBound) <=0) {
+    if (compareRange(lowerBound, other.lowerBound) < 0 ||
+      compareRange(upperBound, other.upperBound) < 0) {
       leftRange = this
       rightRange = other
     } else {
@@ -568,8 +554,12 @@ class ScanRange(var upperBound:Array[Byte], var isUpperBoundEqualTo:Boolean,
 
     //Then see if leftRange goes to null or if leftRange.upperBound
     // upper is greater or equals to rightRange.lowerBound
-    leftRange.upperBound == null ||
-      Bytes.compareTo(leftRange.upperBound, rightRange.lowerBound) >= 0
+    if (leftRange.upperBound == null ||
+      Bytes.compareTo(leftRange.upperBound, rightRange.lowerBound) >= 0) {
+      new ScanRange(leftRange.upperBound, leftRange.isUpperBoundEqualTo, rightRange.lowerBound, rightRange.isLowerBoundEqualTo)
+    } else {
+      null
+    }
   }
 
   /**
@@ -586,9 +576,25 @@ class ScanRange(var upperBound:Array[Byte], var isUpperBoundEqualTo:Boolean,
     else if (left != null && right == null) -1
     else Bytes.compareTo(left, right)
   }
+
+  /**
+   *
+   * @return
+   */
+  def containsPoint(point:Array[Byte]): Boolean = {
+    val lowerCompare = compareRange(point, lowerBound)
+    val upperCompare = compareRange(point, upperBound)
+
+    ((isLowerBoundEqualTo && lowerCompare >= 0) ||
+      (!isLowerBoundEqualTo && lowerCompare > 0)) &&
+      ((isUpperBoundEqualTo && upperCompare <= 0) ||
+        (!isUpperBoundEqualTo && upperCompare < 0))
+
+  }
   override def toString:String = {
-    "ScanRange:(" + Bytes.toString(upperBound) + "," + isUpperBoundEqualTo + "," +
-      Bytes.toString(lowerBound) + "," + isLowerBoundEqualTo + ")"
+    "ScanRange:(upperBound:" + Bytes.toString(upperBound) +
+      ",isUpperBoundEqualTo:" + isUpperBoundEqualTo + ",lowerBound:" +
+      Bytes.toString(lowerBound) + ",isLowerBoundEqualTo:" + isLowerBoundEqualTo + ")"
   }
 }
 
@@ -663,7 +669,7 @@ class ColumnFilter (currentPoint:Array[Byte] = null,
     other.ranges.foreach( otherR => {
       var doesOverLap = false
       ranges.foreach{ r =>
-        if (r.doesOverLap(otherR)) {
+        if (r.getOverLapScanRange(otherR) != null) {
           r.mergeUnion(otherR)
           doesOverLap = true
         }}
@@ -692,7 +698,7 @@ class ColumnFilter (currentPoint:Array[Byte] = null,
 
     other.ranges.foreach( otherR => {
       ranges.foreach( r => {
-        if (r.doesOverLap(otherR)) {
+        if (r.getOverLapScanRange(otherR) != null) {
           r.mergeIntersect(otherR)
           survivingRanges += r
         }
@@ -842,7 +848,8 @@ object DefaultSourceStaticUtils {
     getFreshByteRange(bytes, 0, bytes.length)
   }
 
-  def getFreshByteRange(bytes:Array[Byte],  offset:Int = 0, length:Int): PositionedByteRange = {
+  def getFreshByteRange(bytes:Array[Byte],  offset:Int = 0, length:Int):
+  PositionedByteRange = {
     byteRange.get().set(bytes).setLength(length).setOffset(offset)
   }
 
@@ -856,14 +863,13 @@ object DefaultSourceStaticUtils {
    * This method is to populate the lastFiveExecutionRules for unit test perposes
    * This method is not thread safe.
    *
-   * @param columnFilterCollection           The filters in the last job
-   * @param requiredQualifierDefinitionArray The required columns in the last job
+   * @param rowKeyFilter           The rowKey Filter logic used in the last query
+   * @param dynamicLogicExpression The dynamicLogicExpression used in the last query
    */
-  def populateLatestExecutionRules(columnFilterCollection: ColumnFilterCollection,
-                                   requiredQualifierDefinitionArray:
-                                   mutable.MutableList[SchemaQualifierDefinition]):Unit = {
+  def populateLatestExecutionRules(rowKeyFilter: RowKeyFilter,
+                                   dynamicLogicExpression: DynamicLogicExpression):Unit = {
     lastFiveExecutionRules.add(new ExecutionRuleForUnitTesting(
-      columnFilterCollection, requiredQualifierDefinitionArray))
+      rowKeyFilter, dynamicLogicExpression))
     while (lastFiveExecutionRules.size() > 5) {
       lastFiveExecutionRules.poll()
     }
@@ -977,6 +983,162 @@ object DefaultSourceStaticUtils {
   }
 }
 
-class ExecutionRuleForUnitTesting(val columnFilterCollection: ColumnFilterCollection,
-                                  val requiredQualifierDefinitionArray:
-                                  mutable.MutableList[SchemaQualifierDefinition])
+/**
+ * Contains information related to a filters for a given column.
+ * This can contain many ranges or points.
+ *
+ * @param currentPoint the initial point when the filter is created
+ * @param currentRange the initial scanRange when the filter is created
+ */
+class RowKeyFilter (currentPoint:Array[Byte] = null,
+                    currentRange:ScanRange =
+                    new ScanRange(null, true, new Array[Byte](0), true),
+                    var points:mutable.MutableList[Array[Byte]] =
+                    new mutable.MutableList[Array[Byte]](),
+                    var ranges:mutable.MutableList[ScanRange] =
+                    new mutable.MutableList[ScanRange]() ) extends Serializable {
+  //Collection of ranges
+  if (currentRange != null ) ranges.+=(currentRange)
+
+  //Collection of points
+  if (currentPoint != null) points.+=(currentPoint)
+
+  /**
+   * This will validate a give value through the filter's points and/or ranges
+   * the result will be if the value passed the filter
+   *
+   * @param value       Value to be validated
+   * @param valueOffSet The offset of the value
+   * @param valueLength The length of the value
+   * @return            True is the value passes the filter false if not
+   */
+  def validate(value:Array[Byte], valueOffSet:Int, valueLength:Int):Boolean = {
+    var result = false
+
+    points.foreach( p => {
+      if (Bytes.equals(p, 0, p.length, value, valueOffSet, valueLength)) {
+        result = true
+      }
+    })
+
+    ranges.foreach( r => {
+      val upperBoundPass = r.upperBound == null ||
+        (r.isUpperBoundEqualTo &&
+          Bytes.compareTo(r.upperBound, 0, r.upperBound.length,
+            value, valueOffSet, valueLength) >= 0) ||
+        (!r.isUpperBoundEqualTo &&
+          Bytes.compareTo(r.upperBound, 0, r.upperBound.length,
+            value, valueOffSet, valueLength) > 0)
+
+      val lowerBoundPass = r.lowerBound == null || r.lowerBound.length == 0
+      (r.isLowerBoundEqualTo &&
+        Bytes.compareTo(r.lowerBound, 0, r.lowerBound.length,
+          value, valueOffSet, valueLength) <= 0) ||
+        (!r.isLowerBoundEqualTo &&
+          Bytes.compareTo(r.lowerBound, 0, r.lowerBound.length,
+            value, valueOffSet, valueLength) < 0)
+
+      result = result || (upperBoundPass && lowerBoundPass)
+    })
+    result
+  }
+
+  /**
+   * This will allow us to merge filter logic that is joined to the existing filter
+   * through a OR operator
+   *
+   * @param other Filter to merge
+   */
+  def mergeUnion(other:RowKeyFilter): Unit = {
+    other.points.foreach( p => points += p)
+
+    other.ranges.foreach( otherR => {
+      var doesOverLap = false
+      ranges.foreach{ r =>
+        if (r.getOverLapScanRange(otherR) != null) {
+          r.mergeUnion(otherR)
+          doesOverLap = true
+        }}
+      if (!doesOverLap) ranges.+=(otherR)
+    })
+  }
+
+  /**
+   * This will allow us to merge filter logic that is joined to the existing filter
+   * through a AND operator
+   *
+   * @param other Filter to merge
+   */
+  def mergeIntersect(other:RowKeyFilter): Unit = {
+    val survivingPoints = new mutable.MutableList[Array[Byte]]()
+    val didntSurviveFirstPassPoints = new mutable.MutableList[Array[Byte]]()
+    if (points == null || points.length == 0) {
+      other.points.foreach( otherP => {
+        didntSurviveFirstPassPoints += otherP
+      })
+    } else {
+      points.foreach(p => {
+        if (other.points.length == 0) {
+          didntSurviveFirstPassPoints += p
+        } else {
+          other.points.foreach(otherP => {
+            if (Bytes.equals(p, otherP)) {
+              survivingPoints += p
+            } else {
+              didntSurviveFirstPassPoints += p
+            }
+          })
+        }
+      })
+    }
+
+    val survivingRanges = new mutable.MutableList[ScanRange]()
+
+    if (ranges.length == 0) {
+      didntSurviveFirstPassPoints.foreach(p => {
+          survivingPoints += p
+      })
+    } else {
+      ranges.foreach(r => {
+        other.ranges.foreach(otherR => {
+          val overLapScanRange = r.getOverLapScanRange(otherR)
+          if (overLapScanRange != null) {
+            survivingRanges += overLapScanRange
+          }
+        })
+        didntSurviveFirstPassPoints.foreach(p => {
+          if (r.containsPoint(p)) {
+            survivingPoints += p
+          }
+        })
+      })
+    }
+    points = survivingPoints
+    ranges = survivingRanges
+  }
+
+  override def toString:String = {
+    val strBuilder = new StringBuilder
+    strBuilder.append("(points:(")
+    var isFirst = true
+    points.foreach( p => {
+      if (isFirst) isFirst = false
+      else strBuilder.append(",")
+      strBuilder.append(Bytes.toString(p))
+    })
+    strBuilder.append("),ranges:")
+    isFirst = true
+    ranges.foreach( r => {
+      if (isFirst) isFirst = false
+      else strBuilder.append(",")
+      strBuilder.append(r)
+    })
+    strBuilder.append("))")
+    strBuilder.toString()
+  }
+}
+
+
+
+class ExecutionRuleForUnitTesting(val rowKeyFilter: RowKeyFilter,
+                                  val dynamicLogicExpression: DynamicLogicExpression)

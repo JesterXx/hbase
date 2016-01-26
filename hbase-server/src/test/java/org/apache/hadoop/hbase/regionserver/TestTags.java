@@ -36,6 +36,8 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.TagUtil;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Durability;
@@ -120,7 +122,7 @@ public class TestTags {
       byte[] value = Bytes.toBytes("value");
       table = TEST_UTIL.getConnection().getTable(tableName);
       Put put = new Put(row);
-      put.add(fam, qual, HConstants.LATEST_TIMESTAMP, value);
+      put.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value);
       put.setAttribute("visibility", Bytes.toBytes("myTag"));
       table.put(put);
       admin.flush(tableName);
@@ -133,7 +135,7 @@ public class TestTags {
 
       Put put1 = new Put(row1);
       byte[] value1 = Bytes.toBytes("1000dfsdf");
-      put1.add(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
+      put1.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
       // put1.setAttribute("visibility", Bytes.toBytes("myTag3"));
       table.put(put1);
       admin.flush(tableName);
@@ -141,7 +143,7 @@ public class TestTags {
 
       Put put2 = new Put(row2);
       byte[] value2 = Bytes.toBytes("1000dfsdf");
-      put2.add(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
+      put2.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
       put2.setAttribute("visibility", Bytes.toBytes("myTag3"));
       table.put(put2);
       admin.flush(tableName);
@@ -187,7 +189,7 @@ public class TestTags {
       table = TEST_UTIL.getConnection().getTable(tableName);
       Put put = new Put(row);
       byte[] value = Bytes.toBytes("value");
-      put.add(fam, qual, HConstants.LATEST_TIMESTAMP, value);
+      put.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value);
       table.put(put);
       admin.flush(tableName);
       // We are lacking an API for confirming flush request compaction.
@@ -199,14 +201,14 @@ public class TestTags {
 
       Put put1 = new Put(row1);
       byte[] value1 = Bytes.toBytes("1000dfsdf");
-      put1.add(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
+      put1.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
       table.put(put1);
       admin.flush(tableName);
       Thread.sleep(1000);
 
       Put put2 = new Put(row2);
       byte[] value2 = Bytes.toBytes("1000dfsdf");
-      put2.add(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
+      put2.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
       table.put(put2);
       admin.flush(tableName);
       Thread.sleep(1000);
@@ -277,13 +279,13 @@ public class TestTags {
         table = TEST_UTIL.getConnection().getTable(tableName);
         Put put = new Put(row);
         byte[] value = Bytes.toBytes("value");
-        put.add(fam, qual, HConstants.LATEST_TIMESTAMP, value);
+        put.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value);
         int bigTagLen = Short.MAX_VALUE - 5;
         put.setAttribute("visibility", new byte[bigTagLen]);
         table.put(put);
         Put put1 = new Put(row1);
         byte[] value1 = Bytes.toBytes("1000dfsdf");
-        put1.add(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
+        put1.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
         table.put(put1);
         admin.flush(tableName);
         // We are lacking an API for confirming flush request compaction.
@@ -295,18 +297,18 @@ public class TestTags {
 
         put1 = new Put(row2);
         value1 = Bytes.toBytes("1000dfsdf");
-        put1.add(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
+        put1.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value1);
         table.put(put1);
         admin.flush(tableName);
         Thread.sleep(1000);
 
         Put put2 = new Put(rowd);
         byte[] value2 = Bytes.toBytes("1000dfsdf");
-        put2.add(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
+        put2.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
         table.put(put2);
         put2 = new Put(rowe);
         value2 = Bytes.toBytes("1000dfsddfdf");
-        put2.add(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
+        put2.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value2);
         put.setAttribute("visibility", Bytes.toBytes("ram"));
         table.put(put2);
         admin.flush(tableName);
@@ -325,7 +327,7 @@ public class TestTags {
             if (CellUtil.matchingRow(current, row)) {
               assertEquals(1, TestCoprocessorForTags.tags.size());
               Tag tag = TestCoprocessorForTags.tags.get(0);
-              assertEquals(bigTagLen, tag.getTagLength());
+              assertEquals(bigTagLen, tag.getValueLength());
             } else {
               assertEquals(0, TestCoprocessorForTags.tags.size());
             }
@@ -350,7 +352,7 @@ public class TestTags {
             if (CellUtil.matchingRow(current, row)) {
               assertEquals(1, TestCoprocessorForTags.tags.size());
               Tag tag = TestCoprocessorForTags.tags.get(0);
-              assertEquals(bigTagLen, tag.getTagLength());
+              assertEquals(bigTagLen, tag.getValueLength());
             } else {
               assertEquals(0, TestCoprocessorForTags.tags.size());
             }
@@ -390,7 +392,7 @@ public class TestTags {
       table = TEST_UTIL.getConnection().getTable(tableName);
       Put put = new Put(row1);
       byte[] v = Bytes.toBytes(2L);
-      put.add(f, q, v);
+      put.addColumn(f, q, v);
       put.setAttribute("visibility", Bytes.toBytes("tag1"));
       table.put(put);
       Increment increment = new Increment(row1);
@@ -403,7 +405,7 @@ public class TestTags {
       List<Tag> tags = TestCoprocessorForTags.tags;
       assertEquals(3L, Bytes.toLong(kv.getValueArray(), kv.getValueOffset(), kv.getValueLength()));
       assertEquals(1, tags.size());
-      assertEquals("tag1", Bytes.toString(tags.get(0).getValue()));
+      assertEquals("tag1", Bytes.toString(TagUtil.cloneValue(tags.get(0))));
       TestCoprocessorForTags.checkTagPresence = false;
       TestCoprocessorForTags.tags = null;
 
@@ -421,7 +423,7 @@ public class TestTags {
       // We cannot assume the ordering of tags
       List<String> tagValues = new ArrayList<String>();
       for (Tag tag: tags) {
-        tagValues.add(Bytes.toString(tag.getValue()));
+        tagValues.add(Bytes.toString(TagUtil.cloneValue(tag)));
       }
       assertTrue(tagValues.contains("tag1"));
       assertTrue(tagValues.contains("tag2"));
@@ -430,7 +432,7 @@ public class TestTags {
 
       put = new Put(row2);
       v = Bytes.toBytes(2L);
-      put.add(f, q, v);
+      put.addColumn(f, q, v);
       table.put(put);
       increment = new Increment(row2);
       increment.add(new KeyValue(row2, f, q, 1234L, v));
@@ -445,14 +447,14 @@ public class TestTags {
       tags = TestCoprocessorForTags.tags;
       assertEquals(4L, Bytes.toLong(kv.getValueArray(), kv.getValueOffset(), kv.getValueLength()));
       assertEquals(1, tags.size());
-      assertEquals("tag2", Bytes.toString(tags.get(0).getValue()));
+      assertEquals("tag2", Bytes.toString(TagUtil.cloneValue(tags.get(0))));
       TestCoprocessorForTags.checkTagPresence = false;
       TestCoprocessorForTags.tags = null;
 
       // Test Append
       byte[] row3 = Bytes.toBytes("r3");
       put = new Put(row3);
-      put.add(f, q, Bytes.toBytes("a"));
+      put.addColumn(f, q, Bytes.toBytes("a"));
       put.setAttribute("visibility", Bytes.toBytes("tag1"));
       table.put(put);
       Append append = new Append(row3);
@@ -466,7 +468,7 @@ public class TestTags {
       kv = KeyValueUtil.ensureKeyValue(result.getColumnLatestCell(f, q));
       tags = TestCoprocessorForTags.tags;
       assertEquals(1, tags.size());
-      assertEquals("tag1", Bytes.toString(tags.get(0).getValue()));
+      assertEquals("tag1", Bytes.toString(TagUtil.cloneValue(tags.get(0))));
       TestCoprocessorForTags.checkTagPresence = false;
       TestCoprocessorForTags.tags = null;
 
@@ -483,7 +485,7 @@ public class TestTags {
       // We cannot assume the ordering of tags
       tagValues.clear();
       for (Tag tag: tags) {
-        tagValues.add(Bytes.toString(tag.getValue()));
+        tagValues.add(Bytes.toString(TagUtil.cloneValue(tag)));
       }
       assertTrue(tagValues.contains("tag1"));
       assertTrue(tagValues.contains("tag2"));
@@ -492,7 +494,7 @@ public class TestTags {
 
       byte[] row4 = Bytes.toBytes("r4");
       put = new Put(row4);
-      put.add(f, q, Bytes.toBytes("a"));
+      put.addColumn(f, q, Bytes.toBytes("a"));
       table.put(put);
       append = new Append(row4);
       append.add(new KeyValue(row4, f, q, 1234L, v));
@@ -506,7 +508,7 @@ public class TestTags {
       kv = KeyValueUtil.ensureKeyValue(result.getColumnLatestCell(f, q));
       tags = TestCoprocessorForTags.tags;
       assertEquals(1, tags.size());
-      assertEquals("tag2", Bytes.toString(tags.get(0).getValue()));
+      assertEquals("tag2", Bytes.toString(TagUtil.cloneValue(tags.get(0))));
     } finally {
       TestCoprocessorForTags.checkTagPresence = false;
       TestCoprocessorForTags.tags = null;
@@ -569,7 +571,7 @@ public class TestTags {
             if (cf == null) {
               cf = CellUtil.cloneFamily(kv);
             }
-            Tag tag = new Tag((byte) 1, attribute);
+            Tag tag = new ArrayBackedTag((byte) 1, attribute);
             List<Tag> tagList = new ArrayList<Tag>();
             tagList.add(tag);
 
@@ -611,7 +613,7 @@ public class TestTags {
           CellScanner cellScanner = result.cellScanner();
           if (cellScanner.advance()) {
             Cell cell = cellScanner.current();
-            tags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(),
+            tags = TagUtil.asList(cell.getTagsArray(), cell.getTagsOffset(),
                 cell.getTagsLength());
           }
         }

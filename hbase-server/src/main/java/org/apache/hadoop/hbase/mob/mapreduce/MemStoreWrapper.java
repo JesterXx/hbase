@@ -25,6 +25,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
@@ -45,6 +46,7 @@ import org.apache.hadoop.hbase.regionserver.KeyValueScanner;
 import org.apache.hadoop.hbase.regionserver.MemStore;
 import org.apache.hadoop.hbase.regionserver.MemStoreSnapshot;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.mapreduce.Reducer.Context;
 
@@ -90,7 +92,7 @@ public class MemStoreWrapper {
     flushSize = this.conf.getLong(MobConstants.MOB_SWEEP_TOOL_COMPACTION_MEMSTORE_FLUSH_SIZE,
         MobConstants.DEFAULT_MOB_SWEEP_TOOL_COMPACTION_MEMSTORE_FLUSH_SIZE);
     mobFamilyDir = MobUtils.getMobFamilyPath(conf, table.getName(), hcd.getNameAsString());
-    cryptoContext = MobUtils.createEncryptionContext(conf, hcd);
+    cryptoContext = EncryptionUtil.createEncryptionContext(conf, hcd);
   }
 
   public void setPartitionId(CompactionPartitionId partitionId) {
@@ -155,8 +157,8 @@ public class MemStoreWrapper {
     scanner = snapshot.getScanner();
     scanner.seek(KeyValueUtil.createFirstOnRow(HConstants.EMPTY_START_ROW));
     cell = null;
-    Tag tableNameTag = new Tag(TagType.MOB_TABLE_NAME_TAG_TYPE, Bytes.toBytes(this.table.getName()
-      .toString()));
+    Tag tableNameTag = new ArrayBackedTag(TagType.MOB_TABLE_NAME_TAG_TYPE,
+        Bytes.toBytes(this.table.getName().toString()));
     long updatedCount = 0;
     while (null != (cell = scanner.next())) {
       KeyValue reference = MobUtils.createMobRefKeyValue(cell, referenceValue, tableNameTag);
@@ -172,12 +174,12 @@ public class MemStoreWrapper {
   }
 
   /**
-   * Adds a KeyValue into the memstore.
-   * @param kv The KeyValue to be added.
+   * Adds a Cell into the memstore.
+   * @param cell The Cell to be added.
    * @throws IOException
    */
-  public void addToMemstore(KeyValue kv) throws IOException {
-    memstore.add(kv);
+  public void addToMemstore(Cell cell) throws IOException {
+    memstore.add(cell);
     // flush the memstore if it's full.
     flushMemStoreIfNecessary();
   }

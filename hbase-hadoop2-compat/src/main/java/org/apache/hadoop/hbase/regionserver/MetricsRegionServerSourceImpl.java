@@ -35,6 +35,7 @@ import org.apache.hadoop.metrics2.lib.MutableCounterLong;
 public class MetricsRegionServerSourceImpl
     extends BaseSourceImpl implements MetricsRegionServerSource {
 
+
   final MetricsRegionServerWrapper rsWrap;
   private final MetricHistogram putHisto;
   private final MetricHistogram deleteHisto;
@@ -67,26 +68,26 @@ public class MetricsRegionServerSourceImpl
     super(metricsName, metricsDescription, metricsContext, metricsJmxContext);
     this.rsWrap = rsWrap;
 
-    putHisto = getMetricsRegistry().newHistogram(MUTATE_KEY);
+    putHisto = getMetricsRegistry().newTimeHistogram(MUTATE_KEY);
     slowPut = getMetricsRegistry().newCounter(SLOW_MUTATE_KEY, SLOW_MUTATE_DESC, 0L);
 
-    deleteHisto = getMetricsRegistry().newHistogram(DELETE_KEY);
+    deleteHisto = getMetricsRegistry().newTimeHistogram(DELETE_KEY);
     slowDelete = getMetricsRegistry().newCounter(SLOW_DELETE_KEY, SLOW_DELETE_DESC, 0L);
 
-    getHisto = getMetricsRegistry().newHistogram(GET_KEY);
+    getHisto = getMetricsRegistry().newTimeHistogram(GET_KEY);
     slowGet = getMetricsRegistry().newCounter(SLOW_GET_KEY, SLOW_GET_DESC, 0L);
 
-    incrementHisto = getMetricsRegistry().newHistogram(INCREMENT_KEY);
+    incrementHisto = getMetricsRegistry().newTimeHistogram(INCREMENT_KEY);
     slowIncrement = getMetricsRegistry().newCounter(SLOW_INCREMENT_KEY, SLOW_INCREMENT_DESC, 0L);
 
-    appendHisto = getMetricsRegistry().newHistogram(APPEND_KEY);
+    appendHisto = getMetricsRegistry().newTimeHistogram(APPEND_KEY);
     slowAppend = getMetricsRegistry().newCounter(SLOW_APPEND_KEY, SLOW_APPEND_DESC, 0L);
     
-    replayHisto = getMetricsRegistry().newHistogram(REPLAY_KEY);
-    scanNextHisto = getMetricsRegistry().newHistogram(SCAN_NEXT_KEY);
+    replayHisto = getMetricsRegistry().newTimeHistogram(REPLAY_KEY);
+    scanNextHisto = getMetricsRegistry().newTimeHistogram(SCAN_NEXT_KEY);
 
-    splitTimeHisto = getMetricsRegistry().newHistogram(SPLIT_KEY);
-    flushTimeHisto = getMetricsRegistry().newHistogram(FLUSH_KEY);
+    splitTimeHisto = getMetricsRegistry().newTimeHistogram(SPLIT_KEY);
+    flushTimeHisto = getMetricsRegistry().newTimeHistogram(FLUSH_KEY);
 
     splitRequest = getMetricsRegistry().newCounter(SPLIT_REQUEST_KEY, SPLIT_REQUEST_DESC, 0L);
     splitSuccess = getMetricsRegistry().newCounter(SPLIT_SUCCESS_KEY, SPLIT_SUCCESS_DESC, 0L);
@@ -250,6 +251,8 @@ public class MetricsRegionServerSourceImpl
               rsWrap.getBlockCacheHitPercent())
           .addGauge(Interns.info(BLOCK_CACHE_EXPRESS_HIT_PERCENT,
               BLOCK_CACHE_EXPRESS_HIT_PERCENT_DESC), rsWrap.getBlockCacheHitCachingPercent())
+          .addCounter(Interns.info(BLOCK_CACHE_FAILED_INSERTION_COUNT,
+              BLOCK_CACHE_FAILED_INSERTION_COUNT_DESC),rsWrap.getBlockCacheFailedInsertions())
           .addCounter(Interns.info(UPDATES_BLOCKED_TIME, UPDATES_BLOCKED_DESC),
               rsWrap.getUpdatesBlockedTime())
           .addCounter(Interns.info(FLUSHED_CELLS, FLUSHED_CELLS_DESC),

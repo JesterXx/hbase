@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
@@ -41,6 +42,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.CategoryBasedTimeout;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.CompatibilitySingletonFactory;
@@ -73,6 +75,7 @@ import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.io.hfile.HFile.Reader;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.TimeRangeTracker;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
@@ -88,9 +91,13 @@ import org.apache.hadoop.mapreduce.RecordWriter;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.junit.Ignore;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.rules.TestRule;
 import org.mockito.Mockito;
+
+import com.google.common.collect.Lists;
 
 /**
  * Simple test for {@link CellSortReducer} and {@link HFileOutputFormat2}.
@@ -100,6 +107,8 @@ import org.mockito.Mockito;
  */
 @Category({VerySlowMapReduceTests.class, LargeTests.class})
 public class TestHFileOutputFormat2  {
+  @Rule public final TestRule timeout = CategoryBasedTimeout.builder().
+      withTimeout(this.getClass()).withLookingForStuckThread(true).build();
   private final static int ROWSPERSPLIT = 1024;
 
   private static final byte[][] FAMILIES
@@ -430,7 +439,6 @@ public class TestHFileOutputFormat2  {
       assertEquals("Should make " + regionNum + " regions", numRegions, regionNum);
 
       // Generate the bulk load files
-      util.startMiniMapReduceCluster();
       runIncrementalPELoad(conf, table.getTableDescriptor(), r, testDir);
       // This doesn't write into the table, just makes files
       assertEquals("HFOF should not touch actual table", 0, util.countRows(table));
@@ -511,7 +519,6 @@ public class TestHFileOutputFormat2  {
     } finally {
       testDir.getFileSystem(conf).delete(testDir, true);
       util.deleteTable(TABLE_NAME);
-      util.shutdownMiniMapReduceCluster();
       util.shutdownMiniCluster();
     }
   }
@@ -976,7 +983,6 @@ public class TestHFileOutputFormat2  {
       // Generate two bulk load files
       conf.setBoolean("hbase.mapreduce.hfileoutputformat.compaction.exclude",
           true);
-      util.startMiniMapReduceCluster();
 
       for (int i = 0; i < 2; i++) {
         Path testDir = util.getDataTestDirOnTestFS("testExcludeAllFromMinorCompaction_" + i);
@@ -1000,6 +1006,12 @@ public class TestHFileOutputFormat2  {
         quickPoll(new Callable<Boolean>() {
           @Override
           public Boolean call() throws Exception {
+            List<HRegion> regions = util.getMiniHBaseCluster().getRegions(TABLE_NAME);
+            for (HRegion region : regions) {
+              for (Store store : region.getStores()) {
+                store.closeAndArchiveCompactedFiles();
+              }
+            }
             return fs.listStatus(storePath).length == 1;
           }
         }, 5000);
@@ -1013,12 +1025,17 @@ public class TestHFileOutputFormat2  {
       quickPoll(new Callable<Boolean>() {
         @Override
         public Boolean call() throws Exception {
+          List<HRegion> regions = util.getMiniHBaseCluster().getRegions(TABLE_NAME);
+          for (HRegion region : regions) {
+            for (Store store : region.getStores()) {
+              store.closeAndArchiveCompactedFiles();
+            }
+          }
           return fs.listStatus(storePath).length == 1;
         }
       }, 5000);
 
     } finally {
-      util.shutdownMiniMapReduceCluster();
       util.shutdownMiniCluster();
     }
   }
@@ -1046,7 +1063,7 @@ public class TestHFileOutputFormat2  {
 
       // put some data in it and flush to create a storefile
       Put p = new Put(Bytes.toBytes("test"));
-      p.add(FAMILIES[0], Bytes.toBytes("1"), Bytes.toBytes("1"));
+      p.addColumn(FAMILIES[0], Bytes.toBytes("1"), Bytes.toBytes("1"));
       table.put(p);
       admin.flush(TABLE_NAME);
       assertEquals(1, util.countRows(table));
@@ -1060,7 +1077,6 @@ public class TestHFileOutputFormat2  {
       // Generate a bulk load file with more rows
       conf.setBoolean("hbase.mapreduce.hfileoutputformat.compaction.exclude",
           true);
-      util.startMiniMapReduceCluster();
 
       RegionLocator regionLocator = conn.getRegionLocator(TABLE_NAME);
       runIncrementalPELoad(conf, table.getTableDescriptor(), regionLocator, testDir);
@@ -1100,7 +1116,6 @@ public class TestHFileOutputFormat2  {
       }, 5000);
 
     } finally {
-      util.shutdownMiniMapReduceCluster();
       util.shutdownMiniCluster();
     }
   }

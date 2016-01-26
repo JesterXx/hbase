@@ -475,8 +475,8 @@ public class TestMultipleTimestamps {
       for(int colIdx: columnIndexes) {
         byte column[] = Bytes.toBytes("column:" + colIdx);
         for (long version: versions) {
-          put.add(cf, column, version, Bytes.toBytes("value-version-" +
-              version));
+          put.addColumn(cf, column, version, Bytes.toBytes("value-version-" +
+                  version));
         }
       }
       ht.put(put);
@@ -496,7 +496,7 @@ public class TestMultipleTimestamps {
     put.setDurability(Durability.SKIP_WAL);
 
     for (long idx = versionStart; idx <= versionEnd; idx++) {
-      put.add(cf, column, idx, Bytes.toBytes("value-version-" + idx));
+      put.addColumn(cf, column, idx, Bytes.toBytes("value-version-" + idx));
     }
 
     ht.put(put);
@@ -512,7 +512,7 @@ public class TestMultipleTimestamps {
     byte row[] = Bytes.toBytes("row:" + rowIdx);
     byte column[] = Bytes.toBytes("column:" + colIdx);
     Delete del = new Delete(row);
-    del.deleteColumn(cf, column, version);
+    del.addColumn(cf, column, version);
     ht.delete(del);
   }
 
@@ -526,7 +526,7 @@ public class TestMultipleTimestamps {
     byte row[] = Bytes.toBytes("row:" + rowIdx);
     byte column[] = Bytes.toBytes("column:" + colIdx);
     Delete del = new Delete(row);
-    del.deleteColumns(cf, column, version);
+    del.addColumns(cf, column, version);
     ht.delete(del);
   }
 
@@ -534,14 +534,14 @@ public class TestMultipleTimestamps {
     byte row[] = Bytes.toBytes("row:" + rowIdx);
     byte column[] = Bytes.toBytes("column:" + colIdx);
     Delete del = new Delete(row);
-    del.deleteColumns(cf, column);
+    del.addColumns(cf, column);
     ht.delete(del);
   }
 
   private void deleteFamily(Table ht, byte[] cf, int rowIdx) throws IOException {
     byte row[] = Bytes.toBytes("row:" + rowIdx);
     Delete del = new Delete(row);
-    del.deleteFamily(cf);
+    del.addFamily(cf);
     ht.delete(del);
   }
 

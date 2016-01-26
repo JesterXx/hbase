@@ -49,6 +49,7 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -145,6 +146,7 @@ public class TestMultiParallel {
    */
   @Test(timeout=300000)
   public void testActiveThreadsCount() throws Exception {
+    UTIL.getConfiguration().setLong("hbase.htable.threads.coresize", slaves + 1);
     try (Connection connection = ConnectionFactory.createConnection(UTIL.getConfiguration())) {
       ThreadPoolExecutor executor = HTable.getDefaultExecutor(UTIL.getConfiguration());
       try {
@@ -212,10 +214,10 @@ public class TestMultiParallel {
 
     List<Row> actions = new ArrayList<Row>();
     Put p = new Put(Bytes.toBytes("row1"));
-    p.add(Bytes.toBytes("bad_family"), Bytes.toBytes("qual"), Bytes.toBytes("value"));
+    p.addColumn(Bytes.toBytes("bad_family"), Bytes.toBytes("qual"), Bytes.toBytes("value"));
     actions.add(p);
     p = new Put(Bytes.toBytes("row2"));
-    p.add(BYTES_FAMILY, Bytes.toBytes("qual"), Bytes.toBytes("value"));
+    p.addColumn(BYTES_FAMILY, Bytes.toBytes("qual"), Bytes.toBytes("value"));
     actions.add(p);
 
     // row1 and row2 should be in the same region.
@@ -398,7 +400,7 @@ public class TestMultiParallel {
     ArrayList<Delete> deletes = new ArrayList<Delete>();
     for (int i = 0; i < KEYS.length; i++) {
       Delete delete = new Delete(KEYS[i]);
-      delete.deleteFamily(BYTES_FAMILY);
+      delete.addFamily(BYTES_FAMILY);
       deletes.add(delete);
     }
     table.delete(deletes);
@@ -422,7 +424,7 @@ public class TestMultiParallel {
     for (int i = 0; i < 100; i++) {
       Put put = new Put(ONE_ROW);
       byte[] qual = Bytes.toBytes("column" + i);
-      put.add(BYTES_FAMILY, qual, VALUE);
+      put.addColumn(BYTES_FAMILY, qual, VALUE);
       puts.add(put);
     }
     Object[] results = new Object[puts.size()];
@@ -463,8 +465,8 @@ public class TestMultiParallel {
     Delete d = new Delete(ONE_ROW);
     table.delete(d);
     Put put = new Put(ONE_ROW);
-    put.add(BYTES_FAMILY, QUAL1, Bytes.toBytes("abc"));
-    put.add(BYTES_FAMILY, QUAL2, Bytes.toBytes(1L));
+    put.addColumn(BYTES_FAMILY, QUAL1, Bytes.toBytes("abc"));
+    put.addColumn(BYTES_FAMILY, QUAL2, Bytes.toBytes(1L));
     table.put(put);
 
     Increment inc = new Increment(ONE_ROW);
@@ -493,7 +495,7 @@ public class TestMultiParallel {
     final Connection connection = ConnectionFactory.createConnection(UTIL.getConfiguration());
     Table table = connection.getTable(TEST_TABLE);
     Put put = new Put(ONE_ROW);
-    put.add(BYTES_FAMILY, QUALIFIER, Bytes.toBytes(0L));
+    put.addColumn(BYTES_FAMILY, QUALIFIER, Bytes.toBytes(0L));
 
     // Replace nonce manager with the one that returns each nonce twice.
     NonceGenerator cnm = new PerClientRandomNonceGenerator() {
@@ -609,12 +611,12 @@ public class TestMultiParallel {
 
     // 2 put of new column
     Put put = new Put(KEYS[10]);
-    put.add(BYTES_FAMILY, qual2, val2);
+    put.addColumn(BYTES_FAMILY, qual2, val2);
     actions.add(put);
 
     // 3 delete
     Delete delete = new Delete(KEYS[20]);
-    delete.deleteFamily(BYTES_FAMILY);
+    delete.addFamily(BYTES_FAMILY);
     actions.add(delete);
 
     // 4 get
@@ -628,7 +630,7 @@ public class TestMultiParallel {
 
     // 5 put of new column
     put = new Put(KEYS[40]);
-    put.add(BYTES_FAMILY, qual2, val2);
+    put.addColumn(BYTES_FAMILY, qual2, val2);
     actions.add(put);
 
     results = new Object[actions.size()];
@@ -672,7 +674,7 @@ public class TestMultiParallel {
     List<Put> puts = new ArrayList<>();
     for (byte[] k : KEYS) {
       Put put = new Put(k);
-      put.add(BYTES_FAMILY, QUALIFIER, VALUE);
+      put.addColumn(BYTES_FAMILY, QUALIFIER, VALUE);
       puts.add(put);
     }
     return puts;
@@ -681,13 +683,44 @@ public class TestMultiParallel {
   private void validateLoadedData(Table table) throws IOException {
     // get the data back and validate that it is correct
     LOG.info("Validating data on " + table);
+    List<Get> gets = new ArrayList<Get>();
     for (byte[] k : KEYS) {
       Get get = new Get(k);
       get.addColumn(BYTES_FAMILY, QUALIFIER);
-      Result r = table.get(get);
-      Assert.assertTrue(r.containsColumn(BYTES_FAMILY, QUALIFIER));
-      Assert.assertEquals(0, Bytes.compareTo(VALUE, r
-          .getValue(BYTES_FAMILY, QUALIFIER)));
+      gets.add(get);
+    }
+    int retryNum = 10;
+    Result[] results = null;
+    do  {
+      results = table.get(gets);
+      boolean finished = true;
+      for (Result result : results) {
+        if (result.isEmpty()) {
+          finished = false;
+          break;
+        }
+      }
+      if (finished) {
+        break;
+      }
+      try {
+        Thread.sleep(10);
+      } catch (InterruptedException e) {
+      }
+      retryNum--;
+    } while (retryNum > 0);
+
+    if (retryNum == 0) {
+      fail("Timeout for validate data");
+    } else {
+      if (results != null) {
+        for (Result r : results) {
+          Assert.assertTrue(r.containsColumn(BYTES_FAMILY, QUALIFIER));
+          Assert.assertEquals(0, Bytes.compareTo(VALUE, r
+            .getValue(BYTES_FAMILY, QUALIFIER)));
+        }
+        LOG.info("Validating data on " + table + " successfully!");
+      }
     }
   }
 

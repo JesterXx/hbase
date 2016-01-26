@@ -19,7 +19,7 @@
 package org.apache.hadoop.hbase.mapreduce;
 
 import com.google.protobuf.InvalidProtocolBufferException;
-import com.yammer.metrics.core.MetricsRegistry;
+import com.codahale.metrics.MetricRegistry;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -43,12 +43,11 @@ import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.security.token.TokenUtil;
 import org.apache.hadoop.hbase.util.Base64;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.zookeeper.ZKUtil;
+import org.apache.hadoop.hbase.zookeeper.ZKConfig;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapreduce.InputFormat;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.util.StringUtils;
-import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.io.File;
 import java.io.IOException;
@@ -340,7 +339,7 @@ public class TableMapReduceUtil {
 
     if (addDependencyJars) {
       addDependencyJars(job);
-      addDependencyJars(job.getConfiguration(), MetricsRegistry.class);
+      addDependencyJars(job.getConfiguration(), MetricRegistry.class);
     }
 
     resetCacheConfig(job.getConfiguration());
@@ -485,8 +484,8 @@ public class TableMapReduceUtil {
         String quorumAddress = job.getConfiguration().get(TableOutputFormat.QUORUM_ADDRESS);
         User user = userProvider.getCurrent();
         if (quorumAddress != null) {
-          Configuration peerConf = HBaseConfiguration.create(job.getConfiguration());
-          ZKUtil.applyClusterKeyToConf(peerConf, quorumAddress);
+          Configuration peerConf = HBaseConfiguration.createClusterConf(job.getConfiguration(),
+              quorumAddress, TableOutputFormat.OUTPUT_CONF_PREFIX);
           Connection peerConn = ConnectionFactory.createConnection(peerConf);
           try {
             TokenUtil.addTokenForJob(peerConn, user, job);
@@ -519,15 +518,30 @@ public class TableMapReduceUtil {
    * @param job The job that requires the permission.
    * @param quorumAddress string that contains the 3 required configuratins
    * @throws IOException When the authentication token cannot be obtained.
+   * @deprecated Since 1.2.0, use {@link #initCredentialsForCluster(Job, Configuration)} instead.
    */
+  @Deprecated
   public static void initCredentialsForCluster(Job job, String quorumAddress)
+      throws IOException {
+    Configuration peerConf = HBaseConfiguration.createClusterConf(job.getConfiguration(),
+        quorumAddress);
+    initCredentialsForCluster(job, peerConf);
+  }
+
+  /**
+   * Obtain an authentication token, for the specified cluster, on behalf of the current user
+   * and add it to the credentials for the given map reduce job.
+   *
+   * @param job The job that requires the permission.
+   * @param conf The configuration to use in connecting to the peer cluster
+   * @throws IOException When the authentication token cannot be obtained.
+   */
+  public static void initCredentialsForCluster(Job job, Configuration conf)
       throws IOException {
     UserProvider userProvider = UserProvider.instantiate(job.getConfiguration());
     if (userProvider.isHBaseSecurityEnabled()) {
       try {
-        Configuration peerConf = HBaseConfiguration.create(job.getConfiguration());
-        ZKUtil.applyClusterKeyToConf(peerConf, quorumAddress);
-        Connection peerConn = ConnectionFactory.createConnection(peerConf);
+        Connection peerConn = ConnectionFactory.createConnection(conf);
         try {
           TokenUtil.addTokenForJob(peerConn, userProvider.getCurrent(), job);
         } finally {
@@ -676,7 +690,7 @@ public class TableMapReduceUtil {
     // If passed a quorum/ensemble address, pass it on to TableOutputFormat.
     if (quorumAddress != null) {
       // Calling this will validate the format
-      ZKUtil.transformClusterKey(quorumAddress);
+      ZKConfig.validateClusterKey(quorumAddress);
       conf.set(TableOutputFormat.QUORUM_ADDRESS,quorumAddress);
     }
     if (serverClass != null && serverImpl != null) {
@@ -749,7 +763,7 @@ public class TableMapReduceUtil {
    * Add HBase and its dependencies (only) to the job configuration.
    * <p>
    * This is intended as a low-level API, facilitating code reuse between this
-   * class and its mapred counterpart. It also of use to extenral tools that
+   * class and its mapred counterpart. It also of use to external tools that
    * need to build a MapReduce job that interacts with HBase but want
    * fine-grained control over the jars shipped to the cluster.
    * </p>
@@ -758,6 +772,21 @@ public class TableMapReduceUtil {
    * @see <a href="https://issues.apache.org/jira/browse/PIG-3285">PIG-3285</a>
    */
   public static void addHBaseDependencyJars(Configuration conf) throws IOException {
+
+    // PrefixTreeCodec is part of the hbase-prefix-tree module. If not included in MR jobs jar
+    // dependencies, MR jobs that write encoded hfiles will fail.
+    // We used reflection here so to prevent a circular module dependency.
+    // TODO - if we extract the MR into a module, make it depend on hbase-prefix-tree.
+    Class prefixTreeCodecClass = null;
+    try {
+      prefixTreeCodecClass =
+          Class.forName("org.apache.hadoop.hbase.code.prefixtree.PrefixTreeCodec");
+    } catch (ClassNotFoundException e) {
+      // this will show up in unit tests but should not show in real deployments
+      LOG.warn("The hbase-prefix-tree module jar containing PrefixTreeCodec is not present." +
+          "  Continuing without it.");
+    }
+
     addDependencyJars(conf,
       // explicitly pull a class from each module
       org.apache.hadoop.hbase.HConstants.class,                      // hbase-common
@@ -765,13 +794,14 @@ public class TableMapReduceUtil {
       org.apache.hadoop.hbase.client.Put.class,                      // hbase-client
       org.apache.hadoop.hbase.CompatibilityFactory.class,            // hbase-hadoop-compat
       org.apache.hadoop.hbase.mapreduce.TableMapper.class,           // hbase-server
+      prefixTreeCodecClass, //  hbase-prefix-tree (if null will be skipped)
       // pull necessary dependencies
       org.apache.zookeeper.ZooKeeper.class,
       io.netty.channel.Channel.class,
       com.google.protobuf.Message.class,
       com.google.common.collect.Lists.class,
       org.apache.htrace.Trace.class,
-      com.yammer.metrics.core.MetricsRegistry.class);
+      com.codahale.metrics.MetricRegistry.class);
   }
 
   /**

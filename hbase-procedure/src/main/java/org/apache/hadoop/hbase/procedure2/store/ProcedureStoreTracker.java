@@ -27,7 +27,6 @@ import java.util.TreeMap;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
-import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.protobuf.generated.ProcedureProtos;
 
 /**
@@ -44,13 +43,16 @@ public class ProcedureStoreTracker {
   private boolean keepDeletes = false;
   private boolean partial = false;
 
+  private long minUpdatedProcId = Long.MAX_VALUE;
+  private long maxUpdatedProcId = Long.MIN_VALUE;
+
   public enum DeleteState { YES, NO, MAYBE }
 
   public static class BitSetNode {
     private final static long WORD_MASK = 0xffffffffffffffffL;
     private final static int ADDRESS_BITS_PER_WORD = 6;
     private final static int BITS_PER_WORD = 1 << ADDRESS_BITS_PER_WORD;
-    private final static int MAX_NODE_SIZE = 4 << ADDRESS_BITS_PER_WORD;
+    private final static int MAX_NODE_SIZE = 1 << ADDRESS_BITS_PER_WORD;
 
     private final boolean partial;
     private long[] updated;
@@ -81,7 +83,7 @@ public class ProcedureStoreTracker {
     public BitSetNode(final long procId, final boolean partial) {
       start = alignDown(procId);
 
-      int count = 2;
+      int count = 1;
       updated = new long[count];
       deleted = new long[count];
       for (int i = 0; i < count; ++i) {
@@ -141,8 +143,7 @@ public class ProcedureStoreTracker {
     public boolean isUpdated() {
       // TODO: cache the value
       for (int i = 0; i < updated.length; ++i) {
-        long deleteMask = ~deleted[i];
-        if ((updated[i] & deleteMask) != (WORD_MASK & deleteMask)) {
+        if ((updated[i] | deleted[i]) != WORD_MASK) {
           return false;
         }
       }
@@ -168,6 +169,16 @@ public class ProcedureStoreTracker {
     public void undeleteAll() {
       for (int i = 0; i < updated.length; ++i) {
         deleted[i] = 0;
+      }
+    }
+
+    public void unsetPartialFlag() {
+      for (int i = 0; i < updated.length; ++i) {
+        for (int j = 0; j < BITS_PER_WORD; ++j) {
+          if ((updated[i] & (1L << j)) == 0) {
+            deleted[i] |= (1L << j);
+          }
+        }
       }
     }
 
@@ -344,22 +355,17 @@ public class ProcedureStoreTracker {
     }
   }
 
-  public void insert(final Procedure proc, final Procedure[] subprocs) {
-    insert(proc.getProcId());
-    if (subprocs != null) {
-      for (int i = 0; i < subprocs.length; ++i) {
-        insert(subprocs[i].getProcId());
-      }
-    }
-  }
-
-  public void update(final Procedure proc) {
-    update(proc.getProcId());
-  }
-
   public void insert(long procId) {
     BitSetNode node = getOrCreateNode(procId);
     node.update(procId);
+    trackProcIds(procId);
+  }
+
+  public void insert(final long procId, final long[] subProcIds) {
+    update(procId);
+    for (int i = 0; i < subProcIds.length; ++i) {
+      insert(subProcIds[i]);
+    }
   }
 
   public void update(long procId) {
@@ -369,6 +375,7 @@ public class ProcedureStoreTracker {
     BitSetNode node = entry.getValue();
     assert node.contains(procId);
     node.update(procId);
+    trackProcIds(procId);
   }
 
   public void delete(long procId) {
@@ -383,6 +390,21 @@ public class ProcedureStoreTracker {
       // TODO: RESET if (map.size() == 1)
       map.remove(entry.getKey());
     }
+
+    trackProcIds(procId);
+  }
+
+  private void trackProcIds(long procId) {
+    minUpdatedProcId = Math.min(minUpdatedProcId, procId);
+    maxUpdatedProcId = Math.max(maxUpdatedProcId, procId);
+  }
+
+  public long getUpdatedMinProcId() {
+    return minUpdatedProcId;
+  }
+
+  public long getUpdatedMaxProcId() {
+    return maxUpdatedProcId;
   }
 
   @InterfaceAudience.Private
@@ -392,13 +414,16 @@ public class ProcedureStoreTracker {
     node.updateState(procId, isDeleted);
   }
 
-  public void clear() {
+  public void reset() {
+    this.keepDeletes = false;
+    this.partial = false;
     this.map.clear();
+    resetUpdates();
   }
 
   public DeleteState isDeleted(long procId) {
     Map.Entry<Long, BitSetNode> entry = map.floorEntry(procId);
-    if (entry != null) {
+    if (entry != null && entry.getValue().contains(procId)) {
       BitSetNode node = entry.getValue();
       DeleteState state = node.isDeleted(procId);
       return partial && !node.isUpdated(procId) ? DeleteState.MAYBE : state;
@@ -426,6 +451,11 @@ public class ProcedureStoreTracker {
   }
 
   public void setPartialFlag(boolean isPartial) {
+    if (this.partial && !isPartial) {
+      for (Map.Entry<Long, BitSetNode> entry : map.entrySet()) {
+        entry.getValue().unsetPartialFlag();
+      }
+    }
     this.partial = isPartial;
   }
 
@@ -447,10 +477,17 @@ public class ProcedureStoreTracker {
     return true;
   }
 
+  public boolean isTracking(long minId, long maxId) {
+    // TODO: we can make it more precise, instead of looking just at the block
+    return map.floorEntry(minId) != null || map.floorEntry(maxId) != null;
+  }
+
   public void resetUpdates() {
     for (Map.Entry<Long, BitSetNode> entry : map.entrySet()) {
       entry.getValue().resetUpdates();
     }
+    minUpdatedProcId = Long.MAX_VALUE;
+    maxUpdatedProcId = Long.MIN_VALUE;
   }
 
   public void undeleteAll() {
@@ -527,6 +564,8 @@ public class ProcedureStoreTracker {
 
   public void dump() {
     System.out.println("map " + map.size());
+    System.out.println("isUpdated " + isUpdated());
+    System.out.println("isEmpty " + isEmpty());
     for (Map.Entry<Long, BitSetNode> entry : map.entrySet()) {
       entry.getValue().dump();
     }
@@ -542,11 +581,11 @@ public class ProcedureStoreTracker {
   }
 
   public void readFrom(final InputStream stream) throws IOException {
-    ProcedureProtos.ProcedureStoreTracker data =
+    reset();
+    final ProcedureProtos.ProcedureStoreTracker data =
         ProcedureProtos.ProcedureStoreTracker.parseDelimitedFrom(stream);
-    map.clear();
     for (ProcedureProtos.ProcedureStoreTracker.TrackerNode protoNode: data.getNodeList()) {
-      BitSetNode node = BitSetNode.convert(protoNode);
+      final BitSetNode node = BitSetNode.convert(protoNode);
       map.put(node.getStart(), node);
     }
   }

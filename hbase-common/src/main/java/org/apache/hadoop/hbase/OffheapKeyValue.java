@@ -32,8 +32,8 @@ import org.apache.hadoop.hbase.util.ClassSize;
  * memory.
  */
 @InterfaceAudience.Private
-public class OffheapKeyValue extends ByteBufferedCell implements HeapSize, Cloneable,
-    SettableSequenceId, Streamable {
+public class OffheapKeyValue extends ByteBufferedCell
+  implements HeapSize, SettableSequenceId, Streamable {
 
   protected final ByteBuffer buf;
   protected final int offset;
@@ -187,7 +187,7 @@ public class OffheapKeyValue extends ByteBufferedCell implements HeapSize, Clone
   }
 
   @Override
-  public int getRowPositionInByteBuffer() {
+  public int getRowPosition() {
     return this.offset + KeyValue.ROW_KEY_OFFSET;
   }
 
@@ -197,7 +197,7 @@ public class OffheapKeyValue extends ByteBufferedCell implements HeapSize, Clone
   }
 
   @Override
-  public int getFamilyPositionInByteBuffer() {
+  public int getFamilyPosition() {
     return getFamilyLengthPosition() + Bytes.SIZEOF_BYTE;
   }
 
@@ -207,8 +207,8 @@ public class OffheapKeyValue extends ByteBufferedCell implements HeapSize, Clone
   }
 
   @Override
-  public int getQualifierPositionInByteBuffer() {
-    return getFamilyPositionInByteBuffer() + getFamilyLength();
+  public int getQualifierPosition() {
+    return getFamilyPosition() + getFamilyLength();
   }
 
   @Override
@@ -217,7 +217,7 @@ public class OffheapKeyValue extends ByteBufferedCell implements HeapSize, Clone
   }
 
   @Override
-  public int getValuePositionInByteBuffer() {
+  public int getValuePosition() {
     return this.offset + KeyValue.ROW_OFFSET + this.keyLen;
   }
 
@@ -227,7 +227,7 @@ public class OffheapKeyValue extends ByteBufferedCell implements HeapSize, Clone
   }
 
   @Override
-  public int getTagsPositionInByteBuffer() {
+  public int getTagsPosition() {
     int tagsLen = getTagsLength();
     if (tagsLen == 0) {
       return this.offset + this.length;
@@ -254,7 +254,7 @@ public class OffheapKeyValue extends ByteBufferedCell implements HeapSize, Clone
       length = keyLen + this.getValueLength() + KeyValue.KEYVALUE_INFRASTRUCTURE_SIZE;
     }
     ByteBufferUtils.putInt(out, length);
-    ByteBufferUtils.writeByteBuffer(out, this.buf, this.offset, length);
+    ByteBufferUtils.copyBufferToStream(out, this.buf, this.offset, length);
     return length + Bytes.SIZEOF_INT;
   }
 

@@ -98,7 +98,7 @@
 </head>
 <body>
 <div class="navbar  navbar-fixed-top navbar-default">
-    <div class="container">
+    <div class="container-fluid">
         <div class="navbar-header">
             <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
                 <span class="icon-bar"></span>
@@ -124,7 +124,7 @@
 </div>
 <%
 if ( fqtn != null ) {
-  table = (HTable) master.getConnection().getTable(fqtn);
+  table = (HTable) master.getConnection().getTable(TableName.valueOf(fqtn));
   if (table.getTableDescriptor().getRegionReplication() > 1) {
     tableHeader = "<h2>Table Regions</h2><table class=\"table table-striped\" style=\"table-layout: fixed; word-wrap: break-word;\"><tr><th style=\"width:22%\">Name</th><th>Region Server</th><th style=\"width:22%\">Start Key</th><th style=\"width:22%\">End Key</th><th>Locality</th><th>Requests</th><th>ReplicaID</th></tr>";
     withReplica = true;
@@ -133,9 +133,7 @@ if ( fqtn != null ) {
   }
   if ( !readOnly && action != null ) {
 %>
-<div class="container">
-
-
+<div class="container-fluid content">
         <div class="row inner_header">
             <div class="page-header">
                 <h1>Table action request accepted</h1>
@@ -167,10 +165,7 @@ if ( fqtn != null ) {
 <%
   } else {
 %>
-<div class="container">
-
-
-
+<div class="container-fluid content">
     <div class="row inner_header">
         <div class="page-header">
             <h1>Table <small><%= fqtn %></small></h1>
@@ -204,7 +199,7 @@ if ( fqtn != null ) {
 </table>
 <%} else {
   Admin admin = master.getConnection().getAdmin();
-  RegionLocator r = master.getConnection().getRegionLocator(table.getName());
+  RegionLocator r = master.getClusterConnection().getRegionLocator(table.getName());
   try { %>
 <h2>Table Attributes</h2>
 <table class="table table-striped">
@@ -318,7 +313,7 @@ if ( fqtn != null ) {
                     conf))) %></td>
   <%
   if (addr != null) {
-    String url = "//" + addr.getHostname() + ":" + master.getRegionServerInfoPort(addr) + "/";
+    String url = "//" + addr.getHostname() + ":" + master.getRegionServerInfoPort(addr) + "/rs-status";
   %>
   <td>
      <a href="<%= url %>"><%= addr.getHostname().toString() + ":" + addr.getPort() %></a>
@@ -429,7 +424,7 @@ Actions:
 <% }
 } else { // handle the case for fqtn is null with error message + redirect
 %>
-<div class="container">
+<div class="container-fluid content">
     <div class="row inner_header">
         <div class="page-header">
             <h1>Table not ready</h1>

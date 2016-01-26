@@ -41,6 +41,7 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.TagUtil;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.filter.Filter;
@@ -344,8 +345,7 @@ public class HMobStore extends HStore {
       String fileName = MobUtils.getMobFileName(reference);
       Tag tableNameTag = MobUtils.getTableNameTag(reference);
       if (tableNameTag != null) {
-        byte[] tableName = tableNameTag.getValue();
-        String tableNameString = Bytes.toString(tableName);
+        String tableNameString = TagUtil.getValueAsString(tableNameTag);
         List<Path> locations = map.get(tableNameString);
         if (locations == null) {
           IdLock.Entry lockEntry = keyLock.getLockEntry(tableNameString.hashCode());
@@ -353,7 +353,7 @@ public class HMobStore extends HStore {
             locations = map.get(tableNameString);
             if (locations == null) {
               locations = new ArrayList<Path>(2);
-              TableName tn = TableName.valueOf(tableName);
+              TableName tn = TableName.valueOf(tableNameString);
               locations.add(MobUtils.getMobFamilyPath(conf, tn, family.getNameAsString()));
               locations.add(HFileArchiveUtil.getStoreArchivePath(conf, tn, MobUtils
                   .getMobRegionInfo(tn).getEncodedName(), family.getNameAsString()));

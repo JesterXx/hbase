@@ -22,8 +22,10 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 
-import com.yammer.metrics.core.Histogram;
-import com.yammer.metrics.core.MetricsRegistry;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.MetricRegistry;
+
+import static com.codahale.metrics.MetricRegistry.name;
 
 /**
  * Class that implements cache metrics.
@@ -33,7 +35,7 @@ public class CacheStats {
   /**
    * Needed making histograms.
    */
-  private static final MetricsRegistry METRICS = new MetricsRegistry();
+  private static final MetricRegistry METRICS = new MetricRegistry();
 
   /** Sliding window statistics. The number of metric periods to include in
    * sliding window hit ratio calculations.
@@ -74,6 +76,9 @@ public class CacheStats {
   /** The total number of blocks for primary replica that have been evicted */
   private final AtomicLong primaryEvictedBlockCount = new AtomicLong(0);
 
+  /** The total number of blocks that were not inserted. */
+  private final AtomicLong failedInserts = new AtomicLong(0);
+
   /** The number of metrics periods to include in window */
   private final int numPeriodsInWindow;
   /** Hit counts for each period in window */
@@ -110,7 +115,7 @@ public class CacheStats {
     this.hitCachingCounts = initializeZeros(numPeriodsInWindow);
     this.requestCounts = initializeZeros(numPeriodsInWindow);
     this.requestCachingCounts = initializeZeros(numPeriodsInWindow);
-    this.ageAtEviction = METRICS.newHistogram(CacheStats.class, name + ".ageAtEviction");
+    this.ageAtEviction = METRICS.histogram(name(CacheStats.class, name + ".ageAtEviction"));
   }
 
   @Override
@@ -152,6 +157,10 @@ public class CacheStats {
     if (primary) {
       primaryEvictedBlockCount.incrementAndGet();
     }
+  }
+
+  public long failInsert() {
+    return failedInserts.incrementAndGet();
   }
 
   public long getRequestCount() {
@@ -218,6 +227,10 @@ public class CacheStats {
     return ((float)getEvictedCount()/(float)getEvictionCount());
   }
 
+  public long getFailedInserts() {
+    return failedInserts.get();
+  }
+
   public void rollMetricsPeriod() {
     hitCounts[windowIndex] = getHitCount() - lastHitCount;
     lastHitCount = getHitCount();
@@ -249,13 +262,14 @@ public class CacheStats {
   }
 
   public double getHitRatioPastNPeriods() {
-    double ratio = ((double)sum(hitCounts)/(double)sum(requestCounts));
+    double ratio = ((double)getSumHitCountsPastNPeriods() /
+        (double)getSumRequestCountsPastNPeriods());
     return Double.isNaN(ratio) ? 0 : ratio;
   }
 
   public double getHitCachingRatioPastNPeriods() {
-    double ratio =
-      ((double)sum(hitCachingCounts)/(double)sum(requestCachingCounts));
+    double ratio = ((double)getSumHitCachingCountsPastNPeriods() /
+        (double)getSumRequestCachingCountsPastNPeriods());
     return Double.isNaN(ratio) ? 0 : ratio;
   }
 

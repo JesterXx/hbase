@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.SortedSet;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
@@ -35,6 +34,7 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.io.hfile.HFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreFile.Reader;
 
@@ -48,6 +48,7 @@ public class StoreFileScanner implements KeyValueScanner {
   private final StoreFile.Reader reader;
   private final HFileScanner hfs;
   private Cell cur = null;
+  private boolean closed = false;
 
   private boolean realSeekDone;
   private boolean delayedReseek;
@@ -62,7 +63,7 @@ public class StoreFileScanner implements KeyValueScanner {
   private static AtomicLong seekCount;
 
   private ScanQueryMatcher matcher;
-  
+
   private long readPt;
 
   /**
@@ -246,8 +247,13 @@ public class StoreFileScanner implements KeyValueScanner {
   }
 
   public void close() {
+    if (closed) return;
     cur = null;
     this.hfs.close();
+    if (this.reader != null) {
+      this.reader.decrementRefCount();
+    }
+    closed = true;
   }
 
   /**
@@ -422,9 +428,15 @@ public class StoreFileScanner implements KeyValueScanner {
   }
 
   @Override
-  public boolean shouldUseScanner(Scan scan, SortedSet<byte[]> columns, long oldestUnexpiredTS) {
-    return reader.passesTimerangeFilter(scan, oldestUnexpiredTS)
-        && reader.passesKeyRangeFilter(scan) && reader.passesBloomFilter(scan, columns);
+  public boolean shouldUseScanner(Scan scan, Store store, long oldestUnexpiredTS) {
+    // if the file has no entries, no need to validate or create a scanner.
+    byte[] cf = store.getFamily().getName();
+    TimeRange timeRange = scan.getColumnFamilyTimeRange().get(cf);
+    if (timeRange == null) {
+      timeRange = scan.getTimeRange();
+    }
+    return reader.passesTimerangeFilter(timeRange, oldestUnexpiredTS) && reader
+        .passesKeyRangeFilter(scan) && reader.passesBloomFilter(scan, scan.getFamilyMap().get(cf));
   }
 
   @Override

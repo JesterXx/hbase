@@ -36,6 +36,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.CoordinatedStateManager;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
+import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -66,6 +67,7 @@ import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.JVMClusterUtil.RegionServerThread;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.PairOfSameType;
 import org.apache.hadoop.util.StringUtils;
@@ -212,7 +214,7 @@ public class TestRegionMergeTransactionOnCluster {
       List<Pair<HRegionInfo, ServerName>> tableRegions = MetaTableAccessor
           .getTableRegionsAndLocations(master.getConnection(), tableName);
       HRegionInfo mergedRegionInfo = tableRegions.get(0).getFirst();
-      HTableDescriptor tableDescritor = master.getTableDescriptors().get(
+      HTableDescriptor tableDescriptor = master.getTableDescriptors().get(
           tableName);
       Result mergedRegionResult = MetaTableAccessor.getRegionResult(
         master.getConnection(), mergedRegionInfo.getRegionName());
@@ -224,10 +226,9 @@ public class TestRegionMergeTransactionOnCluster {
           HConstants.MERGEB_QUALIFIER) != null);
 
       // merging regions' directory are in the file system all the same
-      HRegionInfo regionA = HRegionInfo.getHRegionInfo(mergedRegionResult,
-          HConstants.MERGEA_QUALIFIER);
-      HRegionInfo regionB = HRegionInfo.getHRegionInfo(mergedRegionResult,
-          HConstants.MERGEB_QUALIFIER);
+      PairOfSameType<HRegionInfo> p = MetaTableAccessor.getMergeRegions(mergedRegionResult);
+      HRegionInfo regionA = p.getFirst();
+      HRegionInfo regionB = p.getSecond();
       FileSystem fs = master.getMasterFileSystem().getFileSystem();
       Path rootDir = master.getMasterFileSystem().getRootDir();
 
@@ -237,19 +238,46 @@ public class TestRegionMergeTransactionOnCluster {
       assertTrue(fs.exists(regionAdir));
       assertTrue(fs.exists(regionBdir));
 
-      admin.compactRegion(mergedRegionInfo.getRegionName());
-      // wait until merged region doesn't have reference file
-      long timeout = System.currentTimeMillis() + waitTime;
+      HColumnDescriptor[] columnFamilies = tableDescriptor.getColumnFamilies();
       HRegionFileSystem hrfs = new HRegionFileSystem(
-          TEST_UTIL.getConfiguration(), fs, tabledir, mergedRegionInfo);
+        TEST_UTIL.getConfiguration(), fs, tabledir, mergedRegionInfo);
+      int count = 0;
+      for(HColumnDescriptor colFamily : columnFamilies) {
+        count += hrfs.getStoreFiles(colFamily.getName()).size();
+      }
+      admin.compactRegion(mergedRegionInfo.getRegionName());
+      // clean up the merged region store files
+      // wait until merged region have reference file
+      long timeout = System.currentTimeMillis() + waitTime;
+      int newcount = 0;
       while (System.currentTimeMillis() < timeout) {
-        if (!hrfs.hasReferences(tableDescritor)) {
+        for(HColumnDescriptor colFamily : columnFamilies) {
+          newcount += hrfs.getStoreFiles(colFamily.getName()).size();
+        }
+        if(newcount > count) {
           break;
         }
         Thread.sleep(50);
       }
-      assertFalse(hrfs.hasReferences(tableDescritor));
-
+      assertTrue(newcount > count);
+      List<RegionServerThread> regionServerThreads = TEST_UTIL.getHBaseCluster()
+          .getRegionServerThreads();
+      for (RegionServerThread rs : regionServerThreads) {
+        CompactedHFilesDischarger cleaner = new CompactedHFilesDischarger(100, null,
+            rs.getRegionServer(), false);
+        cleaner.chore();
+        Thread.sleep(1000);
+      }
+      int newcount1 = 0;
+      while (System.currentTimeMillis() < timeout) {
+        for(HColumnDescriptor colFamily : columnFamilies) {
+          newcount1 += hrfs.getStoreFiles(colFamily.getName()).size();
+        }
+        if(newcount1 <= 1) {
+          break;
+        }
+        Thread.sleep(50);
+      }
       // run CatalogJanitor to clean merge references in hbase:meta and archive the
       // files of merging regions
       int cleaned = admin.runCatalogScan();
@@ -456,7 +484,7 @@ public class TestRegionMergeTransactionOnCluster {
   private void loadData(Table table) throws IOException {
     for (int i = 0; i < ROWSIZE; i++) {
       Put put = new Put(ROWS[i]);
-      put.add(FAMILYNAME, QUALIFIER, Bytes.toBytes(i));
+      put.addColumn(FAMILYNAME, QUALIFIER, Bytes.toBytes(i));
       table.put(put);
     }
   }

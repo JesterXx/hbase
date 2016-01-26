@@ -43,6 +43,7 @@ import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.io.compress.Compression;
 import org.apache.hadoop.hbase.io.compress.Compression.Algorithm;
 import org.apache.hadoop.hbase.io.hfile.HFile.FileInfo;
@@ -120,7 +121,7 @@ public class TestHFileWriterV3 {
                            .withBlockSize(4096)
                            .withIncludesTags(useTags)
                            .withCompression(compressAlgo).build();
-    HFile.Writer writer = new HFileWriterFactory(conf, new CacheConfig(conf))
+    HFile.Writer writer = new HFile.WriterFactory(conf, new CacheConfig(conf))
             .withPath(fs, hfilePath)
             .withFileContext(context)
             .withComparator(CellComparator.COMPARATOR)
@@ -130,17 +131,17 @@ public class TestHFileWriterV3 {
     List<KeyValue> keyValues = new ArrayList<KeyValue>(entryCount);
 
     for (int i = 0; i < entryCount; ++i) {
-      byte[] keyBytes = TestHFileWriterV2.randomOrderedKey(rand, i);
+      byte[] keyBytes = RandomKeyValueUtil.randomOrderedKey(rand, i);
 
       // A random-length random value.
-      byte[] valueBytes = TestHFileWriterV2.randomValue(rand);
+      byte[] valueBytes = RandomKeyValueUtil.randomValue(rand);
       KeyValue keyValue = null;
       if (useTags) {
         ArrayList<Tag> tags = new ArrayList<Tag>();
         for (int j = 0; j < 1 + rand.nextInt(4); j++) {
           byte[] tagBytes = new byte[16];
           rand.nextBytes(tagBytes);
-          tags.add(new Tag((byte) 1, tagBytes));
+          tags.add(new ArrayBackedTag((byte) 1, tagBytes));
         }
         keyValue = new KeyValue(keyBytes, null, null, HConstants.LATEST_TIMESTAMP,
             valueBytes, tags);
@@ -176,7 +177,7 @@ public class TestHFileWriterV3 {
                         .withHBaseCheckSum(true).build();
     HFileBlock.FSReader blockReader =
         new HFileBlock.FSReaderImpl(fsdis, fileSize, meta);
- // Comparator class name is stored in the trailer in version 2.
+    // Comparator class name is stored in the trailer in version 3.
     CellComparator comparator = trailer.createComparator();
     HFileBlockIndex.BlockIndexReader dataBlockIndexReader =
         new HFileBlockIndex.CellBasedKeyBlockIndexReader(comparator,
@@ -297,6 +298,5 @@ public class TestHFileWriterV3 {
 
     fsdis.close();
   }
-
 }
 

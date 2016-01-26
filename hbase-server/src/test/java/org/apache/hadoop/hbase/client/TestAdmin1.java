@@ -241,7 +241,7 @@ public class TestAdmin1 {
     final TableName table = TableName.valueOf("testDisableAndEnableTable");
     Table ht = TEST_UTIL.createTable(table, HConstants.CATALOG_FAMILY);
     Put put = new Put(row);
-    put.add(HConstants.CATALOG_FAMILY, qualifier, value);
+    put.addColumn(HConstants.CATALOG_FAMILY, qualifier, value);
     ht.put(put);
     Get get = new Get(row);
     get.addColumn(HConstants.CATALOG_FAMILY, qualifier);
@@ -308,7 +308,7 @@ public class TestAdmin1 {
     Table ht1 = TEST_UTIL.createTable(table1, HConstants.CATALOG_FAMILY);
     Table ht2 = TEST_UTIL.createTable(table2, HConstants.CATALOG_FAMILY);
     Put put = new Put(row);
-    put.add(HConstants.CATALOG_FAMILY, qualifier, value);
+    put.addColumn(HConstants.CATALOG_FAMILY, qualifier, value);
     ht1.put(put);
     ht2.put(put);
     Get get = new Get(row);
@@ -1187,13 +1187,13 @@ public class TestAdmin1 {
     List<Put> puts = new ArrayList<Put>();
     byte[] qualifier = "c".getBytes();
     Put put = new Put(new byte[]{(byte)'1'});
-    put.add(cf, qualifier, "100".getBytes());
+    put.addColumn(cf, qualifier, "100".getBytes());
     puts.add(put);
     put = new Put(new byte[]{(byte)'6'});
-    put.add(cf, qualifier, "100".getBytes());
+    put.addColumn(cf, qualifier, "100".getBytes());
     puts.add(put);
     put = new Put(new byte[]{(byte)'8'});
-    put.add(cf, qualifier, "100".getBytes());
+    put.addColumn(cf, qualifier, "100".getBytes());
     puts.add(put);
     ht.put(puts);
     ht.close();
@@ -1203,7 +1203,7 @@ public class TestAdmin1 {
     // the element at index 1 would be a replica (since the metareader gives us ordered
     // regions). Try splitting that region via the split API . Should fail
     try {
-      TEST_UTIL.getHBaseAdmin().split(regions.get(1).getFirst().getRegionName());
+      TEST_UTIL.getHBaseAdmin().splitRegion(regions.get(1).getFirst().getRegionName());
     } catch (IllegalArgumentException ex) {
       gotException = true;
     }
@@ -1391,6 +1391,45 @@ public class TestAdmin1 {
         this.admin.disableTable(name);
         this.admin.deleteTable(name);
       }
+    }
+  }
+
+  @Test
+  public void testMergeRegions() throws Exception {
+    TableName tableName = TableName.valueOf("testMergeWithFullRegionName");
+    HColumnDescriptor cd = new HColumnDescriptor("d");
+    HTableDescriptor td = new HTableDescriptor(tableName);
+    td.addFamily(cd);
+    byte[][] splitRows = new byte[2][];
+    splitRows[0] = new byte[]{(byte)'3'};
+    splitRows[1] = new byte[]{(byte)'6'};
+    try {
+      TEST_UTIL.createTable(td, splitRows);
+      TEST_UTIL.waitTableAvailable(tableName);
+
+      List<HRegionInfo> tableRegions;
+      HRegionInfo regionA;
+      HRegionInfo regionB;
+
+      // merge with full name
+      tableRegions = admin.getTableRegions(tableName);
+      assertEquals(3, admin.getTableRegions(tableName).size());
+      regionA = tableRegions.get(0);
+      regionB = tableRegions.get(1);
+      admin.mergeRegions(regionA.getRegionName(), regionB.getRegionName(), false);
+      Thread.sleep(1000);
+      assertEquals(2, admin.getTableRegions(tableName).size());
+
+      // merge with encoded name
+      tableRegions = admin.getTableRegions(tableName);
+      regionA = tableRegions.get(0);
+      regionB = tableRegions.get(1);
+      admin.mergeRegions(regionA.getEncodedNameAsBytes(), regionB.getEncodedNameAsBytes(), false);
+      Thread.sleep(1000);
+      assertEquals(1, admin.getTableRegions(tableName).size());
+    } finally {
+      this.admin.disableTable(tableName);
+      this.admin.deleteTable(tableName);
     }
   }
 }

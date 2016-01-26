@@ -251,10 +251,11 @@ public class AsyncRpcClient extends AbstractRpcClient {
       if (e.getCause() instanceof IOException) {
         throw (IOException) e.getCause();
       } else {
-        throw new IOException(e.getCause());
+        throw wrapException(addr, (Exception) e.getCause());
       }
     } catch (TimeoutException e) {
-      throw new CallTimeoutException(promise.toString());
+      CallTimeoutException cte = new CallTimeoutException(promise.toString());
+      throw wrapException(addr, cte);
     }
   }
 
@@ -386,7 +387,11 @@ public class AsyncRpcClient extends AbstractRpcClient {
         throw new StoppedRpcClientException();
       }
       rpcChannel = connections.get(hashCode);
-      if (rpcChannel == null || !rpcChannel.isAlive()) {
+      if (rpcChannel != null && !rpcChannel.isAlive()) {
+        LOG.debug("Removing dead channel from server="+rpcChannel.address.toString());
+        connections.remove(hashCode);
+      }
+      if (rpcChannel == null) {
         rpcChannel = new AsyncRpcChannel(this.bootstrap, this, ticket, serviceName, location);
         connections.put(hashCode, rpcChannel);
       }

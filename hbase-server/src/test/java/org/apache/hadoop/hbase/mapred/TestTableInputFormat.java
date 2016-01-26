@@ -34,11 +34,11 @@ import java.util.Map;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -81,7 +81,7 @@ public class TestTableInputFormat {
   private static final Log LOG = LogFactory.getLog(TestTableInputFormat.class);
 
   private final static HBaseTestingUtility UTIL = new HBaseTestingUtility();
-  private static MiniMRCluster mrCluster;
+
   static final byte[] FAMILY = Bytes.toBytes("family");
 
   private static final byte[][] columns = new byte[][] { FAMILY };
@@ -89,12 +89,10 @@ public class TestTableInputFormat {
   @BeforeClass
   public static void beforeClass() throws Exception {
     UTIL.startMiniCluster();
-    mrCluster = UTIL.startMiniMapReduceCluster();
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    UTIL.shutdownMiniMapReduceCluster();
     UTIL.shutdownMiniCluster();
   }
 
@@ -127,12 +125,12 @@ public class TestTableInputFormat {
     Table table = UTIL.createTable(TableName.valueOf(tableName), families);
     Put p = new Put("aaa".getBytes());
     for (byte[] family : families) {
-      p.add(family, null, "value aaa".getBytes());
+      p.addColumn(family, null, "value aaa".getBytes());
     }
     table.put(p);
     p = new Put("bbb".getBytes());
     for (byte[] family : families) {
-      p.add(family, null, "value bbb".getBytes());
+      p.addColumn(family, null, "value bbb".getBytes());
     }
     table.put(p);
     return table;
@@ -345,7 +343,8 @@ public class TestTableInputFormat {
   }
 
   void testInputFormat(Class<? extends InputFormat> clazz) throws IOException {
-    final JobConf job = MapreduceTestingShim.getJobConf(mrCluster);
+    Configuration conf = UTIL.getConfiguration();
+    final JobConf job = new JobConf(conf);
     job.setInputFormat(clazz);
     job.setOutputFormat(NullOutputFormat.class);
     job.setMapperClass(ExampleVerifier.class);

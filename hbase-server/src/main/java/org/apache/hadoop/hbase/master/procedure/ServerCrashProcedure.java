@@ -110,6 +110,11 @@ implements ServerProcedureInterface {
   private ServerName serverName;
 
   /**
+   * Whether DeadServer knows that we are processing it.
+   */
+  private boolean notifiedDeadServer = false;
+
+  /**
    * Regions that were on the crashed server.
    */
   private Set<HRegionInfo> regionsOnCrashedServer;
@@ -183,6 +188,13 @@ implements ServerProcedureInterface {
     if (!services.getAssignmentManager().isFailoverCleanupDone()) {
       throwProcedureYieldException("Waiting on master failover to complete");
     }
+    // HBASE-14802
+    // If we have not yet notified that we are processing a dead server, we should do now.
+    if (!notifiedDeadServer) {
+      services.getServerManager().getDeadServers().notifyServer(serverName);
+      notifiedDeadServer = true;
+    }
+
     try {
       switch (state) {
       case SERVER_CRASH_START:
@@ -541,13 +553,13 @@ implements ServerProcedureInterface {
 
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
-    if (!env.getMasterServices().isServerCrashProcessingEnabled()) return false;
-    return env.getProcedureQueue().tryAcquireServerExclusiveLock(this);
+    if (env.waitServerCrashProcessingEnabled(this)) return false;
+    return env.getProcedureQueue().tryAcquireServerExclusiveLock(this, getServerName());
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseServerExclusiveLock(this);
+    env.getProcedureQueue().releaseServerExclusiveLock(this, getServerName());
   }
 
   @Override
@@ -718,7 +730,7 @@ implements ServerProcedureInterface {
     boolean metaAssigned = false;
     // Is hbase:meta location available yet?
     if (mtl.isLocationAvailable(zkw)) {
-      ClusterConnection connection = env.getMasterServices().getConnection();
+      ClusterConnection connection = env.getMasterServices().getClusterConnection();
       // Is hbase:meta location good yet?
       long timeout =
         env.getMasterConfiguration().getLong(KEY_SHORT_WAIT_ON_META, DEFAULT_SHORT_WAIT_ON_META);
@@ -737,6 +749,11 @@ implements ServerProcedureInterface {
   @Override
   public boolean hasMetaTableRegion() {
     return this.carryingMeta;
+  }
+
+  @Override
+  public ServerOperationType getServerOperationType() {
+    return ServerOperationType.CRASH_HANDLER;
   }
 
   /**

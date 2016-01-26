@@ -37,7 +37,6 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -57,7 +56,6 @@ import org.apache.hadoop.mapred.MiniMRCluster;
 import org.apache.hadoop.mapreduce.InputFormat;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.JobContext;
-import org.apache.hadoop.mapreduce.Mapper.Context;
 import org.apache.hadoop.mapreduce.lib.output.NullOutputFormat;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -85,12 +83,10 @@ public class TestTableInputFormat {
   @BeforeClass
   public static void beforeClass() throws Exception {
     UTIL.startMiniCluster();
-    mrCluster = UTIL.startMiniMapReduceCluster();
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    UTIL.shutdownMiniMapReduceCluster();
     UTIL.shutdownMiniCluster();
   }
 
@@ -123,12 +119,12 @@ public class TestTableInputFormat {
     Table table = UTIL.createTable(TableName.valueOf(tableName), families);
     Put p = new Put("aaa".getBytes());
     for (byte[] family : families) {
-      p.add(family, null, "value aaa".getBytes());
+      p.addColumn(family, null, "value aaa".getBytes());
     }
     table.put(p);
     p = new Put("bbb".getBytes());
     for (byte[] family : families) {
-      p.add(family, null, "value bbb".getBytes());
+      p.addColumn(family, null, "value bbb".getBytes());
     }
     table.put(p);
     return table;

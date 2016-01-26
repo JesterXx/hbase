@@ -22,35 +22,41 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
-import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableNotFoundException;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.protobuf.ReplicationProtbufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.AdminService.BlockingInterface;
-import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.wal.WAL.Entry;
 import org.apache.hadoop.hbase.replication.HBaseReplicationEndpoint;
 import org.apache.hadoop.hbase.replication.ReplicationPeer.PeerState;
 import org.apache.hadoop.hbase.replication.regionserver.ReplicationSinkManager.SinkPeer;
+import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.wal.WAL.Entry;
 import org.apache.hadoop.ipc.RemoteException;
 
 /**
- * A {@link org.apache.hadoop.hbase.replication.ReplicationEndpoint} 
+ * A {@link org.apache.hadoop.hbase.replication.ReplicationEndpoint}
  * implementation for replicating to another HBase cluster.
  * For the slave cluster it selects a random number of peers
  * using a replication ratio. For example, if replication ration = 0.1
@@ -80,8 +86,12 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
   // Handles connecting to peer region servers
   private ReplicationSinkManager replicationSinkMgr;
   private boolean peersSelected = false;
+  private String replicationClusterId = "";
   private ThreadPoolExecutor exec;
   private int maxThreads;
+  private Path baseNamespaceDir;
+  private Path hfileArchiveDir;
+  private boolean replicationBulkLoadDataEnabled;
 
   @Override
   public void init(Context context) throws IOException {
@@ -103,8 +113,21 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
     // per sink thread pool
     this.maxThreads = this.conf.getInt(HConstants.REPLICATION_SOURCE_MAXTHREADS_KEY,
       HConstants.REPLICATION_SOURCE_MAXTHREADS_DEFAULT);
-    this.exec = new ThreadPoolExecutor(1, maxThreads, 60, TimeUnit.SECONDS,
-      new SynchronousQueue<Runnable>());
+    this.exec = new ThreadPoolExecutor(maxThreads, maxThreads, 60, TimeUnit.SECONDS,
+        new LinkedBlockingQueue<Runnable>());
+    this.exec.allowCoreThreadTimeOut(true);
+
+    this.replicationBulkLoadDataEnabled =
+        conf.getBoolean(HConstants.REPLICATION_BULKLOAD_ENABLE_KEY,
+          HConstants.REPLICATION_BULKLOAD_ENABLE_DEFAULT);
+    if (this.replicationBulkLoadDataEnabled) {
+      replicationClusterId = this.conf.get(HConstants.REPLICATION_CLUSTER_ID);
+    }
+    // Construct base namespace directory and hfile archive directory path
+    Path rootDir = FSUtils.getRootDir(conf);
+    Path baseNSDir = new Path(HConstants.BASE_NAMESPACE_DIR);
+    baseNamespaceDir = new Path(rootDir, baseNSDir);
+    hfileArchiveDir = new Path(rootDir, new Path(HConstants.HFILE_ARCHIVE_DIRECTORY, baseNSDir));
   }
 
   private void decorateConf() {
@@ -120,9 +143,9 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
     int sleepMultiplier = 1;
 
     // Connect to peer cluster first, unless we have to stop
-    while (this.isRunning() && replicationSinkMgr.getSinks().size() == 0) {
+    while (this.isRunning() && replicationSinkMgr.getNumSinks() == 0) {
       replicationSinkMgr.chooseSinks();
-      if (this.isRunning() && replicationSinkMgr.getSinks().size() == 0) {
+      if (this.isRunning() && replicationSinkMgr.getNumSinks() == 0) {
         if (sleepForRetries("Waiting for peers", sleepMultiplier)) {
           sleepMultiplier++;
         }
@@ -153,22 +176,28 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
    */
   @Override
   public boolean replicate(ReplicateContext replicateContext) {
+    CompletionService<Integer> pool = new ExecutorCompletionService<Integer>(this.exec);
     List<Entry> entries = replicateContext.getEntries();
     String walGroupId = replicateContext.getWalGroupId();
     int sleepMultiplier = 1;
+    int numReplicated = 0;
 
     if (!peersSelected && this.isRunning()) {
       connectToPeers();
       peersSelected = true;
     }
 
-    if (replicationSinkMgr.getSinks().size() == 0) {
+    int numSinks = replicationSinkMgr.getNumSinks();
+    if (numSinks == 0) {
+      LOG.warn("No replication sinks found, returning without replicating. The source should retry"
+          + " with the same set of edits.");
       return false;
     }
+
     // minimum of: configured threads, number of 100-waledit batches,
     //  and number of current sinks
-    int n = Math.min(Math.min(this.maxThreads, entries.size()/100+1),
-      replicationSinkMgr.getSinks().size());
+    int n = Math.min(Math.min(this.maxThreads, entries.size()/100+1), numSinks);
+
     List<List<Entry>> entryLists = new ArrayList<List<Entry>>(n);
     if (n == 1) {
       entryLists.add(entries);
@@ -194,7 +223,7 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
               " entries of total size " + replicateContext.getSize());
         }
 
-        List<Future<Integer>> futures = new ArrayList<Future<Integer>>(entryLists.size());
+        int futures = 0;
         for (int i=0; i<entryLists.size(); i++) {
           if (!entryLists.get(i).isEmpty()) {
             if (LOG.isTraceEnabled()) {
@@ -202,15 +231,22 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
                   " entries of total size " + replicateContext.getSize());
             }
             // RuntimeExceptions encountered here bubble up and are handled in ReplicationSource
-            futures.add(exec.submit(new Replicator(entryLists.get(i), i)));
+            pool.submit(createReplicator(entryLists.get(i), i));
+            futures++;
           }
         }
         IOException iox = null;
-        for (Future<Integer> f : futures) {
+
+        for (int i=0; i<futures; i++) {
           try {
             // wait for all futures, remove successful parts
             // (only the remaining parts will be retried)
-            entryLists.remove(f.get());
+            Future<Integer> f = pool.take();
+            int index = f.get().intValue();
+            int batchSize =  entryLists.get(index).size();
+            entryLists.set(index, Collections.<Entry>emptyList());
+            // Now, we have marked the batch as done replicating, record its size
+            numReplicated += batchSize;
           } catch (InterruptedException ie) {
             iox =  new IOException(ie);
           } catch (ExecutionException ee) {
@@ -221,6 +257,12 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
         if (iox != null) {
           // if we had any exceptions, try again
           throw iox;
+        }
+        if (numReplicated != entries.size()) {
+          // Something went wrong here and we don't know what, let's just fail and retry.
+          LOG.warn("The number of edits replicated is different from the number received,"
+              + " failing for now.");
+          return false;
         }
         // update metrics
         this.metrics.setAgeOfLastShippedOp(entries.get(entries.size() - 1).getKey().getWriteTime(),
@@ -289,7 +331,13 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
     return super.stopAndWait();
   }
 
-  private class Replicator implements Callable<Integer> {
+  @VisibleForTesting
+  protected Replicator createReplicator(List<Entry> entries, int ordinal) {
+    return new Replicator(entries, ordinal);
+  }
+
+  @VisibleForTesting
+  protected class Replicator implements Callable<Integer> {
     private List<Entry> entries;
     private int ordinal;
     public Replicator(List<Entry> entries, int ordinal) {
@@ -303,8 +351,8 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
       try {
         sinkPeer = replicationSinkMgr.getReplicationSink();
         BlockingInterface rrs = sinkPeer.getRegionServer();
-        ReplicationProtbufUtil.replicateWALEntry(rrs,
-            entries.toArray(new Entry[entries.size()]));
+        ReplicationProtbufUtil.replicateWALEntry(rrs, entries.toArray(new Entry[entries.size()]),
+          replicationClusterId, baseNamespaceDir, hfileArchiveDir);
         replicationSinkMgr.reportSinkSuccess(sinkPeer);
         return ordinal;
 

@@ -35,8 +35,10 @@ import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.MetaTableAccessor;
+import org.apache.hadoop.hbase.MultiActionResultTooLarge;
 import org.apache.hadoop.hbase.RegionLocations;
 import org.apache.hadoop.hbase.RegionTooBusyException;
+import org.apache.hadoop.hbase.RetryImmediatelyException;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotEnabledException;
@@ -148,8 +150,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   //  be waiting for the master lock => deadlock.
   private final Object masterAndZKLock = new Object();
 
-  private long keepZooKeeperWatcherAliveUntil = Long.MAX_VALUE;
-
   // thread executor shared by all HTableInterface instances created
   // by this connection
   private volatile ExecutorService batchPool = null;
@@ -169,8 +169,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
   private final MetaCache metaCache;
   private final MetricsConnection metrics;
-
-  private int refCount;
 
   protected User user;
 
@@ -201,8 +199,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     this.pause = conf.getLong(HConstants.HBASE_CLIENT_PAUSE,
         HConstants.DEFAULT_HBASE_CLIENT_PAUSE);
     this.useMetaReplicas = conf.getBoolean(HConstants.USE_META_REPLICAS,
-        HConstants.DEFAULT_USE_META_REPLICAS);
-    this.numTries = tableConfig.getRetriesNumber();
+      HConstants.DEFAULT_USE_META_REPLICAS);
+    // how many times to try, one more than max *retry* time
+    this.numTries = tableConfig.getRetriesNumber() + 1;
     this.rpcTimeout = conf.getInt(
         HConstants.HBASE_RPC_TIMEOUT_KEY,
         HConstants.DEFAULT_HBASE_RPC_TIMEOUT);
@@ -241,7 +240,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       this.registry = setupRegistry();
       retrieveClusterId();
 
-      this.rpcClient = RpcClientFactory.createClient(this.conf, this.clusterId);
+      this.rpcClient = RpcClientFactory.createClient(this.conf, this.clusterId, this.metrics);
 
       // Do we publish the status?
       if (shouldListen) {
@@ -299,7 +298,8 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     Throwable cur = (Throwable) exception;
     while (cur != null) {
       if (cur instanceof RegionMovedException || cur instanceof RegionOpeningException
-          || cur instanceof RegionTooBusyException || cur instanceof ThrottlingException) {
+          || cur instanceof RegionTooBusyException || cur instanceof ThrottlingException
+          || cur instanceof RetryImmediatelyException) {
         return cur;
       }
       if (cur instanceof RemoteException) {
@@ -396,7 +396,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       synchronized (this) {
         if (batchPool == null) {
           this.batchPool = getThreadPool(conf.getInt("hbase.hconnection.threads.max", 256),
-              conf.getInt("hbase.hconnection.threads.core", 256), "-shared-", null);
+              conf.getInt("hbase.hconnection.threads.core", 256), "-shared", null);
           this.cleanupPool = true;
         }
       }
@@ -480,7 +480,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
   /**
    * @return The cluster registry implementation to use.
-   * @throws java.io.IOException
    */
   private Registry setupRegistry() throws IOException {
     return RegistryFactory.getRegistry(this);
@@ -540,7 +539,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   /**
    * @return true if the master is running, throws an exception otherwise
    * @throws org.apache.hadoop.hbase.MasterNotRunningException - if the master is not running
-   * @throws org.apache.hadoop.hbase.ZooKeeperConnectionException
    * @deprecated this has been deprecated without a replacement
    */
   @Deprecated
@@ -847,13 +845,13 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       s.setConsistency(Consistency.TIMELINE);
     }
 
-    int localNumRetries = (retry ? numTries : 1);
+    int maxAttempts = (retry ? numTries : 1);
 
     for (int tries = 0; true; tries++) {
-      if (tries >= localNumRetries) {
+      if (tries >= maxAttempts) {
         throw new NoServerForRegionException("Unable to find region for "
             + Bytes.toStringBinary(row) + " in " + tableName +
-            " after " + localNumRetries + " tries.");
+            " after " + tries + " tries.");
       }
       if (useCache) {
         RegionLocations locations = getCachedLocation(tableName, row);
@@ -941,12 +939,12 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
         if (e instanceof RemoteException) {
           e = ((RemoteException)e).unwrapRemoteException();
         }
-        if (tries < localNumRetries - 1) {
+        if (tries < maxAttempts - 1) {
           if (LOG.isDebugEnabled()) {
             LOG.debug("locateRegionInMeta parentTable=" +
                 TableName.META_TABLE_NAME + ", metaLocation=" +
               ", attempt=" + tries + " of " +
-              localNumRetries + " failed; retrying after sleep of " +
+              maxAttempts + " failed; retrying after sleep of " +
               ConnectionUtils.getPauseTime(this.pause, tries) + " because: " + e.getMessage());
           }
         } else {
@@ -979,9 +977,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   /**
    * Search the cache for a location that fits our table and row key.
    * Return null if no suitable region is located.
-   *
-   * @param tableName
-   * @param row
    * @return Null or region location found in cache.
    */
   RegionLocations getCachedLocation(final TableName tableName,
@@ -1087,21 +1082,27 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     private final ConcurrentMap<ServerName, ServerErrors> errorsByServer =
         new ConcurrentHashMap<ServerName, ServerErrors>();
     private final long canRetryUntil;
-    private final int maxRetries;
+    private final int maxTries;// max number to try
     private final long startTrackingTime;
 
-    public ServerErrorTracker(long timeout, int maxRetries) {
-      this.maxRetries = maxRetries;
+    /**
+     * Constructor
+     * @param timeout how long to wait before timeout, in unit of millisecond
+     * @param maxTries how many times to try
+     */
+    public ServerErrorTracker(long timeout, int maxTries) {
+      this.maxTries = maxTries;
       this.canRetryUntil = EnvironmentEdgeManager.currentTime() + timeout;
       this.startTrackingTime = new Date().getTime();
     }
 
     /**
-     * We stop to retry when we have exhausted BOTH the number of retries and the time allocated.
+     * We stop to retry when we have exhausted BOTH the number of tries and the time allocated.
+     * @param numAttempt how many times we have tried by now
      */
-    boolean canRetryMore(int numRetry) {
+    boolean canTryMore(int numAttempt) {
       // If there is a single try we must not take into account the time.
-      return numRetry < maxRetries || (maxRetries > 1 &&
+      return numAttempt < maxTries || (maxTries > 1 &&
           EnvironmentEdgeManager.currentTime() < this.canRetryUntil);
     }
 
@@ -1173,13 +1174,11 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
     /**
      * Make stub and cache it internal so can be used later doing the isMasterRunning call.
-     * @param channel
      */
     protected abstract Object makeStub(final BlockingRpcChannel channel);
 
     /**
      * Once setup, check it works by doing isMasterRunning check.
-     * @throws com.google.protobuf.ServiceException
      */
     protected abstract void isMasterRunning() throws ServiceException;
 
@@ -1187,9 +1186,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
      * Create a stub. Try once only.  It is not typed because there is no common type to
      * protobuf services nor their interfaces.  Let the caller do appropriate casting.
      * @return A stub for master services.
-     * @throws java.io.IOException
-     * @throws org.apache.zookeeper.KeeperException
-     * @throws com.google.protobuf.ServiceException
      */
     private Object makeStubNoRetries() throws IOException, KeeperException, ServiceException {
       ZooKeeperKeepAliveConnection zkw;
@@ -1362,10 +1358,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
   private ZooKeeperKeepAliveConnection keepAliveZookeeper;
   private AtomicInteger keepAliveZookeeperUserCount = new AtomicInteger(0);
-  private boolean canCloseZKW = true;
-
-  // keepAlive time, in ms. No reason to make it configurable.
-  private static final long keepAlive = 5 * 60 * 1000;
 
   /**
    * Retrieve a shared ZooKeeperWatcher. You must close it it once you've have finished with it.
@@ -1383,7 +1375,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
         keepAliveZookeeper = new ZooKeeperKeepAliveConnection(conf, this.toString(), this);
       }
       keepAliveZookeeperUserCount.addAndGet(1);
-      keepZooKeeperWatcherAliveUntil = Long.MAX_VALUE;
       return keepAliveZookeeper;
     }
   }
@@ -1391,9 +1382,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   void releaseZooKeeperWatcher(final ZooKeeperWatcher zkw) {
     if (zkw == null){
       return;
-    }
-    if (keepAliveZookeeperUserCount.addAndGet(-1) <= 0) {
-      keepZooKeeperWatcherAliveUntil = System.currentTimeMillis() + keepAlive;
     }
   }
 
@@ -1812,7 +1800,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     };
   }
 
-
   private static void release(MasterServiceState mss) {
     if (mss != null && mss.connection != null) {
       ((ConnectionImplementation)mss.connection).releaseMaster(mss);
@@ -1885,7 +1872,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
    * or delete it from the cache. Does nothing if we can be sure from the exception that
    * the location is still accurate, or if the cache has already been updated.
    * @param exception an object (to simplify user code) on which we will try to find a nested
-   *                  or wrapped or both RegionMovedException
+   *  or wrapped or both RegionMovedException
    * @param source server that is the source of the location update.
    */
   @Override
@@ -1924,7 +1911,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     Throwable cause = findException(exception);
     if (cause != null) {
       if (cause instanceof RegionTooBusyException || cause instanceof RegionOpeningException
-          || cause instanceof ThrottlingException) {
+          || cause instanceof ThrottlingException || cause instanceof MultiActionResultTooLarge) {
         // We know that the region is still on this region server
         return;
       }
@@ -1956,7 +1943,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   }
 
   /**
-   * @deprecated since 0.96 - Use {@link org.apache.hadoop.hbase.client.HTableInterface#batch} instead
+   * @deprecated since 0.96 Use {@link org.apache.hadoop.hbase.client.HTableInterface#batch} instead
    */
   @Override
   @Deprecated
@@ -1991,8 +1978,8 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
    * If the method returns it means that there is no error, and the 'results' array will
    * contain no exception. On error, an exception is thrown, and the 'results' array will
    * contain results and exceptions.
-   * @deprecated since 0.96 -
-   *   Use {@link org.apache.hadoop.hbase.client.HTable#processBatchCallback} instead
+   * @deprecated since 0.96
+   *  Use {@link org.apache.hadoop.hbase.client.HTable#processBatchCallback} instead
    */
   @Override
   @Deprecated
@@ -2131,22 +2118,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     return this.registry.getCurrentNrHRS();
   }
 
-  /**
-   * Increment this client's reference count.
-   */
-  void incCount() {
-    ++refCount;
-  }
-
-  /**
-   * Decrement this client's reference count.
-   */
-  void decCount() {
-    if (refCount > 0) {
-      --refCount;
-    }
-  }
-
   @Override
   public void close() {
     if (this.closed) {
@@ -2169,13 +2140,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   }
 
   /**
-   * Close the connection for good, regardless of what the current value of
-   * {@link #refCount} is. Ideally, {@link #refCount} should be zero at this
-   * point, which would be the case if all of its consumers close the
-   * connection. However, on the off chance that someone is unable to close
+   * Close the connection for good. On the off chance that someone is unable to close
    * the connection, perhaps because it bailed out prematurely, the method
-   * below will ensure that this {@link org.apache.hadoop.hbase.client.HConnection} instance
-   * is cleaned up.
+   * below will ensure that this instance is cleaned up.
    * Caveat: The JVM may take an unknown amount of time to call finalize on an
    * unreachable object, so our hope is that every consumer cleans up after
    * itself, like any good citizen.
@@ -2183,8 +2150,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   @Override
   protected void finalize() throws Throwable {
     super.finalize();
-    // Pretend as if we are about to release the last remaining reference
-    refCount = 1;
     close();
   }
 
@@ -2239,7 +2204,8 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   }
 
   /**
-   * @deprecated Use {@link org.apache.hadoop.hbase.client.Admin#getTableDescriptorsByTableName(java.util.List)} instead
+   * @deprecated Use {@link
+   *  org.apache.hadoop.hbase.client.Admin#getTableDescriptorsByTableName(java.util.List)} instead
    */
   @Deprecated
   @Override
@@ -2259,12 +2225,13 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   }
 
   /**
-   * @deprecated Use {@link org.apache.hadoop.hbase.client.Admin#getTableDescriptorsByTableName(java.util.List)} instead
+   * @deprecated Use
+   *  {@link org.apache.hadoop.hbase.client.Admin#getTableDescriptorsByTableName(java.util.List)}
+   *  instead
    */
   @Deprecated
   @Override
-  public HTableDescriptor[] getHTableDescriptors(
-      List<String> names) throws IOException {
+  public HTableDescriptor[] getHTableDescriptors(List<String> names) throws IOException {
     List<TableName> tableNames = new ArrayList<TableName>(names.size());
     for(String name : names) {
       tableNames.add(TableName.valueOf(name));
@@ -2283,7 +2250,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
    * @param tableName table name
    * @throws java.io.IOException if the connection to master fails or if the table
    *  is not found.
-   * @deprecated Use {@link org.apache.hadoop.hbase.client.Admin#getTableDescriptor(org.apache.hadoop.hbase.TableName)} instead
+   * @deprecated Use {@link
+   *  org.apache.hadoop.hbase.client.Admin#getTableDescriptor(org.apache.hadoop.hbase.TableName)}
+   *  instead
    */
   @Deprecated
   @Override
@@ -2308,7 +2277,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   }
 
   /**
-   * @deprecated Use {@link org.apache.hadoop.hbase.client.Admin#getTableDescriptor(org.apache.hadoop.hbase.TableName)} instead
+   * @deprecated Use {@link
+   *  org.apache.hadoop.hbase.client.Admin#getTableDescriptor(org.apache.hadoop.hbase.TableName)}
+   *  instead
    */
   @Deprecated
   @Override
@@ -2320,10 +2291,8 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   @Override
   public TableState getTableState(TableName tableName) throws IOException {
     if (this.closed) throw new IOException(toString() + " closed");
-
     TableState tableState = MetaTableAccessor.getTableState(this, tableName);
-    if (tableState == null)
-      throw new TableNotFoundException(tableName);
+    if (tableState == null) throw new TableNotFoundException(tableName);
     return tableState;
   }
 

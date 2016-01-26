@@ -110,6 +110,11 @@ public class MockRegionServerServices implements RegionServerServices {
   }
 
   @Override
+  public List<Region> getOnlineRegions() {
+    return null;
+  }
+
+  @Override
   public void addToOnlineRegions(Region r) {
     this.regions.put(r.getRegionInfo().getEncodedName(), r);
   }
@@ -305,5 +310,11 @@ public class MockRegionServerServices implements RegionServerServices {
   @Override
   public double getCompactionPressure() {
     return 0;
+  }
+
+  @Override
+  public ClusterConnection getClusterConnection() {
+    // TODO Auto-generated method stub
+    return null;
   }
 }

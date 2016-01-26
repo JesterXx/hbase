@@ -208,7 +208,7 @@ public class MultiThreadedUpdater extends MultiThreadedWriterBase {
                   switch (mt) {
                   case PUT:
                     Put put = new Put(rowKey);
-                    put.add(cf, column, hashCodeBytes);
+                    put.addColumn(cf, column, hashCodeBytes);
                     mutate(table, put, rowKeyBase, rowKey, cf, column, checkedValue);
                     buf.append(MutationType.PUT.getNumber());
                     break;
@@ -216,7 +216,7 @@ public class MultiThreadedUpdater extends MultiThreadedWriterBase {
                     Delete delete = new Delete(rowKey);
                     // Delete all versions since a put
                     // could be called multiple times if CM is used
-                    delete.deleteColumns(cf, column);
+                    delete.addColumns(cf, column);
                     mutate(table, delete, rowKeyBase, rowKey, cf, column, checkedValue);
                     buf.append(MutationType.DELETE.getNumber());
                     break;

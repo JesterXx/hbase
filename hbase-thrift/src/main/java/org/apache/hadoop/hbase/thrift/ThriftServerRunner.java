@@ -58,6 +58,7 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
@@ -67,7 +68,6 @@ import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.Increment;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
@@ -98,8 +98,8 @@ import org.apache.hadoop.hbase.thrift.generated.TRowResult;
 import org.apache.hadoop.hbase.thrift.generated.TScan;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ConnectionCache;
+import org.apache.hadoop.hbase.util.DNS;
 import org.apache.hadoop.hbase.util.Strings;
-import org.apache.hadoop.net.DNS;
 import org.apache.hadoop.security.SaslRpcServer.SaslGssCallbackHandler;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.authorize.ProxyUsers;
@@ -159,6 +159,15 @@ public class ThriftServerRunner implements Runnable {
   static final String THRIFT_SSL_KEYSTORE_STORE = "hbase.thrift.ssl.keystore.store";
   static final String THRIFT_SSL_KEYSTORE_PASSWORD = "hbase.thrift.ssl.keystore.password";
   static final String THRIFT_SSL_KEYSTORE_KEYPASSWORD = "hbase.thrift.ssl.keystore.keypassword";
+
+  /**
+   * Amount of time in milliseconds before a server thread will timeout
+   * waiting for client to send data on a connected socket. Currently,
+   * applies only to TBoundedThreadPoolServer
+   */
+  public static final String THRIFT_SERVER_SOCKET_READ_TIMEOUT_KEY =
+    "hbase.thrift.server.socket.read.timeout";
+  public static final int THRIFT_SERVER_SOCKET_READ_TIMEOUT_DEFAULT = 60000;
 
 
   /**
@@ -522,7 +531,6 @@ public class ThriftServerRunner implements Runnable {
 
     if (implType == ImplType.HS_HA || implType == ImplType.NONBLOCKING ||
         implType == ImplType.THREADED_SELECTOR) {
-
       InetAddress listenAddress = getBindAddress(conf);
       TNonblockingServerTransport serverTransport = new TNonblockingServerSocket(
           new InetSocketAddress(listenAddress, listenPort));
@@ -539,7 +547,7 @@ public class ThriftServerRunner implements Runnable {
         CallQueue callQueue =
             new CallQueue(new LinkedBlockingQueue<Call>(), metrics);
         ExecutorService executorService = createExecutor(
-            callQueue, serverArgs.getWorkerThreads());
+            callQueue, serverArgs.getMinWorkerThreads(), serverArgs.getMaxWorkerThreads());
         serverArgs.executorService(executorService)
                   .processor(processor)
                   .transportFactory(transportFactory)
@@ -551,7 +559,7 @@ public class ThriftServerRunner implements Runnable {
         CallQueue callQueue =
             new CallQueue(new LinkedBlockingQueue<Call>(), metrics);
         ExecutorService executorService = createExecutor(
-            callQueue, serverArgs.getWorkerThreads());
+            callQueue, serverArgs.getWorkerThreads(), serverArgs.getWorkerThreads());
         serverArgs.executorService(executorService)
                   .processor(processor)
                   .transportFactory(transportFactory)
@@ -563,10 +571,13 @@ public class ThriftServerRunner implements Runnable {
     } else if (implType == ImplType.THREAD_POOL) {
       // Thread pool server. Get the IP address to bind to.
       InetAddress listenAddress = getBindAddress(conf);
-
+      int readTimeout = conf.getInt(THRIFT_SERVER_SOCKET_READ_TIMEOUT_KEY,
+          THRIFT_SERVER_SOCKET_READ_TIMEOUT_DEFAULT);
       TServerTransport serverTransport = new TServerSocket(
           new TServerSocket.ServerSocketTransportArgs().
-              bindAddr(new InetSocketAddress(listenAddress, listenPort)).backlog(backlog));
+              bindAddr(new InetSocketAddress(listenAddress, listenPort)).
+              backlog(backlog).
+              clientTimeout(readTimeout));
 
       TBoundedThreadPoolServer.Args serverArgs =
           new TBoundedThreadPoolServer.Args(serverTransport, conf);
@@ -575,7 +586,7 @@ public class ThriftServerRunner implements Runnable {
                 .protocolFactory(protocolFactory);
       LOG.info("starting " + ImplType.THREAD_POOL.simpleClassName() + " on "
           + listenAddress + ":" + Integer.toString(listenPort)
-          + "; " + serverArgs);
+          + " with readTimeout " + readTimeout + "ms; " + serverArgs);
       TBoundedThreadPoolServer tserver =
           new TBoundedThreadPoolServer(serverArgs, metrics);
       this.tserver = tserver;
@@ -597,11 +608,11 @@ public class ThriftServerRunner implements Runnable {
   }
 
   ExecutorService createExecutor(BlockingQueue<Runnable> callQueue,
-                                 int workerThreads) {
+                                 int minWorkers, int maxWorkers) {
     ThreadFactoryBuilder tfb = new ThreadFactoryBuilder();
     tfb.setDaemon(true);
     tfb.setNameFormat("thrift-worker-%d");
-    return new ThreadPoolExecutor(workerThreads, workerThreads,
+    return new ThreadPoolExecutor(minWorkers, maxWorkers,
             Long.MAX_VALUE, TimeUnit.SECONDS, callQueue, tfb.build());
   }
 
@@ -771,26 +782,34 @@ public class ThriftServerRunner implements Runnable {
       }
     }
 
+    // ThriftServerRunner.compact should be deprecated and replaced with methods specific to
+    // table and region.
     @Override
     public void compact(ByteBuffer tableNameOrRegionName) throws IOError {
       try {
-        // TODO: HBaseAdmin.compact(byte[]) deprecated and not trivial to replace here.
-        // ThriftServerRunner.compact should be deprecated and replaced with methods specific to
-        // table and region.
-        ((HBaseAdmin) getAdmin()).compact(getBytes(tableNameOrRegionName));
+        try {
+          getAdmin().compactRegion(getBytes(tableNameOrRegionName));
+        } catch (IllegalArgumentException e) {
+          // Invalid region, try table
+          getAdmin().compact(TableName.valueOf(getBytes(tableNameOrRegionName)));
+        }
       } catch (IOException e) {
         LOG.warn(e.getMessage(), e);
         throw new IOError(Throwables.getStackTraceAsString(e));
       }
     }
 
+    // ThriftServerRunner.majorCompact should be deprecated and replaced with methods specific
+    // to table and region.
     @Override
     public void majorCompact(ByteBuffer tableNameOrRegionName) throws IOError {
       try {
-        // TODO: HBaseAdmin.majorCompact(byte[]) deprecated and not trivial to replace here.
-        // ThriftServerRunner.majorCompact should be deprecated and replaced with methods specific
-        // to table and region.
-        ((HBaseAdmin) getAdmin()).majorCompact(getBytes(tableNameOrRegionName));
+        try {
+          getAdmin().compactRegion(getBytes(tableNameOrRegionName));
+        } catch (IllegalArgumentException e) {
+          // Invalid region, try table
+          getAdmin().compact(TableName.valueOf(getBytes(tableNameOrRegionName)));
+        }
       } catch (IOException e) {
         LOG.warn(e.getMessage(), e);
         throw new IOError(Throwables.getStackTraceAsString(e));
@@ -1136,9 +1155,9 @@ public class ThriftServerRunner implements Runnable {
         addAttributes(delete, attributes);
         byte [][] famAndQf = KeyValue.parseColumn(getBytes(column));
         if (famAndQf.length == 1) {
-          delete.deleteFamily(famAndQf[0], timestamp);
+          delete.addFamily(famAndQf[0], timestamp);
         } else {
-          delete.deleteColumns(famAndQf[0], famAndQf[1], timestamp);
+          delete.addColumns(famAndQf[0], famAndQf[1], timestamp);
         }
         table.delete(delete);
 
@@ -1250,9 +1269,9 @@ public class ThriftServerRunner implements Runnable {
           byte[][] famAndQf = KeyValue.parseColumn(getBytes(m.column));
           if (m.isDelete) {
             if (famAndQf.length == 1) {
-              delete.deleteFamily(famAndQf[0], timestamp);
+              delete.addFamily(famAndQf[0], timestamp);
             } else {
-              delete.deleteColumns(famAndQf[0], famAndQf[1], timestamp);
+              delete.addColumns(famAndQf[0], famAndQf[1], timestamp);
             }
             delete.setDurability(m.writeToWAL ? Durability.SYNC_WAL
                 : Durability.SKIP_WAL);
@@ -1310,9 +1329,9 @@ public class ThriftServerRunner implements Runnable {
           if (m.isDelete) {
             // no qualifier, family only.
             if (famAndQf.length == 1) {
-              delete.deleteFamily(famAndQf[0], timestamp);
+              delete.addFamily(famAndQf[0], timestamp);
             } else {
-              delete.deleteColumns(famAndQf[0], famAndQf[1], timestamp);
+              delete.addColumns(famAndQf[0], famAndQf[1], timestamp);
             }
             delete.setDurability(m.writeToWAL ? Durability.SYNC_WAL
                 : Durability.SKIP_WAL);
@@ -1682,7 +1701,7 @@ public class ThriftServerRunner implements Runnable {
         }
 
         // find region start and end keys
-        HRegionInfo regionInfo = HRegionInfo.getHRegionInfo(startRowResult);
+        HRegionInfo regionInfo = MetaTableAccessor.getHRegionInfo(startRowResult);
         if (regionInfo == null) {
           throw new IOException("HRegionInfo REGIONINFO was null or " +
                                 " empty in Meta for row="
@@ -1696,7 +1715,7 @@ public class ThriftServerRunner implements Runnable {
         region.version = HREGION_VERSION; // version not used anymore, PB encoding used.
 
         // find region assignment to server
-        ServerName serverName = HRegionInfo.getServerName(startRowResult);
+        ServerName serverName = MetaTableAccessor.getServerName(startRowResult, 0);
         if (serverName != null) {
           region.setServerName(Bytes.toBytes(serverName.getHostname()));
           region.port = serverName.getPort();

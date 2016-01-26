@@ -63,8 +63,6 @@ import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Consistency;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
@@ -121,7 +119,7 @@ import com.google.protobuf.ServiceException;
 public class TestSplitTransactionOnCluster {
   private static final Log LOG =
     LogFactory.getLog(TestSplitTransactionOnCluster.class);
-  private HBaseAdmin admin = null;
+  private Admin admin = null;
   private MiniHBaseCluster cluster = null;
   private static final int NB_SERVERS = 3;
   private static CountDownLatch latch = new CountDownLatch(1);
@@ -202,7 +200,7 @@ public class TestSplitTransactionOnCluster {
         Coprocessor.PRIORITY_USER, region.getBaseConf());
 
       // split async
-      this.admin.split(region.getRegionInfo().getRegionName(), new byte[] {42});
+      this.admin.splitRegion(region.getRegionInfo().getRegionName(), new byte[] {42});
 
       // we have to wait until the SPLITTING state is seen by the master
       FailingSplitRegionObserver observer = (FailingSplitRegionObserver) region
@@ -366,9 +364,9 @@ public class TestSplitTransactionOnCluster {
 
       // Now try splitting.... should fail.  And each should successfully
       // rollback.
-      this.admin.split(hri.getRegionNameAsString());
-      this.admin.split(hri.getRegionNameAsString());
-      this.admin.split(hri.getRegionNameAsString());
+      this.admin.splitRegion(hri.getRegionName());
+      this.admin.splitRegion(hri.getRegionName());
+      this.admin.splitRegion(hri.getRegionName());
       // Wait around a while and assert count of regions remains constant.
       for (int i = 0; i < 10; i++) {
         Thread.sleep(100);
@@ -428,7 +426,7 @@ public class TestSplitTransactionOnCluster {
       LOG.info("Daughter we are going to split: " + daughter);
       // Compact first to ensure we have cleaned up references -- else the split
       // will fail.
-      this.admin.compact(daughter.getRegionName());
+      this.admin.compactRegion(daughter.getRegionName());
       daughters = cluster.getRegions(tableName);
       HRegion daughterRegion = null;
       for (HRegion r: daughters) {
@@ -487,30 +485,30 @@ public class TestSplitTransactionOnCluster {
         String row = "row" + i;
         Put p = new Put(row.getBytes());
         String val = "Val" + i;
-        p.add("col".getBytes(), "ql".getBytes(), val.getBytes());
+        p.addColumn("col".getBytes(), "ql".getBytes(), val.getBytes());
         table.put(p);
-        admin.flush(userTableName.getName());
+        admin.flush(userTableName);
         Delete d = new Delete(row.getBytes());
         // Do a normal delete
         table.delete(d);
-        admin.flush(userTableName.getName());
+        admin.flush(userTableName);
       }
-      admin.majorCompact(userTableName.getName());
+      admin.majorCompact(userTableName);
       List<HRegionInfo> regionsOfTable = TESTING_UTIL.getMiniHBaseCluster()
           .getMaster().getAssignmentManager().getRegionStates()
           .getRegionsOfTable(userTableName);
       HRegionInfo hRegionInfo = regionsOfTable.get(0);
       Put p = new Put("row6".getBytes());
-      p.add("col".getBytes(), "ql".getBytes(), "val".getBytes());
+      p.addColumn("col".getBytes(), "ql".getBytes(), "val".getBytes());
       table.put(p);
       p = new Put("row7".getBytes());
-      p.add("col".getBytes(), "ql".getBytes(), "val".getBytes());
+      p.addColumn("col".getBytes(), "ql".getBytes(), "val".getBytes());
       table.put(p);
       p = new Put("row8".getBytes());
-      p.add("col".getBytes(), "ql".getBytes(), "val".getBytes());
+      p.addColumn("col".getBytes(), "ql".getBytes(), "val".getBytes());
       table.put(p);
-      admin.flush(userTableName.getName());
-      admin.split(hRegionInfo.getRegionName(), "row7".getBytes());
+      admin.flush(userTableName);
+      admin.splitRegion(hRegionInfo.getRegionName(), "row7".getBytes());
       regionsOfTable = TESTING_UTIL.getMiniHBaseCluster().getMaster()
           .getAssignmentManager().getRegionStates()
           .getRegionsOfTable(userTableName);
@@ -586,7 +584,7 @@ public class TestSplitTransactionOnCluster {
       HRegionServer server = cluster.getRegionServer(tableRegionIndex);
       printOutRegions(server, "Initial regions: ");
 
-      this.admin.split(hri.getRegionNameAsString());
+      this.admin.splitRegion(hri.getRegionName());
       checkAndGetDaughters(tableName);
 
       HMaster master = abortAndWaitForMaster();
@@ -652,7 +650,7 @@ public class TestSplitTransactionOnCluster {
       SplitTransactionImpl st = new SplitTransactionImpl(region, Bytes.toBytes("row2"));
       try {
         st.prepare();
-        st.createDaughters(regionServer, regionServer);
+        st.createDaughters(regionServer, regionServer, null);
       } catch (IOException e) {
 
       }
@@ -751,19 +749,19 @@ public class TestSplitTransactionOnCluster {
     }
   }
 
-  private void insertData(final TableName tableName, HBaseAdmin admin, Table t) throws IOException,
+  private void insertData(final TableName tableName, Admin admin, Table t) throws IOException,
       InterruptedException {
     Put p = new Put(Bytes.toBytes("row1"));
-    p.add(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("1"));
+    p.addColumn(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("1"));
     t.put(p);
     p = new Put(Bytes.toBytes("row2"));
-    p.add(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("2"));
+    p.addColumn(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("2"));
     t.put(p);
     p = new Put(Bytes.toBytes("row3"));
-    p.add(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("3"));
+    p.addColumn(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("3"));
     t.put(p);
     p = new Put(Bytes.toBytes("row4"));
-    p.add(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("4"));
+    p.addColumn(Bytes.toBytes("cf"), Bytes.toBytes("q1"), Bytes.toBytes("4"));
     t.put(p);
     admin.flush(tableName);
   }
@@ -967,27 +965,28 @@ public class TestSplitTransactionOnCluster {
       Table hTable = connection.getTable(desc.getTableName());
       for(int i = 1; i < 5; i++) {
         Put p1 = new Put(("r"+i).getBytes());
-        p1.add(Bytes.toBytes("f"), "q1".getBytes(), "v".getBytes());
+        p1.addColumn(Bytes.toBytes("f"), "q1".getBytes(), "v".getBytes());
         hTable.put(p1);
       }
       admin.flush(desc.getTableName());
       List<HRegion> regions = cluster.getRegions(desc.getTableName());
       int serverWith = cluster.getServerWith(regions.get(0).getRegionInfo().getRegionName());
       HRegionServer regionServer = cluster.getRegionServer(serverWith);
-      cluster.getServerWith(regions.get(0).getRegionInfo().getRegionName());
       SplitTransactionImpl st = new SplitTransactionImpl(regions.get(0), Bytes.toBytes("r3"));
       st.prepare();
       st.stepsBeforePONR(regionServer, regionServer, false);
       Path tableDir =
           FSUtils.getTableDir(cluster.getMaster().getMasterFileSystem().getRootDir(),
             desc.getTableName());
-      tableDir.getFileSystem(cluster.getConfiguration());
       List<Path> regionDirs =
           FSUtils.getRegionDirs(tableDir.getFileSystem(cluster.getConfiguration()), tableDir);
       assertEquals(3,regionDirs.size());
-      cluster.startRegionServer();
       regionServer.kill();
-      cluster.getRegionServerThreads().get(serverWith).join();
+      // Before we check deadServerInProgress, we should ensure server is dead at master side.
+      while (!cluster.getMaster().getServerManager().
+          getDeadServers().isDeadServer(regionServer.serverName)) {
+        Thread.sleep(10);
+      }
       // Wait until finish processing of shutdown
       while (cluster.getMaster().getServerManager().areDeadServersInProgress()) {
         Thread.sleep(10);
@@ -1056,8 +1055,8 @@ public class TestSplitTransactionOnCluster {
       HRegion region = regions.get(0);
       for(int i = 3;i<9;i++) {
         Put p = new Put(Bytes.toBytes("row"+i));
-        p.add(Bytes.toBytes("f"), Bytes.toBytes("q"), Bytes.toBytes("value"+i));
-        p.add(Bytes.toBytes("i_f"), Bytes.toBytes("q"), Bytes.toBytes("value"+i));
+        p.addColumn(Bytes.toBytes("f"), Bytes.toBytes("q"), Bytes.toBytes("value" + i));
+        p.addColumn(Bytes.toBytes("i_f"), Bytes.toBytes("q"), Bytes.toBytes("value" + i));
         region.put(p);
       }
       region.flush(true);
@@ -1143,7 +1142,7 @@ public class TestSplitTransactionOnCluster {
 
   private void split(final HRegionInfo hri, final HRegionServer server, final int regionCount)
       throws IOException, InterruptedException {
-    this.admin.split(hri.getRegionNameAsString());
+    this.admin.splitRegion(hri.getRegionName());
     for (int i = 0; ProtobufUtil.getOnlineRegions(
         server.getRSRpcServices()).size() <= regionCount && i < 300; i++) {
       LOG.debug("Waiting on region to split");
@@ -1374,7 +1373,7 @@ public class TestSplitTransactionOnCluster {
         throws IOException {
       RegionCoprocessorEnvironment environment = ctx.getEnvironment();
       HRegionServer rs = (HRegionServer) environment.getRegionServerServices();
-      st.stepsAfterPONR(rs, rs, daughterRegions);
+      st.stepsAfterPONR(rs, rs, daughterRegions, null);
     }
   }
 

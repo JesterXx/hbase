@@ -24,8 +24,6 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.TestChoreService.ScheduledChoreSamples.CountingChore;
 import org.apache.hadoop.hbase.TestChoreService.ScheduledChoreSamples.DoNothingChore;
 import org.apache.hadoop.hbase.TestChoreService.ScheduledChoreSamples.FailInitialChore;
@@ -38,8 +36,6 @@ import org.junit.experimental.categories.Category;
 
 @Category(SmallTests.class)
 public class TestChoreService {
-  private static final Log LOG = LogFactory.getLog(TestChoreService.class);
-
   /**
    * A few ScheduledChore samples that are useful for testing with ChoreService
    */
@@ -319,7 +315,7 @@ public class TestChoreService {
     final int corePoolSize = 10;
     final int defaultCorePoolSize = ChoreService.MIN_CORE_POOL_SIZE;
 
-    ChoreService customInit = new ChoreService("testChoreServiceConstruction_custom", corePoolSize);
+    ChoreService customInit = new ChoreService("testChoreServiceConstruction_custom", corePoolSize, false);
     try {
       assertEquals(corePoolSize, customInit.getCorePoolSize());
     } finally {
@@ -333,11 +329,11 @@ public class TestChoreService {
       shutdownService(defaultInit);
     }
 
-    ChoreService invalidInit = new ChoreService("testChoreServiceConstruction_invalid", -10);
+    ChoreService invalidInit = new ChoreService("testChoreServiceConstruction_invalid", -10, false);
     try {
       assertEquals(defaultCorePoolSize, invalidInit.getCorePoolSize());
     } finally {
-    shutdownService(invalidInit);
+      shutdownService(invalidInit);
     }
   }
 
@@ -373,7 +369,7 @@ public class TestChoreService {
     final int period = 100;
     final int delta = 5;
     ChoreService service = ChoreService.getInstance("testForceTrigger");
-    CountingChore chore = new CountingChore("countingChore", period);
+    final CountingChore chore = new CountingChore("countingChore", period);
     try {
       service.scheduleChore(chore);
       Thread.sleep(10 * period + delta);
@@ -393,11 +389,12 @@ public class TestChoreService {
       chore.triggerNow();
       Thread.sleep(delta);
 
-      assertTrue(chore.getCountOfChoreCalls() == 16);
+      assertTrue("" + chore.getCountOfChoreCalls(), chore.getCountOfChoreCalls() == 16);
 
       Thread.sleep(10 * period + delta);
 
-      assertTrue(chore.getCountOfChoreCalls() == 26);
+      // Be loosey-goosey. It used to be '26' but it was a big flakey relying on timing.
+      assertTrue("" + chore.getCountOfChoreCalls(), chore.getCountOfChoreCalls() > 16);
     } finally {
       shutdownService(service);
     }
@@ -406,7 +403,7 @@ public class TestChoreService {
   @Test (timeout=20000)
   public void testCorePoolIncrease() throws InterruptedException {
     final int initialCorePoolSize = 3;
-    ChoreService service = new ChoreService("testCorePoolIncrease", initialCorePoolSize);
+    ChoreService service = new ChoreService("testCorePoolIncrease", initialCorePoolSize, false);
 
     try {
       assertEquals("Should have a core pool of size: " + initialCorePoolSize, initialCorePoolSize,
@@ -446,7 +443,7 @@ public class TestChoreService {
   @Test(timeout = 30000)
   public void testCorePoolDecrease() throws InterruptedException {
     final int initialCorePoolSize = 3;
-    ChoreService service = new ChoreService("testCorePoolDecrease", initialCorePoolSize);
+    ChoreService service = new ChoreService("testCorePoolDecrease", initialCorePoolSize, false);
     final int chorePeriod = 100;
     try {
       // Slow chores always miss their start time and thus the core pool size should be at least as

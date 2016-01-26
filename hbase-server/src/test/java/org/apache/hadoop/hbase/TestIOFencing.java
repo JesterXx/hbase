@@ -46,6 +46,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputController;
 import org.apache.hadoop.hbase.regionserver.wal.WALUtil;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.MiscTests;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -129,6 +130,16 @@ public class TestIOFencing {
       }
     }
 
+    @Override
+    public boolean compact(CompactionContext compaction, Store store,
+        CompactionThroughputController throughputController, User user) throws IOException {
+      try {
+        return super.compact(compaction, store, throughputController, user);
+      } finally {
+        compactCount++;
+      }
+    }
+
     public int countStoreFiles() {
       int count = 0;
       for (Store store : stores.values()) {
@@ -186,17 +197,6 @@ public class TestIOFencing {
       r = (CompactionBlockerRegion) region;
     }
 
-    @Override
-    protected void completeCompaction(final Collection<StoreFile> compactedFiles,
-        boolean removeFiles) throws IOException {
-      try {
-        r.compactionsWaiting.countDown();
-        r.compactionsBlocked.await();
-      } catch (InterruptedException ex) {
-        throw new IOException(ex);
-      }
-      super.completeCompaction(compactedFiles, removeFiles);
-    }
     @Override
     protected void completeCompaction(Collection<StoreFile> compactedFiles) throws IOException {
       try {
@@ -296,7 +296,7 @@ public class TestIOFencing {
       assertTrue(compactingRegion.countStoreFiles() > 1);
       final byte REGION_NAME[] = compactingRegion.getRegionInfo().getRegionName();
       LOG.info("Asking for compaction");
-      ((HBaseAdmin)admin).majorCompact(TABLE_NAME.getName());
+      admin.majorCompact(TABLE_NAME);
       LOG.info("Waiting for compaction to be about to start");
       compactingRegion.waitForCompactionToBlock();
       LOG.info("Starting a new server");
@@ -337,7 +337,7 @@ public class TestIOFencing {
       // If we survive the split keep going...
       // Now we make sure that the region isn't totally confused.  Load up more rows.
       TEST_UTIL.loadNumericRows(table, FAMILY, FIRST_BATCH_COUNT, FIRST_BATCH_COUNT + SECOND_BATCH_COUNT);
-      ((HBaseAdmin)admin).majorCompact(TABLE_NAME.getName());
+      admin.majorCompact(TABLE_NAME);
       startWaitTime = System.currentTimeMillis();
       while (newRegion.compactCount == 0) {
         Thread.sleep(1000);

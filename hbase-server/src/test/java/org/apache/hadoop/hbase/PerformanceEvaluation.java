@@ -93,9 +93,9 @@ import org.apache.htrace.impl.ProbabilitySampler;
 
 import com.google.common.base.Objects;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import com.yammer.metrics.core.Histogram;
-import com.yammer.metrics.stats.Snapshot;
-import com.yammer.metrics.stats.UniformSample;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Snapshot;
+import com.codahale.metrics.UniformReservoir;
 
 /**
  * Script used evaluating HBase performance and scalability.  Runs a HBase
@@ -1054,8 +1054,8 @@ public class PerformanceEvaluation extends Configured implements Tool {
         this.connection = ConnectionFactory.createConnection(conf);
       }
       onStartup();
-      latency = YammerHistogramUtils.newHistogram(new UniformSample(1024 * 500));
-      valueSize = YammerHistogramUtils.newHistogram(new UniformSample(1024 * 500));
+      latency = YammerHistogramUtils.newHistogram(new UniformReservoir(1024 * 500));
+      valueSize = YammerHistogramUtils.newHistogram(new UniformReservoir(1024 * 500));
     }
 
     abstract void onStartup() throws IOException;
@@ -1121,21 +1121,21 @@ public class PerformanceEvaluation extends Configured implements Tool {
      */
     private void reportLatency() throws IOException {
       status.setStatus(testName + " latency log (microseconds), on " +
-          latency.count() + " measures");
+          latency.getCount() + " measures");
       reportHistogram(this.latency);
     }
 
     private void reportValueSize() throws IOException {
       status.setStatus(testName + " valueSize after " +
-          valueSize.count() + " measures");
+          valueSize.getCount() + " measures");
       reportHistogram(this.valueSize);
     }
 
     private void reportHistogram(final Histogram h) throws IOException {
       Snapshot sn = h.getSnapshot();
-      status.setStatus(testName + " Min      = " + h.min());
-      status.setStatus(testName + " Avg      = " + h.mean());
-      status.setStatus(testName + " StdDev   = " + h.stdDev());
+      status.setStatus(testName + " Min      = " + sn.getMin());
+      status.setStatus(testName + " Avg      = " + sn.getMean());
+      status.setStatus(testName + " StdDev   = " + sn.getStdDev());
       status.setStatus(testName + " 50th     = " + sn.getMedian());
       status.setStatus(testName + " 75th     = " + sn.get75thPercentile());
       status.setStatus(testName + " 95th     = " + sn.get95thPercentile());
@@ -1143,7 +1143,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
       status.setStatus(testName + " 99.9th   = " + sn.get999thPercentile());
       status.setStatus(testName + " 99.99th  = " + sn.getValue(0.9999));
       status.setStatus(testName + " 99.999th = " + sn.getValue(0.99999));
-      status.setStatus(testName + " Max      = " + h.max());
+      status.setStatus(testName + " Max      = " + sn.getMax());
     }
 
     /**
@@ -1405,7 +1405,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
           byte[] tag = generateData(this.rand, TAG_LENGTH);
           Tag[] tags = new Tag[opts.noOfTags];
           for (int n = 0; n < opts.noOfTags; n++) {
-            Tag t = new Tag((byte) n, tag);
+            Tag t = new ArrayBackedTag((byte) n, tag);
             tags[n] = t;
           }
           KeyValue kv = new KeyValue(row, FAMILY_NAME, qualifier, HConstants.LATEST_TIMESTAMP,
@@ -1413,7 +1413,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
           put.add(kv);
           updateValueSize(kv.getValueLength());
         } else {
-          put.add(FAMILY_NAME, qualifier, value);
+          put.addColumn(FAMILY_NAME, qualifier, value);
           updateValueSize(value.length);
         }
       }
@@ -1493,7 +1493,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
           byte[] tag = generateData(this.rand, TAG_LENGTH);
           Tag[] tags = new Tag[opts.noOfTags];
           for (int n = 0; n < opts.noOfTags; n++) {
-            Tag t = new Tag((byte) n, tag);
+            Tag t = new ArrayBackedTag((byte) n, tag);
             tags[n] = t;
           }
           KeyValue kv = new KeyValue(row, FAMILY_NAME, qualifier, HConstants.LATEST_TIMESTAMP,
@@ -1501,7 +1501,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
           put.add(kv);
           updateValueSize(kv.getValueLength());
         } else {
-          put.add(FAMILY_NAME, qualifier, value);
+          put.addColumn(FAMILY_NAME, qualifier, value);
           updateValueSize(value.length);
         }
       }
@@ -1611,15 +1611,6 @@ public class PerformanceEvaluation extends Configured implements Tool {
       b[i] = a;
     }
     return b;
-  }
-
-  /**
-   * @deprecated Use {@link #generateData(java.util.Random, int)} instead.
-   * @return Generated random value to insert into a table cell.
-   */
-  @Deprecated
-  public static byte[] generateValue(final Random r) {
-    return generateData(r, DEFAULT_VALUE_LENGTH);
   }
 
   static byte [] getRandomRow(final Random random, final int totalRows) {

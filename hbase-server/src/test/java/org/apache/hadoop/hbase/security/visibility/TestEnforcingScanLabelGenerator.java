@@ -31,7 +31,6 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Table;
@@ -104,15 +103,15 @@ public class TestEnforcingScanLabelGenerator {
         try (Connection connection = ConnectionFactory.createConnection(conf);
              Table table = TEST_UTIL.createTable(tableName, CF)) {
           Put put = new Put(ROW_1);
-          put.add(CF, Q1, HConstants.LATEST_TIMESTAMP, value);
+          put.addColumn(CF, Q1, HConstants.LATEST_TIMESTAMP, value);
           put.setCellVisibility(new CellVisibility(SECRET));
           table.put(put);
           put = new Put(ROW_1);
-          put.add(CF, Q2, HConstants.LATEST_TIMESTAMP, value);
+          put.addColumn(CF, Q2, HConstants.LATEST_TIMESTAMP, value);
           put.setCellVisibility(new CellVisibility(CONFIDENTIAL));
           table.put(put);
           put = new Put(ROW_1);
-          put.add(CF, Q3, HConstants.LATEST_TIMESTAMP, value);
+          put.addColumn(CF, Q3, HConstants.LATEST_TIMESTAMP, value);
           table.put(put);
           return null;
         }

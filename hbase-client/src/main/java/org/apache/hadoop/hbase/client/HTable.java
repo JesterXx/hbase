@@ -42,7 +42,6 @@ import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.AsyncProcess.AsyncRequestFuture;
@@ -62,8 +61,6 @@ import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutateRequest;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutateResponse;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.RegionAction;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.CompareType;
-import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.GetTableDescriptorsRequest;
-import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.GetTableDescriptorsResponse;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
@@ -131,14 +128,15 @@ public class HTable implements HTableInterface {
     if (maxThreads == 0) {
       maxThreads = 1; // is there a better default?
     }
+    int corePoolSize = conf.getInt("hbase.htable.threads.coresize", 1);
     long keepAliveTime = conf.getLong("hbase.htable.threads.keepalivetime", 60);
 
     // Using the "direct handoff" approach, new threads will only be created
     // if it is necessary and will grow unbounded. This could be bad but in HCM
     // we only create as many Runnables as there are region servers. It means
     // it also scales when new region servers are added.
-    ThreadPoolExecutor pool = new ThreadPoolExecutor(1, maxThreads, keepAliveTime, TimeUnit.SECONDS,
-        new SynchronousQueue<Runnable>(), Threads.newDaemonThreadFactory("htable"));
+    ThreadPoolExecutor pool = new ThreadPoolExecutor(corePoolSize, maxThreads, keepAliveTime,
+      TimeUnit.SECONDS, new SynchronousQueue<Runnable>(), Threads.newDaemonThreadFactory("htable"));
     pool.allowCoreThreadTimeOut(true);
     return pool;
   }
@@ -441,7 +439,7 @@ public class HTable implements HTableInterface {
           try {
             ClientProtos.GetResponse response = getStub().get(controller, request);
             if (response == null) return null;
-            return ProtobufUtil.toResult(response.getResult());
+            return ProtobufUtil.toResult(response.getResult(), controller.cellScanner());
           } catch (ServiceException se) {
             throw ProtobufUtil.getRemoteException(se);
           }

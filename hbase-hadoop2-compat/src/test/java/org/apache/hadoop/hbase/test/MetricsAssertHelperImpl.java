@@ -19,7 +19,6 @@
 package org.apache.hadoop.hbase.test;
 
 import org.apache.hadoop.hbase.metrics.BaseSource;
-import org.apache.hadoop.hbase.metrics.BaseSourceImpl;
 import org.apache.hadoop.metrics2.AbstractMetric;
 import org.apache.hadoop.metrics2.MetricsCollector;
 import org.apache.hadoop.metrics2.MetricsInfo;
@@ -206,6 +205,13 @@ public class MetricsAssertHelperImpl implements MetricsAssertHelper {
   }
 
   @Override
+  public boolean checkCounterExists(String name, BaseSource source) {
+    getMetrics(source);
+    String cName = canonicalizeMetricName(name);
+    return (counters.get(cName) != null) ? true : false;
+  }
+  
+  @Override
   public double getGaugeDouble(String name, BaseSource source) {
     getMetrics(source);
     String cName = canonicalizeMetricName(name);
@@ -220,7 +226,6 @@ public class MetricsAssertHelperImpl implements MetricsAssertHelper {
     assertNotNull("Should get gauge " + cName + " but did not", gauges.get(cName));
     return gauges.get(cName).longValue();
   }
-
 
   private void reset() {
     tags.clear();

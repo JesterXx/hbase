@@ -23,6 +23,7 @@ import static org.apache.hadoop.hbase.util.Bytes.len;
 
 import java.io.DataInput;
 import java.io.DataOutput;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -395,7 +396,8 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
   }
 
   /**
-   * Constructs KeyValue structure filled with null value.
+   * Constructs KeyValue structure as a put filled with specified values and
+   * LATEST_TIMESTAMP.
    * @param row - row key (arbitrary byte array)
    * @param family family name
    * @param qualifier column qualifier
@@ -892,7 +894,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
     int tagsLength = 0;
     if (tags != null && tags.length > 0) {
       for (Tag t: tags) {
-        tagsLength += t.getLength();
+        tagsLength += t.getValueLength() + Tag.INFRASTRUCTURE_SIZE;
       }
     }
     checkForTagsLength(tagsLength);
@@ -926,7 +928,11 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
     if (tagsLength > 0) {
       pos = Bytes.putAsShort(buffer, pos, tagsLength);
       for (Tag t : tags) {
-        pos = Bytes.putBytes(buffer, pos, t.getBuffer(), t.getOffset(), t.getLength());
+        int tlen = t.getValueLength();
+        pos = Bytes.putAsShort(buffer, pos, tlen + Tag.TYPE_LENGTH_SIZE);
+        pos = Bytes.putByte(buffer, pos, t.getType());
+        TagUtil.copyValueTo(t, buffer, pos);
+        pos += tlen;
       }
     }
     return keyValueLength;
@@ -1011,7 +1017,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
     int tagsLength = 0;
     if (tags != null && !tags.isEmpty()) {
       for (Tag t : tags) {
-        tagsLength += t.getLength();
+        tagsLength += t.getValueLength() + Tag.INFRASTRUCTURE_SIZE;
       }
     }
     checkForTagsLength(tagsLength);
@@ -1051,7 +1057,11 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
     if (tagsLength > 0) {
       pos = Bytes.putAsShort(bytes, pos, tagsLength);
       for (Tag t : tags) {
-        pos = Bytes.putBytes(bytes, pos, t.getBuffer(), t.getOffset(), t.getLength());
+        int tlen = t.getValueLength();
+        pos = Bytes.putAsShort(bytes, pos, tlen + Tag.TYPE_LENGTH_SIZE);
+        pos = Bytes.putByte(bytes, pos, t.getType());
+        TagUtil.copyValueTo(t, bytes, pos);
+        pos += tlen;
       }
     }
     return bytes;
@@ -1174,7 +1184,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
     if (tags != null) {
       List<String> tagsString = new ArrayList<String>();
       for (Tag t : tags) {
-        tagsString.add((t.getType()) + ":" +Bytes.toStringBinary(t.getValue()));
+        tagsString.add((t.getType()) + ":" + TagUtil.getValueAsString(t));
       }
       stringMap.put("tag", tagsString);
     }
@@ -1556,7 +1566,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
     if (tagsLength == 0) {
       return EMPTY_ARRAY_LIST;
     }
-    return Tag.asList(getTagsArray(), getTagsOffset(), tagsLength);
+    return TagUtil.asList(getTagsArray(), getTagsOffset(), tagsLength);
   }
 
   /**
@@ -2384,7 +2394,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
   public static KeyValue cloneAndAddTags(Cell c, List<Tag> newTags) {
     List<Tag> existingTags = null;
     if(c.getTagsLength() > 0) {
-      existingTags = Tag.asList(c.getTagsArray(), c.getTagsOffset(), c.getTagsLength());
+      existingTags = CellUtil.getTags(c);
       existingTags.addAll(newTags);
     } else {
       existingTags = newTags;
@@ -2400,8 +2410,7 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
    * Create a KeyValue reading from the raw InputStream.
    * Named <code>iscreate</code> so doesn't clash with {@link #create(DataInput)}
    * @param in
-   * @return Created KeyValue OR if we find a length of zero, we will return null which
-   * can be useful marking a stream as done.
+   * @return Created KeyValue or throws an exception
    * @throws IOException
    * {@link Deprecated} As of 1.2. Use {@link KeyValueUtil#iscreate(InputStream, boolean)} instead.
    */
@@ -2412,7 +2421,9 @@ public class KeyValue implements Cell, HeapSize, Cloneable, SettableSequenceId,
     while (bytesRead < intBytes.length) {
       int n = in.read(intBytes, bytesRead, intBytes.length - bytesRead);
       if (n < 0) {
-        if (bytesRead == 0) return null; // EOF at start is ok
+        if (bytesRead == 0) {
+          throw new EOFException();
+        }
         throw new IOException("Failed read of int, read " + bytesRead + " bytes");
       }
       bytesRead += n;

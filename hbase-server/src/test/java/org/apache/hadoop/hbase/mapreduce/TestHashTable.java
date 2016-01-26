@@ -29,7 +29,6 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
@@ -58,12 +57,10 @@ public class TestHashTable {
   @BeforeClass
   public static void beforeClass() throws Exception {
     TEST_UTIL.startMiniCluster(3);
-    TEST_UTIL.startMiniMapReduceCluster();
   }
   
   @AfterClass
   public static void afterClass() throws Exception {
-    TEST_UTIL.shutdownMiniMapReduceCluster();
     TEST_UTIL.shutdownMiniCluster();
   }
   

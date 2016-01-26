@@ -37,7 +37,6 @@ import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.FSUtils;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -47,17 +46,14 @@ public class TestMobFile extends TestCase {
   private static final HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private Configuration conf = TEST_UTIL.getConfiguration();
   private CacheConfig cacheConf =  new CacheConfig(conf);
-  private final String TABLE = "tableName";
-  private final String FAMILY = "familyName";
 
   @Test
   public void testReadKeyValue() throws Exception {
-    FileSystem fs = FileSystem.get(conf);
-	Path testDir = FSUtils.getRootDir(conf);
-    Path outputDir = new Path(new Path(testDir, TABLE), FAMILY);
+    Path testDir = TEST_UTIL.getDataTestDir();
+    FileSystem fs = testDir.getFileSystem(conf);
     HFileContext meta = new HFileContextBuilder().withBlockSize(8*1024).build();
     StoreFile.Writer writer = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-            .withOutputDir(outputDir)
+            .withOutputDir(testDir)
             .withFileContext(meta)
             .build();
     String caseName = getName();
@@ -106,12 +102,11 @@ public class TestMobFile extends TestCase {
 
   @Test
   public void testGetScanner() throws Exception {
-    FileSystem fs = FileSystem.get(conf);
-    Path testDir = FSUtils.getRootDir(conf);
-    Path outputDir = new Path(new Path(testDir, TABLE), FAMILY);
+    Path testDir = TEST_UTIL.getDataTestDir();
+    FileSystem fs = testDir.getFileSystem(conf);
     HFileContext meta = new HFileContextBuilder().withBlockSize(8*1024).build();
     StoreFile.Writer writer = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-            .withOutputDir(outputDir)
+            .withOutputDir(testDir)
             .withFileContext(meta)
             .build();
     MobTestUtil.writeStoreFile(writer, getName());

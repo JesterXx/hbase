@@ -200,21 +200,19 @@ public class CreateNamespaceProcedure
       // Namespace manager might not be ready if master is not fully initialized,
       // return false to reject user namespace creation; return true for default
       // and system namespace creation (this is part of master initialization).
-      if (nsDescriptor.equals(NamespaceDescriptor.DEFAULT_NAMESPACE) ||
-        nsDescriptor.equals(NamespaceDescriptor.SYSTEM_NAMESPACE)) {
-        return true;
-      }
+      boolean isBootstrapNs = nsDescriptor.equals(NamespaceDescriptor.DEFAULT_NAMESPACE) ||
+        nsDescriptor.equals(NamespaceDescriptor.SYSTEM_NAMESPACE);
 
-      return false;
+      if (!isBootstrapNs && env.waitInitialized(this)) {
+        return false;
+      }
     }
-    return getTableNamespaceManager(env).acquireExclusiveLock();
+    return env.getProcedureQueue().tryAcquireNamespaceExclusiveLock(this, getNamespaceName());
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    if (env.getMasterServices().isInitialized()) {
-      getTableNamespaceManager(env).releaseExclusiveLock();
-    }
+    env.getProcedureQueue().releaseNamespaceExclusiveLock(this, getNamespaceName());
   }
 
   @Override
@@ -225,6 +223,10 @@ public class CreateNamespaceProcedure
   @Override
   public TableOperationType getTableOperationType() {
     return TableOperationType.EDIT;
+  }
+
+  private String getNamespaceName() {
+    return nsDescriptor.getName();
   }
 
   /**
@@ -348,7 +350,7 @@ public class CreateNamespaceProcedure
   }
 
   private static TableNamespaceManager getTableNamespaceManager(final MasterProcedureEnv env) {
-    return env.getMasterServices().getTableNamespaceManager();
+    return env.getMasterServices().getClusterSchema().getTableNamespaceManager();
   }
 
   /**

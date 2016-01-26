@@ -31,11 +31,13 @@ import org.apache.hadoop.metrics2.lib.MutableHistogram;
 public class MetricsHBaseServerSourceImpl extends BaseSourceImpl
     implements MetricsHBaseServerSource {
 
+
   private final MetricsHBaseServerWrapper wrapper;
   private final MutableCounterLong authorizationSuccesses;
   private final MutableCounterLong authorizationFailures;
   private final MutableCounterLong authenticationSuccesses;
   private final MutableCounterLong authenticationFailures;
+  private final MutableCounterLong authenticationFallbacks;
   private final MutableCounterLong sentBytes;
   private final MutableCounterLong receivedBytes;
 
@@ -46,6 +48,7 @@ public class MetricsHBaseServerSourceImpl extends BaseSourceImpl
   private final MutableCounterLong exceptionsSanity;
   private final MutableCounterLong exceptionsNSRE;
   private final MutableCounterLong exceptionsMoved;
+  private final MutableCounterLong exceptionsMultiTooLarge;
 
 
   private MutableHistogram queueCallTime;
@@ -80,24 +83,28 @@ public class MetricsHBaseServerSourceImpl extends BaseSourceImpl
         .newCounter(EXCEPTIONS_MOVED_NAME, EXCEPTIONS_TYPE_DESC, 0L);
     this.exceptionsNSRE = this.getMetricsRegistry()
         .newCounter(EXCEPTIONS_NSRE_NAME, EXCEPTIONS_TYPE_DESC, 0L);
+    this.exceptionsMultiTooLarge = this.getMetricsRegistry()
+        .newCounter(EXCEPTIONS_MULTI_TOO_LARGE_NAME, EXCEPTIONS_MULTI_TOO_LARGE_DESC, 0L);
 
     this.authenticationSuccesses = this.getMetricsRegistry().newCounter(
         AUTHENTICATION_SUCCESSES_NAME, AUTHENTICATION_SUCCESSES_DESC, 0L);
     this.authenticationFailures = this.getMetricsRegistry().newCounter(AUTHENTICATION_FAILURES_NAME,
         AUTHENTICATION_FAILURES_DESC, 0L);
+    this.authenticationFallbacks = this.getMetricsRegistry().newCounter(
+        AUTHENTICATION_FALLBACKS_NAME, AUTHENTICATION_FALLBACKS_DESC, 0L);
     this.sentBytes = this.getMetricsRegistry().newCounter(SENT_BYTES_NAME,
         SENT_BYTES_DESC, 0L);
     this.receivedBytes = this.getMetricsRegistry().newCounter(RECEIVED_BYTES_NAME,
         RECEIVED_BYTES_DESC, 0L);
-    this.queueCallTime = this.getMetricsRegistry().newHistogram(QUEUE_CALL_TIME_NAME,
+    this.queueCallTime = this.getMetricsRegistry().newTimeHistogram(QUEUE_CALL_TIME_NAME,
         QUEUE_CALL_TIME_DESC);
-    this.processCallTime = this.getMetricsRegistry().newHistogram(PROCESS_CALL_TIME_NAME,
+    this.processCallTime = this.getMetricsRegistry().newTimeHistogram(PROCESS_CALL_TIME_NAME,
         PROCESS_CALL_TIME_DESC);
-    this.totalCallTime = this.getMetricsRegistry().newHistogram(TOTAL_CALL_TIME_NAME,
+    this.totalCallTime = this.getMetricsRegistry().newTimeHistogram(TOTAL_CALL_TIME_NAME,
         TOTAL_CALL_TIME_DESC);
-    this.requestSize = this.getMetricsRegistry().newHistogram(REQUEST_SIZE_NAME,
+    this.requestSize = this.getMetricsRegistry().newSizeHistogram(REQUEST_SIZE_NAME,
         REQUEST_SIZE_DESC);
-    this.responseSize = this.getMetricsRegistry().newHistogram(RESPONSE_SIZE_NAME,
+    this.responseSize = this.getMetricsRegistry().newSizeHistogram(RESPONSE_SIZE_NAME,
               RESPONSE_SIZE_DESC);
   }
 
@@ -114,6 +121,11 @@ public class MetricsHBaseServerSourceImpl extends BaseSourceImpl
   @Override
   public void authenticationFailure() {
     authenticationFailures.incr();
+  }
+
+  @Override
+  public void authenticationFallback() {
+    authenticationFallbacks.incr();
   }
 
   @Override
@@ -149,6 +161,11 @@ public class MetricsHBaseServerSourceImpl extends BaseSourceImpl
   @Override
   public void tooBusyException() {
     exceptionsBusy.incr();
+  }
+
+  @Override
+  public void multiActionTooLargeException() {
+    exceptionsMultiTooLarge.incr();
   }
 
   @Override

@@ -42,7 +42,6 @@ import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.exceptions.DeserializationException;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
@@ -290,9 +289,9 @@ public class TestTablePermissions {
 
     Table table = UTIL.getConnection().getTable(TEST_TABLE);
     table.put(new Put(Bytes.toBytes("row1"))
-        .add(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes("v1")));
+            .addColumn(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes("v1")));
     table.put(new Put(Bytes.toBytes("row2"))
-        .add(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes("v2")));
+            .addColumn(TEST_FAMILY, TEST_QUALIFIER, Bytes.toBytes("v2")));
     Admin admin = UTIL.getHBaseAdmin();
     admin.split(TEST_TABLE);
 

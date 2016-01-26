@@ -34,9 +34,7 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
-import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -77,13 +75,11 @@ public class TestMultithreadedTableMapper {
         UTIL.createMultiRegionTable(MULTI_REGION_TABLE_NAME, new byte[][] { INPUT_FAMILY,
             OUTPUT_FAMILY });
     UTIL.loadTable(table, INPUT_FAMILY, false);
-    UTIL.startMiniMapReduceCluster();
     UTIL.waitUntilAllRegionsAssigned(MULTI_REGION_TABLE_NAME);
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    UTIL.shutdownMiniMapReduceCluster();
     UTIL.shutdownMiniCluster();
   }
 
@@ -119,7 +115,7 @@ public class TestMultithreadedTableMapper {
       newValue.reverse();
       // Now set the value to be collected
       Put outval = new Put(key.get());
-      outval.add(OUTPUT_FAMILY, null, Bytes.toBytes(newValue.toString()));
+      outval.addColumn(OUTPUT_FAMILY, null, Bytes.toBytes(newValue.toString()));
       context.write(key, outval);
     }
   }

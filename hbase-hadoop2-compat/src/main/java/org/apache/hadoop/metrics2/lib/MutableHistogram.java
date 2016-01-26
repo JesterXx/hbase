@@ -26,9 +26,9 @@ import org.apache.hadoop.metrics2.MetricHistogram;
 import org.apache.hadoop.metrics2.MetricsInfo;
 import org.apache.hadoop.metrics2.MetricsRecordBuilder;
 
-import com.yammer.metrics.stats.ExponentiallyDecayingSample;
-import com.yammer.metrics.stats.Sample;
-import com.yammer.metrics.stats.Snapshot;
+import com.codahale.metrics.ExponentiallyDecayingReservoir;
+import com.codahale.metrics.Reservoir;
+import com.codahale.metrics.Snapshot;
 
 /**
  * A histogram implementation that runs in constant space, and exports to hadoop2's metrics2 system.
@@ -41,9 +41,9 @@ public class MutableHistogram extends MutableMetric implements MetricHistogram {
   // Per Cormode et al. an alpha of 0.015 strongly biases to the last 5 minutes
   private static final double DEFAULT_ALPHA = 0.015;
 
-  private final String name;
-  private final String desc;
-  private final Sample sample;
+  protected final String name;
+  protected final String desc;
+  private final Reservoir reservoir;
   private final AtomicLong min;
   private final AtomicLong max;
   private final AtomicLong sum;
@@ -56,7 +56,7 @@ public class MutableHistogram extends MutableMetric implements MetricHistogram {
   public MutableHistogram(String name, String description) {
     this.name = StringUtils.capitalize(name);
     this.desc = StringUtils.uncapitalize(description);
-    sample = new ExponentiallyDecayingSample(DEFAULT_SAMPLE_SIZE, DEFAULT_ALPHA);
+    reservoir = new ExponentiallyDecayingReservoir(DEFAULT_SAMPLE_SIZE, DEFAULT_ALPHA);
     count = new AtomicLong();
     min = new AtomicLong(Long.MAX_VALUE);
     max = new AtomicLong(Long.MIN_VALUE);
@@ -66,7 +66,7 @@ public class MutableHistogram extends MutableMetric implements MetricHistogram {
   public void add(final long val) {
     setChanged();
     count.incrementAndGet();
-    sample.update(val);
+    reservoir.update(val);
     setMax(val);
     setMin(val);
     sum.getAndAdd(val);
@@ -116,7 +116,12 @@ public class MutableHistogram extends MutableMetric implements MetricHistogram {
   public void snapshot(MetricsRecordBuilder metricsRecordBuilder, boolean all) {
     if (all || changed()) {
       clearChanged();
-      final Snapshot s = sample.getSnapshot();
+      updateSnapshotMetrics(metricsRecordBuilder);
+    }
+  }
+
+  public void updateSnapshotMetrics(MetricsRecordBuilder metricsRecordBuilder) {
+      final Snapshot s = reservoir.getSnapshot();
       metricsRecordBuilder.addCounter(Interns.info(name + NUM_OPS_METRIC_NAME, desc), count.get());
 
       metricsRecordBuilder.addGauge(Interns.info(name + MIN_METRIC_NAME, desc), getMin());
@@ -126,10 +131,11 @@ public class MutableHistogram extends MutableMetric implements MetricHistogram {
       metricsRecordBuilder.addGauge(Interns.info(name + MEDIAN_METRIC_NAME, desc), s.getMedian());
       metricsRecordBuilder.addGauge(Interns.info(name + SEVENTY_FIFTH_PERCENTILE_METRIC_NAME, desc),
           s.get75thPercentile());
+      metricsRecordBuilder.addGauge(Interns.info(name + NINETIETH_PERCENTILE_METRIC_NAME, desc),
+          s.getValue(0.90));
       metricsRecordBuilder.addGauge(Interns.info(name + NINETY_FIFTH_PERCENTILE_METRIC_NAME, desc),
           s.get95thPercentile());
       metricsRecordBuilder.addGauge(Interns.info(name + NINETY_NINETH_PERCENTILE_METRIC_NAME, desc),
           s.get99thPercentile());
-    }
   }
 }

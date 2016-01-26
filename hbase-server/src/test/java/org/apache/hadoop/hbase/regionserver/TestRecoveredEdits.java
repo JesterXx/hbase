@@ -37,7 +37,6 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Result;
@@ -116,9 +115,9 @@ public class TestRecoveredEdits {
     Path regionDir = region.getRegionDir(hbaseRootDir, hri);
     Path recoveredEditsDir = WALSplitter.getRegionDirRecoveredEditsDir(regionDir);
     // This is a little fragile getting this path to a file of 10M of edits.
-    Path recoveredEditsFile = new Path(new Path(
-      System.getProperty("project.build.testSourceDirectory", "src" + Path.SEPARATOR + "test"),
-      "data"), "0000000000000016310");
+    Path recoveredEditsFile = new Path(
+      System.getProperty("test.build.classes", "target/test-classes"),
+        "0000000000000016310");
     // Copy this file under the region's recovered.edits dir so it is replayed on reopen.
     Path destination = new Path(recoveredEditsDir, recoveredEditsFile.getName());
     fs.copyToLocalFile(recoveredEditsFile, destination);

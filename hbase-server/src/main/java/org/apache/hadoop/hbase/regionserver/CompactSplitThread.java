@@ -21,7 +21,6 @@ package org.apache.hadoop.hbase.regionserver;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -223,9 +222,9 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
   }
 
   public synchronized void requestRegionsMerge(final Region a,
-      final Region b, final boolean forcible, long masterSystemTime) {
+      final Region b, final boolean forcible, long masterSystemTime, User user) {
     try {
-      mergePool.execute(new RegionMergeRequest(a, b, this.server, forcible, masterSystemTime));
+      mergePool.execute(new RegionMergeRequest(a, b, this.server, forcible, masterSystemTime,user));
       if (LOG.isDebugEnabled()) {
         LOG.debug("Region merge requested for " + a + "," + b + ", forcible="
             + forcible + ".  " + this);
@@ -352,7 +351,7 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
 
     CompactionContext compaction = null;
     if (selectNow) {
-      compaction = selectCompaction(r, s, priority, request);
+      compaction = selectCompaction(r, s, priority, request, user);
       if (compaction == null) return null; // message logged inside
     }
 
@@ -370,10 +369,10 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
   }
 
   private CompactionContext selectCompaction(final Region r, final Store s,
-      int priority, CompactionRequest request) throws IOException {
-    CompactionContext compaction = s.requestCompaction(priority, request);
+      int priority, CompactionRequest request, User user) throws IOException {
+    CompactionContext compaction = s.requestCompaction(priority, request, user);
     if (compaction == null) {
-      if(LOG.isDebugEnabled()) {
+      if(LOG.isDebugEnabled() && r.getRegionInfo() != null) {
         LOG.debug("Not compacting " + r.getRegionInfo().getRegionNameAsString() +
             " because compaction request was cancelled");
       }
@@ -484,7 +483,7 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
           : ("Store = " + store.toString() + ", pri = " + queuedPriority);
     }
 
-    private void doCompaction() {
+    private void doCompaction(User user) {
       // Common case - system compaction without a file selection. Select now.
       if (this.compaction == null) {
         int oldPriority = this.queuedPriority;
@@ -496,7 +495,7 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
           return;
         }
         try {
-          this.compaction = selectCompaction(this.region, this.store, queuedPriority, null);
+          this.compaction = selectCompaction(this.region, this.store, queuedPriority, null, user);
         } catch (IOException ex) {
           LOG.error("Compaction selection failed " + this, ex);
           server.checkFileSystem();
@@ -528,7 +527,7 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
         //       put it into region/store/etc. This is CST logic.
         long start = EnvironmentEdgeManager.currentTime();
         boolean completed =
-            region.compact(compaction, store, compactionThroughputController);
+            region.compact(compaction, store, compactionThroughputController, user);
         long now = EnvironmentEdgeManager.currentTime();
         LOG.info(((completed) ? "Completed" : "Aborted") + " compaction: " +
               this + "; duration=" + StringUtils.formatTimeDiff(now, start));
@@ -565,22 +564,7 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
           || (region.getTableDesc() != null && !region.getTableDesc().isCompactionEnabled())) {
         return;
       }
-      if (this.user == null) doCompaction();
-      else {
-        try {
-          user.getUGI().doAs(new PrivilegedExceptionAction<Void>() {
-            @Override
-            public Void run() throws Exception {
-              doCompaction();
-              return null;
-            }
-          });
-        } catch (InterruptedException ie) {
-          Thread.currentThread().interrupt();
-        } catch (IOException ioe) {
-          LOG.error("Encountered exception while compacting", ioe);
-        }
-      }
+      doCompaction(user);
     }
 
     private String formatStackTrace(Exception ex) {
@@ -634,8 +618,13 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
       LOG.info("Changing the value of " + LARGE_COMPACTION_THREADS +
               " from " + this.longCompactions.getCorePoolSize() + " to " +
               largeThreads);
-      this.longCompactions.setMaximumPoolSize(largeThreads);
-      this.longCompactions.setCorePoolSize(largeThreads);
+      if(this.longCompactions.getCorePoolSize() < largeThreads) {
+        this.longCompactions.setMaximumPoolSize(largeThreads);
+        this.longCompactions.setCorePoolSize(largeThreads);
+      } else {
+        this.longCompactions.setCorePoolSize(largeThreads);
+        this.longCompactions.setMaximumPoolSize(largeThreads);
+      }
     }
 
     int smallThreads = newConf.getInt(SMALL_COMPACTION_THREADS,
@@ -644,8 +633,13 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
       LOG.info("Changing the value of " + SMALL_COMPACTION_THREADS +
                 " from " + this.shortCompactions.getCorePoolSize() + " to " +
                 smallThreads);
-      this.shortCompactions.setMaximumPoolSize(smallThreads);
-      this.shortCompactions.setCorePoolSize(smallThreads);
+      if(this.shortCompactions.getCorePoolSize() < smallThreads) {
+        this.shortCompactions.setMaximumPoolSize(smallThreads);
+        this.shortCompactions.setCorePoolSize(smallThreads);
+      } else {
+        this.shortCompactions.setCorePoolSize(smallThreads);
+        this.shortCompactions.setMaximumPoolSize(smallThreads);
+      }
     }
 
     int splitThreads = newConf.getInt(SPLIT_THREADS,
@@ -654,8 +648,13 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
       LOG.info("Changing the value of " + SPLIT_THREADS +
                 " from " + this.splits.getCorePoolSize() + " to " +
                 splitThreads);
-      this.splits.setMaximumPoolSize(smallThreads);
-      this.splits.setCorePoolSize(smallThreads);
+      if(this.splits.getCorePoolSize() < splitThreads) {
+        this.splits.setMaximumPoolSize(splitThreads);
+        this.splits.setCorePoolSize(splitThreads);
+      } else {
+        this.splits.setCorePoolSize(splitThreads);
+        this.splits.setMaximumPoolSize(splitThreads);
+      }
     }
 
     int mergeThreads = newConf.getInt(MERGE_THREADS,
@@ -664,8 +663,13 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
       LOG.info("Changing the value of " + MERGE_THREADS +
                 " from " + this.mergePool.getCorePoolSize() + " to " +
                 mergeThreads);
-      this.mergePool.setMaximumPoolSize(smallThreads);
-      this.mergePool.setCorePoolSize(smallThreads);
+      if(this.mergePool.getCorePoolSize() < mergeThreads) {
+        this.mergePool.setMaximumPoolSize(mergeThreads);
+        this.mergePool.setCorePoolSize(mergeThreads);
+      } else {
+        this.mergePool.setCorePoolSize(mergeThreads);
+        this.mergePool.setMaximumPoolSize(mergeThreads);
+      }
     }
 
     CompactionThroughputController old = this.compactionThroughputController;
@@ -684,8 +688,16 @@ public class CompactSplitThread implements CompactionRequestor, PropagatingConfi
     return this.shortCompactions.getCorePoolSize();
   }
 
-  public int getLargeCompactionThreadNum() {
+  protected int getLargeCompactionThreadNum() {
     return this.longCompactions.getCorePoolSize();
+  }
+
+  protected int getSplitThreadNum() {
+    return this.splits.getCorePoolSize();
+  }
+
+  protected int getMergeThreadNum() {
+    return this.mergePool.getCorePoolSize();
   }
 
   /**

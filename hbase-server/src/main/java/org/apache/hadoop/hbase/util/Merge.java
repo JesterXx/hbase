@@ -23,8 +23,8 @@ import java.io.IOException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -125,7 +125,7 @@ public class Merge extends Configured implements Tool {
     Result result1 =  meta.get(get);
     Preconditions.checkState(!result1.isEmpty(),
         "First region cells can not be null");
-    HRegionInfo info1 = HRegionInfo.getHRegionInfo(result1);
+    HRegionInfo info1 = MetaTableAccessor.getHRegionInfo(result1);
     if (info1 == null) {
       throw new NullPointerException("info1 is null using key " +
           Bytes.toStringBinary(region1) + " in " + meta);
@@ -135,7 +135,7 @@ public class Merge extends Configured implements Tool {
     Result result2 =  meta.get(get);
     Preconditions.checkState(!result2.isEmpty(),
         "Second region cells can not be null");
-    HRegionInfo info2 = HRegionInfo.getHRegionInfo(result2);
+    HRegionInfo info2 = MetaTableAccessor.getHRegionInfo(result2);
     if (info2 == null) {
       throw new NullPointerException("info2 is null using key " + meta);
     }

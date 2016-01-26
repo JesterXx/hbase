@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.SortedSet;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -36,18 +37,20 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HDFSBlocksDistribution;
 import org.apache.hadoop.hbase.KeyValue;
-import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.io.FSDataInputStreamWrapper;
+import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.io.hfile.BlockType;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
+import org.apache.hadoop.hbase.io.hfile.HFileBlock;
 import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileScanner;
 import org.apache.hadoop.hbase.nio.ByteBuff;
@@ -58,8 +61,8 @@ import org.apache.hadoop.hbase.util.BloomFilterWriter;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Writables;
 import org.apache.hadoop.io.WritableUtils;
-import org.apache.hadoop.hbase.io.hfile.HFileBlock;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -128,6 +131,29 @@ public class StoreFile {
   // max of the MemstoreTS in the KV's in this store
   // Set when we obtain a Reader.
   private long maxMemstoreTS = -1;
+
+  // firstKey, lastkey and cellComparator will be set when openReader.
+  private Cell firstKey;
+
+  private Cell lastKey;
+
+  private Comparator comparator;
+
+  CacheConfig getCacheConf() {
+    return cacheConf;
+  }
+
+  public Cell getFirstKey() {
+    return firstKey;
+  }
+
+  public Cell getLastKey() {
+    return lastKey;
+  }
+
+  public Comparator getComparator() {
+    return comparator;
+  }
 
   public long getMaxMemstoreTS() {
     return maxMemstoreTS;
@@ -337,7 +363,7 @@ public class StoreFile {
   /**
    * Check if this storefile was created by bulk load.
    * When a hfile is bulk loaded into HBase, we append
-   * '_SeqId_<id-when-loaded>' to the hfile name, unless
+   * {@code '_SeqId_<id-when-loaded>'} to the hfile name, unless
    * "hbase.mapreduce.bulkload.assign.sequenceNumbers" is
    * explicitly turned off.
    * If "hbase.mapreduce.bulkload.assign.sequenceNumbers"
@@ -352,6 +378,19 @@ public class StoreFile {
       bulkLoadedHFile = true;
     }
     return bulkLoadedHFile || metadataMap.containsKey(BULKLOAD_TIME_KEY);
+  }
+
+  @VisibleForTesting
+  public boolean isCompactedAway() {
+    if (this.reader != null) {
+      return this.reader.isCompactedAway();
+    }
+    return true;
+  }
+
+  @VisibleForTesting
+  public int getRefCount() {
+    return this.reader.refCount.get();
   }
 
   /**
@@ -475,6 +514,10 @@ public class StoreFile {
           "proceeding without", e);
       this.reader.timeRangeTracker = null;
     }
+    // initialize so we can reuse them after reader closed.
+    firstKey = reader.getFirstKey();
+    lastKey = reader.getLastKey();
+    comparator = reader.getComparator();
     return this.reader;
   }
 
@@ -492,7 +535,9 @@ public class StoreFile {
         this.reader = open(canUseDropBehind);
       } catch (IOException e) {
         try {
-          this.closeReader(true);
+          boolean evictOnClose =
+              cacheConf != null? cacheConf.shouldEvictOnClose(): true; 
+          this.closeReader(evictOnClose);
         } catch (IOException ee) {
         }
         throw e;
@@ -523,11 +568,22 @@ public class StoreFile {
   }
 
   /**
+   * Marks the status of the file as compactedAway.
+   */
+  public void markCompactedAway() {
+    if (this.reader != null) {
+      this.reader.markCompactedAway();
+    }
+  }
+
+  /**
    * Delete this file
    * @throws IOException
    */
   public void deleteReader() throws IOException {
-    closeReader(true);
+    boolean evictOnClose =
+        cacheConf != null? cacheConf.shouldEvictOnClose(): true; 
+    closeReader(evictOnClose);
     this.fs.delete(getPath(), true);
   }
 
@@ -566,6 +622,8 @@ public class StoreFile {
     return false;
   }
 
+  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="ICAST_INTEGER_MULTIPLY_CAST_TO_LONG",
+      justification="Will not overflow")
   public static class WriterBuilder {
     private final Configuration conf;
     private final CacheConfig cacheConf;
@@ -578,7 +636,6 @@ public class StoreFile {
     private Path filePath;
     private InetSocketAddress[] favoredNodes;
     private HFileContext fileContext;
-    private boolean shouldDropCacheBehind = false;
 
     public WriterBuilder(Configuration conf, CacheConfig cacheConf,
         FileSystem fs) {
@@ -646,8 +703,8 @@ public class StoreFile {
       return this;
     }
 
-    public WriterBuilder withShouldDropCacheBehind(boolean shouldDropCacheBehind) {
-      this.shouldDropCacheBehind = shouldDropCacheBehind;
+    public WriterBuilder withShouldDropCacheBehind(boolean shouldDropCacheBehind/*NOT USED!!*/) {
+      // TODO: HAS NO EFFECT!!! FIX!!
       return this;
     }
     /**
@@ -749,9 +806,6 @@ public class StoreFile {
     private long earliestPutTs = HConstants.LATEST_TIMESTAMP;
     private Cell lastDeleteFamilyCell = null;
     private long deleteFamilyCnt = 0;
-
-    /** Bytes per Checksum */
-    protected int bytesPerChecksum;
 
     TimeRangeTracker timeRangeTracker = new TimeRangeTracker();
     /* isTimeRangeTrackerSet keeps track if the timeRange has already been set
@@ -1105,11 +1159,21 @@ public class StoreFile {
     private boolean bulkLoadResult = false;
     private KeyValue.KeyOnlyKeyValue lastBloomKeyOnlyKV = null;
     private boolean skipResetSeqId = true;
+    // Counter that is incremented every time a scanner is created on the
+    // store file.  It is decremented when the scan on the store file is
+    // done.
+    private AtomicInteger refCount = new AtomicInteger(0);
+    // Indicates if the file got compacted
+    private volatile boolean compactedAway = false;
 
     public Reader(FileSystem fs, Path path, CacheConfig cacheConf, Configuration conf)
         throws IOException {
       reader = HFile.createReader(fs, path, cacheConf, conf);
       bloomFilterType = BloomType.NONE;
+    }
+
+    void markCompactedAway() {
+      this.compactedAway = true;
     }
 
     public Reader(FileSystem fs, Path path, FSDataInputStreamWrapper in, long size,
@@ -1163,9 +1227,33 @@ public class StoreFile {
     public StoreFileScanner getStoreFileScanner(boolean cacheBlocks,
                                                boolean pread,
                                                boolean isCompaction, long readPt) {
+      // Increment the ref count
+      refCount.incrementAndGet();
       return new StoreFileScanner(this,
                                  getScanner(cacheBlocks, pread, isCompaction),
                                  !isCompaction, reader.hasMVCCInfo(), readPt);
+    }
+
+    /**
+     * Decrement the ref count associated with the reader when ever a scanner associated
+     * with the reader is closed
+     */
+    void decrementRefCount() {
+      refCount.decrementAndGet();
+    }
+
+    /**
+     * @return true if the file is still used in reads
+     */
+    public boolean isReferencedInReads() {
+      return refCount.get() != 0;
+    }
+ 
+    /**
+     * @return true if the file is compacted
+     */
+    public boolean isCompactedAway() {
+      return this.compactedAway;
     }
 
     /**
@@ -1208,16 +1296,16 @@ public class StoreFile {
     /**
      * Check if this storeFile may contain keys within the TimeRange that
      * have not expired (i.e. not older than oldestUnexpiredTS).
-     * @param scan the current scan
+     * @param timeRange the timeRange to restrict
      * @param oldestUnexpiredTS the oldest timestamp that is not expired, as
      *          determined by the column family's TTL
      * @return false if queried keys definitely don't exist in this StoreFile
      */
-    boolean passesTimerangeFilter(Scan scan, long oldestUnexpiredTS) {
+    boolean passesTimerangeFilter(TimeRange timeRange, long oldestUnexpiredTS) {
       if (timeRangeTracker == null) {
         return true;
       } else {
-        return timeRangeTracker.includesTimeRange(scan.getTimeRange()) &&
+        return timeRangeTracker.includesTimeRange(timeRange) &&
             timeRangeTracker.getMaximumTimestamp() >= oldestUnexpiredTS;
       }
     }
@@ -1678,7 +1766,13 @@ public class StoreFile {
     private static class GetFileSize implements Function<StoreFile, Long> {
       @Override
       public Long apply(StoreFile sf) {
-        return sf.getReader().length();
+        if (sf.getReader() != null) {
+          return sf.getReader().length();
+        } else {
+          // the reader may be null for the compacted files and if the archiving
+          // had failed.
+          return -1L;
+        }
       }
     }
 

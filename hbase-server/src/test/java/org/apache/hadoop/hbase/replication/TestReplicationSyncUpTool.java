@@ -52,15 +52,15 @@ public class TestReplicationSyncUpTool extends TestReplicationBase {
   private static final TableName t1_su = TableName.valueOf("t1_syncup");
   private static final TableName t2_su = TableName.valueOf("t2_syncup");
 
-  private static final byte[] famName = Bytes.toBytes("cf1");
+  protected static final byte[] famName = Bytes.toBytes("cf1");
   private static final byte[] qualName = Bytes.toBytes("q1");
 
-  private static final byte[] noRepfamName = Bytes.toBytes("norep");
+  protected static final byte[] noRepfamName = Bytes.toBytes("norep");
 
   private HTableDescriptor t1_syncupSource, t1_syncupTarget;
   private HTableDescriptor t2_syncupSource, t2_syncupTarget;
 
-  private Table ht1Source, ht2Source, ht1TargetAtPeer1, ht2TargetAtPeer1;
+  protected Table ht1Source, ht2Source, ht1TargetAtPeer1, ht2TargetAtPeer1;
 
   @Before
   public void setUp() throws Exception {
@@ -179,7 +179,7 @@ public class TestReplicationSyncUpTool extends TestReplicationBase {
 
   }
 
-  private void setupReplication() throws Exception {
+  protected void setupReplication() throws Exception {
     ReplicationAdmin admin1 = new ReplicationAdmin(conf1);
     ReplicationAdmin admin2 = new ReplicationAdmin(conf2);
 
@@ -225,21 +225,21 @@ public class TestReplicationSyncUpTool extends TestReplicationBase {
     // 100 + 1 row to t1_syncup
     for (int i = 0; i < NB_ROWS_IN_BATCH; i++) {
       p = new Put(Bytes.toBytes("row" + i));
-      p.add(famName, qualName, Bytes.toBytes("val" + i));
+      p.addColumn(famName, qualName, Bytes.toBytes("val" + i));
       ht1Source.put(p);
     }
     p = new Put(Bytes.toBytes("row" + 9999));
-    p.add(noRepfamName, qualName, Bytes.toBytes("val" + 9999));
+    p.addColumn(noRepfamName, qualName, Bytes.toBytes("val" + 9999));
     ht1Source.put(p);
 
     // 200 + 1 row to t2_syncup
     for (int i = 0; i < NB_ROWS_IN_BATCH * 2; i++) {
       p = new Put(Bytes.toBytes("row" + i));
-      p.add(famName, qualName, Bytes.toBytes("val" + i));
+      p.addColumn(famName, qualName, Bytes.toBytes("val" + i));
       ht2Source.put(p);
     }
     p = new Put(Bytes.toBytes("row" + 9999));
-    p.add(noRepfamName, qualName, Bytes.toBytes("val" + 9999));
+    p.addColumn(noRepfamName, qualName, Bytes.toBytes("val" + 9999));
     ht2Source.put(p);
 
     // ensure replication completed
@@ -351,22 +351,22 @@ public class TestReplicationSyncUpTool extends TestReplicationBase {
     // we should see 100 + 2 rows now
     for (int i = 0; i < NB_ROWS_IN_BATCH; i++) {
       p = new Put(Bytes.toBytes("row" + i));
-      p.add(famName, qualName, Bytes.toBytes("val" + i));
+      p.addColumn(famName, qualName, Bytes.toBytes("val" + i));
       ht1Source.put(p);
     }
     p = new Put(Bytes.toBytes("row" + 9998));
-    p.add(noRepfamName, qualName, Bytes.toBytes("val" + 9998));
+    p.addColumn(noRepfamName, qualName, Bytes.toBytes("val" + 9998));
     ht1Source.put(p);
 
     // another 200 + 1 row to t1_syncup
     // we should see 200 + 2 rows now
     for (int i = 0; i < NB_ROWS_IN_BATCH * 2; i++) {
       p = new Put(Bytes.toBytes("row" + i));
-      p.add(famName, qualName, Bytes.toBytes("val" + i));
+      p.addColumn(famName, qualName, Bytes.toBytes("val" + i));
       ht2Source.put(p);
     }
     p = new Put(Bytes.toBytes("row" + 9998));
-    p.add(noRepfamName, qualName, Bytes.toBytes("val" + 9998));
+    p.addColumn(noRepfamName, qualName, Bytes.toBytes("val" + 9998));
     ht2Source.put(p);
 
     int rowCount_ht1Source = utility1.countRows(ht1Source);
@@ -418,7 +418,7 @@ public class TestReplicationSyncUpTool extends TestReplicationBase {
     }
   }
 
-  private void syncUp(HBaseTestingUtility ut) throws Exception {
+  protected void syncUp(HBaseTestingUtility ut) throws Exception {
     ReplicationSyncUp.setConfigure(ut.getConfiguration());
     String[] arguments = new String[] { null };
     new ReplicationSyncUp().run(arguments);

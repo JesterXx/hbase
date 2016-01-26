@@ -32,7 +32,8 @@
 #
 # Modelled after $HADOOP_HOME/bin/slaves.sh.
 
-usage_str="Usage: `basename $0` [--config <hbase-confdir>] [--rs-only] [--master-only] [--graceful] [--maxthreads xx]"
+usage_str="Usage: `basename $0` [--config <hbase-confdir>] [--rs-only] [--master-only]\
+ [--graceful [--maxthreads xx] [--noack] [--movetimeout]]"
 
 function usage() {
   echo "${usage_str}"
@@ -54,6 +55,8 @@ RR_RS=1
 RR_MASTER=1
 RR_GRACEFUL=0
 RR_MAXTHREADS=1
+RR_NOACK=
+RR_MOVE_TIMEOUT=2147483647
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -78,6 +81,15 @@ while [ $# -gt 0 ]; do
     --maxthreads)
       shift
       RR_MAXTHREADS=$1
+      shift
+      ;;
+    --noack)
+      RR_NOACK="--noack"
+      shift
+      ;;
+    --movetimeout)
+      shift
+      RR_MOVE_TIMEOUT=$1
       shift
       ;;
     --help|-h)
@@ -116,6 +128,7 @@ else
     if [ "$zmaster" == "null" ]; then zmaster="master"; fi
     zmaster=$zparent/$zmaster
     echo -n "Waiting for Master ZNode ${zmaster} to expire"
+    echo
     while ! "$bin"/hbase zkcli stat $zmaster 2>&1 | grep "Node does not exist"; do
       echo -n "."
       sleep 1
@@ -136,17 +149,28 @@ else
     zunassigned=`$bin/hbase org.apache.hadoop.hbase.util.HBaseConfTool zookeeper.znode.unassigned`
     if [ "$zunassigned" == "null" ]; then zunassigned="region-in-transition"; fi
     zunassigned="$zparent/$zunassigned"
-    echo -n "Waiting for ${zunassigned} to empty"
-    while true ; do
-      unassigned=`$bin/hbase zkcli stat ${zunassigned} 2>&1 |grep -e 'numChildren = '|sed -e 's,numChildren = ,,'`
-      if test 0 -eq ${unassigned}
-      then
-        break
-      else
-        echo -n " ${unassigned}"
-      fi
-      sleep 1
-    done
+    # Checking if /hbase/region-in-transition exist
+    ritZnodeCheck=`$bin/hbase zkcli stat ${zunassigned} 2>&1 | tail -1 \
+		  | grep "Node does not exist:" >/dev/null`
+    ret=$?
+    if test 0 -eq ${ret}
+    then
+      echo "Znode ${zunassigned} does not exist"
+    else
+      echo -n "Waiting for ${zunassigned} to empty"
+      while true ; do
+        unassigned=`$bin/hbase zkcli stat ${zunassigned} 2>&1 \
+		   | grep -e 'numChildren = '|sed -e 's,numChildren = ,,'`
+        if test 0 -eq ${unassigned}
+        then
+          echo
+          break
+        else
+          echo -n " ${unassigned}"
+        fi
+        sleep 1
+      done
+    fi
   fi
 
   if [ $RR_RS -eq 1 ]; then
@@ -158,6 +182,8 @@ else
 
   if [ $RR_GRACEFUL -eq 1 ]; then
     # gracefully restart all online regionservers
+    masterport=`$bin/hbase org.apache.hadoop.hbase.util.HBaseConfTool hbase.master.port`
+    if [ "$masterport" == "null" ]; then masterport="16000"; fi
     zkrs=`$bin/hbase org.apache.hadoop.hbase.util.HBaseConfTool zookeeper.znode.rs`
     if [ "$zkrs" == "null" ]; then zkrs="rs"; fi
     zkrs="$zparent/$zkrs"
@@ -166,9 +192,16 @@ else
     do
         rs_parts=(${rs//,/ })
         hostname=${rs_parts[0]}
-        echo "Gracefully restarting: $hostname"
-        "$bin"/graceful_stop.sh --config "${HBASE_CONF_DIR}" --restart --reload --debug --maxthreads "${RR_MAXTHREADS}" "$hostname"
-        sleep 1
+        port=${rs_parts[1]}
+        if [ "$port" -eq "$masterport" ]; then
+          echo "Skipping regionserver on master machine $hostname:$port"
+          continue
+        else
+          echo "Gracefully restarting: $hostname"
+          "$bin"/graceful_stop.sh --config ${HBASE_CONF_DIR} --restart --reload --maxthreads \
+		${RR_MAXTHREADS} ${RR_NOACK} --movetimeout ${RR_MOVE_TIMEOUT} $hostname
+          sleep 1
+        fi
     done
   fi
 fi

@@ -144,7 +144,7 @@ public class QuotaUtil extends QuotaTableUtil {
   private static void addQuotas(final Connection connection, final byte[] rowKey,
       final byte[] qualifier, final Quotas data) throws IOException {
     Put put = new Put(rowKey);
-    put.add(QUOTA_FAMILY_INFO, qualifier, quotasToData(data));
+    put.addColumn(QUOTA_FAMILY_INFO, qualifier, quotasToData(data));
     doPut(connection, put);
   }
 
@@ -157,7 +157,7 @@ public class QuotaUtil extends QuotaTableUtil {
       final byte[] qualifier) throws IOException {
     Delete delete = new Delete(rowKey);
     if (qualifier != null) {
-      delete.deleteColumns(QUOTA_FAMILY_INFO, qualifier);
+      delete.addColumns(QUOTA_FAMILY_INFO, qualifier);
     }
     doDelete(connection, delete);
   }

@@ -32,7 +32,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
@@ -85,13 +84,10 @@ public abstract class TestTableInputFormatScanBase {
     // create and fill table
     table = TEST_UTIL.createMultiRegionTable(TABLE_NAME, INPUT_FAMILY);
     TEST_UTIL.loadTable(table, INPUT_FAMILY, false);
-    // start MR cluster
-    TEST_UTIL.startMiniMapReduceCluster();
   }
 
   @AfterClass
   public static void tearDownAfterClass() throws Exception {
-    TEST_UTIL.shutdownMiniMapReduceCluster();
     TEST_UTIL.shutdownMiniCluster();
   }
 

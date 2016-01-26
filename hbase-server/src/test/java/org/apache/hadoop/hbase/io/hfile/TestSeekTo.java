@@ -42,7 +42,11 @@ import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
+import org.apache.hadoop.hbase.OffheapKeyValue;
+import org.apache.hadoop.hbase.ShareableMemory;
 import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.TagUtil;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.testclassification.IOTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
@@ -86,7 +90,7 @@ public class TestSeekTo {
       return new KeyValue(Bytes.toBytes(row), Bytes.toBytes("family"), Bytes.toBytes("qualifier"),
           Bytes.toBytes("value"));
     } else if (tagUsage == TagUsage.ONLY_TAG) {
-      Tag t = new Tag((byte) 1, "myTag1");
+      Tag t = new ArrayBackedTag((byte) 1, "myTag1");
       Tag[] tags = new Tag[1];
       tags[0] = t;
       return new KeyValue(Bytes.toBytes(row), Bytes.toBytes("family"), Bytes.toBytes("qualifier"),
@@ -98,7 +102,7 @@ public class TestSeekTo {
             Bytes.toBytes("qualifier"), HConstants.LATEST_TIMESTAMP, Bytes.toBytes("value"));
       } else {
         switchKVs = false;
-        Tag t = new Tag((byte) 1, "myTag1");
+        Tag t = new ArrayBackedTag((byte) 1, "myTag1");
         Tag[] tags = new Tag[1];
         tags[0] = t;
         return new KeyValue(Bytes.toBytes(row), Bytes.toBytes("family"),
@@ -172,11 +176,10 @@ public class TestSeekTo {
     assertEquals("i", toRowStr(scanner.getCell()));
     Cell cell = scanner.getCell();
     if (tagUsage != TagUsage.NO_TAG && cell.getTagsLength() > 0) {
-      Iterator<Tag> tagsIterator = CellUtil.tagsIterator(cell.getTagsArray(), cell.getTagsOffset(),
-          cell.getTagsLength());
+      Iterator<Tag> tagsIterator = CellUtil.tagsIterator(cell);
       while (tagsIterator.hasNext()) {
         Tag next = tagsIterator.next();
-        assertEquals("myTag1", Bytes.toString(next.getValue()));
+        assertEquals("myTag1", Bytes.toString(TagUtil.cloneValue(next)));
       }
     }
     assertTrue(scanner.seekBefore(toKV("k", tagUsage)));
@@ -215,6 +218,8 @@ public class TestSeekTo {
 
     // seekBefore d, so the scanner points to c
     assertTrue(scanner.seekBefore(toKV("d", tagUsage)));
+    assertFalse(scanner.getCell() instanceof ShareableMemory);
+    assertFalse(scanner.getCell() instanceof OffheapKeyValue);
     assertEquals("c", toRowStr(scanner.getCell()));
     // reseekTo e and g
     assertEquals(0, scanner.reseekTo(toKV("c", tagUsage)));

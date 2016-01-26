@@ -37,6 +37,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.CategoryBasedTimeout;
 import org.apache.hadoop.hbase.Coprocessor;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
@@ -49,10 +50,9 @@ import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Waiter;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Table;
@@ -77,6 +77,8 @@ import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.regionserver.RegionServerCoprocessorHost;
+import org.apache.hadoop.hbase.regionserver.Store;
+import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.snapshot.RestoreSnapshotException;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -85,16 +87,20 @@ import org.apache.zookeeper.KeeperException;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.rules.TestRule;
 
 import com.google.common.collect.Sets;
 
 @Category(MediumTests.class)
 public class TestNamespaceAuditor {
+  @Rule public final TestRule timeout = CategoryBasedTimeout.builder().
+      withTimeout(this.getClass()).withLookingForStuckThread(true).build();
   private static final Log LOG = LogFactory.getLog(TestNamespaceAuditor.class);
   private static final HBaseTestingUtility UTIL = new HBaseTestingUtility();
-  private static HBaseAdmin ADMIN;
+  private static Admin ADMIN;
   private String prefix = "TestNamespaceAuditor";
 
   @BeforeClass
@@ -109,7 +115,7 @@ public class TestNamespaceAuditor {
     conf.setClass("hbase.coprocessor.regionserver.classes", CPRegionServerObserver.class,
       RegionServerObserver.class);
     UTIL.startMiniCluster(1, 1);
-    waitForQuotaEnabled();
+    waitForQuotaEnabled(UTIL);
     ADMIN = UTIL.getHBaseAdmin();
   }
 
@@ -130,10 +136,10 @@ public class TestNamespaceAuditor {
       }
     }
     assertTrue("Quota manager not enabled", UTIL.getHBaseCluster().getMaster()
-      .getMasterQuotaManager().isQuotaEnabled());
+        .getMasterQuotaManager().isQuotaEnabled());
   }
 
-  @Test(timeout = 60000)
+  @Test
   public void testTableOperations() throws Exception {
     String nsp = prefix + "_np2";
     NamespaceDescriptor nspDesc =
@@ -453,17 +459,24 @@ public class TestNamespaceAuditor {
     assertEquals(1, stateInfo.getTables().size());
     assertEquals(1, stateInfo.getRegionCount());
     restartMaster();
-    ADMIN.split(tableOne, Bytes.toBytes("500"));
+
     HRegion actualRegion = UTIL.getHBaseCluster().getRegions(tableOne).get(0);
     CustomObserver observer = (CustomObserver) actualRegion.getCoprocessorHost().findCoprocessor(
-      CustomObserver.class.getName());
+        CustomObserver.class.getName());
     assertNotNull(observer);
+
+    ADMIN.split(tableOne, Bytes.toBytes("500"));
     observer.postSplit.await();
     assertEquals(2, ADMIN.getTableRegions(tableOne).size());
     actualRegion = UTIL.getHBaseCluster().getRegions(tableOne).get(0);
     observer = (CustomObserver) actualRegion.getCoprocessorHost().findCoprocessor(
       CustomObserver.class.getName());
     assertNotNull(observer);
+
+    //Before we go on split, we should remove all reference store files.
+    ADMIN.compact(tableOne);
+    observer.postCompact.await();
+
     ADMIN.split(tableOne, getSplitKey(actualRegion.getRegionInfo().getStartKey(),
       actualRegion.getRegionInfo().getEndKey()));
     observer.postSplit.await();
@@ -480,7 +493,7 @@ public class TestNamespaceAuditor {
    * namespace quota cache. Now correct the failure and recreate the table with same name.
    * HBASE-13394
    */
-  @Test(timeout = 180000)
+  @Test
   public void testRecreateTableWithSameNameAfterFirstTimeFailure() throws Exception {
     String nsp1 = prefix + "_testRecreateTable";
     NamespaceDescriptor nspDesc =
@@ -546,6 +559,7 @@ public class TestNamespaceAuditor {
   public static class CustomObserver extends BaseRegionObserver{
     volatile CountDownLatch postSplit;
     volatile CountDownLatch preSplitBeforePONR;
+    volatile CountDownLatch postCompact;
 
     @Override
     public void postCompleteSplit(ObserverContext<RegionCoprocessorEnvironment> ctx)
@@ -554,15 +568,23 @@ public class TestNamespaceAuditor {
     }
 
     @Override
+    public void postCompact(ObserverContext<RegionCoprocessorEnvironment> e,
+                            Store store, StoreFile resultFile) throws IOException {
+      postCompact.countDown();
+    }
+
+    @Override
     public void preSplitBeforePONR(ObserverContext<RegionCoprocessorEnvironment> ctx,
         byte[] splitKey, List<Mutation> metaEntries) throws IOException {
       preSplitBeforePONR.countDown();
     }
 
+
     @Override
     public void start(CoprocessorEnvironment e) throws IOException {
       postSplit = new CountDownLatch(1);
       preSplitBeforePONR = new CountDownLatch(1);
+      postCompact = new CountDownLatch(1);
     }
   }
 
@@ -598,11 +620,11 @@ public class TestNamespaceAuditor {
         .getTables().size(), after.getTables().size());
   }
 
-  private static void waitForQuotaEnabled() throws Exception {
-    UTIL.waitFor(60000, new Waiter.Predicate<Exception>() {
+  public static void waitForQuotaEnabled(final HBaseTestingUtility util) throws Exception {
+    util.waitFor(60000, new Waiter.Predicate<Exception>() {
       @Override
       public boolean evaluate() throws Exception {
-        HMaster master = UTIL.getHBaseCluster().getMaster();
+        HMaster master = util.getHBaseCluster().getMaster();
         if (master == null) {
           return false;
         }
@@ -616,7 +638,7 @@ public class TestNamespaceAuditor {
     UTIL.getHBaseCluster().getMaster(0).stop("Stopping to start again");
     UTIL.getHBaseCluster().waitOnMaster(0);
     UTIL.getHBaseCluster().startMaster();
-    waitForQuotaEnabled();
+    waitForQuotaEnabled(UTIL);
   }
 
   private NamespaceAuditor getQuotaManager() {
@@ -659,7 +681,7 @@ public class TestNamespaceAuditor {
     observer.tableDeletionLatch.await();
   }
 
-  @Test(expected = QuotaExceededException.class, timeout = 30000)
+  @Test(expected = QuotaExceededException.class)
   public void testExceedTableQuotaInNamespace() throws Exception {
     String nsp = prefix + "_testExceedTableQuotaInNamespace";
     NamespaceDescriptor nspDesc =
@@ -676,7 +698,7 @@ public class TestNamespaceAuditor {
     ADMIN.createTable(tableDescTwo, Bytes.toBytes("AAA"), Bytes.toBytes("ZZZ"), 4);
   }
   
-  @Test(expected = QuotaExceededException.class, timeout = 30000)
+  @Test(expected = QuotaExceededException.class)
   public void testCloneSnapshotQuotaExceed() throws Exception {
     String nsp = prefix + "_testTableQuotaExceedWithCloneSnapshot";
     NamespaceDescriptor nspDesc =
@@ -694,7 +716,7 @@ public class TestNamespaceAuditor {
     ADMIN.deleteSnapshot(snapshot);
   }
 
-  @Test(timeout = 180000)
+  @Test
   public void testCloneSnapshot() throws Exception {
     String nsp = prefix + "_testCloneSnapshot";
     NamespaceDescriptor nspDesc =
@@ -729,7 +751,7 @@ public class TestNamespaceAuditor {
     ADMIN.deleteSnapshot(snapshot);
   }
 
-  @Test(timeout = 180000)
+  @Test
   public void testRestoreSnapshot() throws Exception {
     String nsp = prefix + "_testRestoreSnapshot";
     NamespaceDescriptor nspDesc =
@@ -763,7 +785,7 @@ public class TestNamespaceAuditor {
     ADMIN.deleteSnapshot(snapshot);
   }
 
-  @Test(timeout = 180000)
+  @Test
   public void testRestoreSnapshotQuotaExceed() throws Exception {
     String nsp = prefix + "_testRestoreSnapshotQuotaExceed";
     NamespaceDescriptor nspDesc =

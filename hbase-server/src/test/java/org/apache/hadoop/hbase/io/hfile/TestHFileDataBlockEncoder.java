@@ -18,8 +18,8 @@ package org.apache.hadoop.hbase.io.hfile;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
-import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -27,14 +27,15 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.io.ByteArrayOutputStream;
 import org.apache.hadoop.hbase.io.HeapSize;
 import org.apache.hadoop.hbase.io.compress.Compression.Algorithm;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.io.encoding.HFileBlockDefaultEncodingContext;
 import org.apache.hadoop.hbase.io.encoding.HFileBlockEncodingContext;
-import org.apache.hadoop.hbase.io.hfile.HFileBlock.Writer.BufferGrabbingByteArrayOutputStream;
 import org.apache.hadoop.hbase.testclassification.IOTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.ChecksumType;
@@ -141,6 +142,29 @@ public class TestHFileDataBlockEncoder {
     testEncodingInternals(true);
   }
 
+  /**
+   * Test encoding with offheap keyvalue. This test just verifies if the encoders
+   * work with DBB and does not use the getXXXArray() API
+   * @throws IOException
+   */
+  @Test
+  public void testEncodingWithOffheapKeyValue() throws IOException {
+    // usually we have just block without headers, but don't complicate that
+    if(blockEncoder.getDataBlockEncoding() == DataBlockEncoding.PREFIX_TREE) {
+      // This is a TODO: Only after PrefixTree is fixed we can remove this check
+      return;
+    }
+    try {
+      List<Cell> kvs = generator.generateTestExtendedOffheapKeyValues(60, true);
+      HFileContext meta = new HFileContextBuilder().withIncludesMvcc(includesMemstoreTS)
+          .withIncludesTags(true).withHBaseCheckSum(true).withCompression(Algorithm.NONE)
+          .withBlockSize(0).withChecksumType(ChecksumType.NULL).build();
+      writeBlock(kvs, meta, true);
+    } catch (IllegalArgumentException e) {
+      fail("No exception should have been thrown");
+    }
+  }
+
   private void testEncodingInternals(boolean useTag) throws IOException {
     // usually we have just block without headers, but don't complicate that
     List<KeyValue> kvs = generator.generateTestKeyValues(60, useTag);
@@ -192,13 +216,26 @@ public class TestHFileDataBlockEncoder {
     for (KeyValue kv : kvs) {
       blockEncoder.encode(kv, context, dos);
     }
-    BufferGrabbingByteArrayOutputStream stream = new BufferGrabbingByteArrayOutputStream();
-    baos.writeTo(stream);
-    blockEncoder.endBlockEncoding(context, dos, stream.getBuffer(), BlockType.DATA);
+    blockEncoder.endBlockEncoding(context, dos, baos.getBuffer(), BlockType.DATA);
     byte[] encodedBytes = baos.toByteArray();
     size = encodedBytes.length - block.getDummyHeaderForVersion().length;
     return new HFileBlock(context.getBlockType(), size, size, -1, ByteBuffer.wrap(encodedBytes),
         HFileBlock.FILL_HEADER, 0, block.getOnDiskDataSizeWithHeader(), block.getHFileContext());
+  }
+
+  private void writeBlock(List<Cell> kvs, HFileContext fileContext, boolean useTags)
+      throws IOException {
+    HFileBlockEncodingContext context = new HFileBlockDefaultEncodingContext(
+        blockEncoder.getDataBlockEncoding(), HConstants.HFILEBLOCK_DUMMY_HEADER,
+        fileContext);
+
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    baos.write(HConstants.HFILEBLOCK_DUMMY_HEADER);
+    DataOutputStream dos = new DataOutputStream(baos);
+    blockEncoder.startBlockEncoding(context, dos);
+    for (Cell kv : kvs) {
+      blockEncoder.encode(kv, context, dos);
+    }
   }
 
   /**

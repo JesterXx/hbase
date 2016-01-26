@@ -115,7 +115,7 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
    * Skips the entries which has original seqId. Only entries persisted via distributed log replay
    * have their original seq Id fields set.
    */
-  private class SkipReplayedEditsFilter extends BaseWALEntryFilter {
+  private static class SkipReplayedEditsFilter extends BaseWALEntryFilter {
     @Override
     public Entry filter(Entry entry) {
       // if orig seq id is set, skip replaying the entry
@@ -649,8 +649,8 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
 
         // set the region name for the target region replica
         Pair<AdminProtos.ReplicateWALEntryRequest, CellScanner> p =
-            ReplicationProtbufUtil.buildReplicateWALEntryRequest(
-              entriesArray, location.getRegionInfo().getEncodedNameAsBytes());
+            ReplicationProtbufUtil.buildReplicateWALEntryRequest(entriesArray, location
+                .getRegionInfo().getEncodedNameAsBytes(), null, null, null);
         try {
           PayloadCarryingRpcController controller = rpcControllerFactory.newController(p.getSecond());
           controller.setCallTimeout(timeout);

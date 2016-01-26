@@ -26,7 +26,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
-import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
@@ -35,7 +35,6 @@ import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.FSUtils;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -43,10 +42,9 @@ import org.junit.experimental.categories.Category;
 @Category(SmallTests.class)
 public class TestCachedMobFile extends TestCase{
   static final Log LOG = LogFactory.getLog(TestCachedMobFile.class);
-  private Configuration conf = HBaseConfiguration.create();
+  private static final HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
+  private Configuration conf = TEST_UTIL.getConfiguration();
   private CacheConfig cacheConf = new CacheConfig(conf);
-  private static final String TABLE = "tableName";
-  private static final String FAMILY = "familyName";
   private static final String FAMILY1 = "familyName1";
   private static final String FAMILY2 = "familyName2";
   private static final long EXPECTED_REFERENCE_ZERO = 0;
@@ -56,13 +54,11 @@ public class TestCachedMobFile extends TestCase{
   @Test
   public void testOpenClose() throws Exception {
     String caseName = getName();
-    FileSystem fs = FileSystem.get(conf);
-    Path testDir = FSUtils.getRootDir(conf);
-    Path outputDir = new Path(new Path(testDir, TABLE),
-        FAMILY);
+    Path testDir = TEST_UTIL.getDataTestDir();
+    FileSystem fs = testDir.getFileSystem(conf);
     HFileContext meta = new HFileContextBuilder().withBlockSize(8*1024).build();
     StoreFile.Writer writer = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-        .withOutputDir(outputDir).withFileContext(meta).build();
+        .withOutputDir(testDir).withFileContext(meta).build();
     MobTestUtil.writeStoreFile(writer, caseName);
     CachedMobFile cachedMobFile = CachedMobFile.create(fs, writer.getPath(), conf, cacheConf);
     Assert.assertEquals(EXPECTED_REFERENCE_ZERO, cachedMobFile.getReferenceCount());
@@ -79,17 +75,15 @@ public class TestCachedMobFile extends TestCase{
   @Test
   public void testCompare() throws Exception {
     String caseName = getName();
-    FileSystem fs = FileSystem.get(conf);
-    Path testDir = FSUtils.getRootDir(conf);
-    Path outputDir1 = new Path(new Path(testDir, TABLE),
-        FAMILY1);
+    Path testDir = TEST_UTIL.getDataTestDir();
+    FileSystem fs = testDir.getFileSystem(conf);
+    Path outputDir1 = new Path(testDir, FAMILY1);
     HFileContext meta = new HFileContextBuilder().withBlockSize(8 * 1024).build();
     StoreFile.Writer writer1 = new StoreFile.WriterBuilder(conf, cacheConf, fs)
         .withOutputDir(outputDir1).withFileContext(meta).build();
     MobTestUtil.writeStoreFile(writer1, caseName);
     CachedMobFile cachedMobFile1 = CachedMobFile.create(fs, writer1.getPath(), conf, cacheConf);
-    Path outputDir2 = new Path(new Path(testDir, TABLE),
-        FAMILY2);
+    Path outputDir2 = new Path(testDir, FAMILY2);
     StoreFile.Writer writer2 = new StoreFile.WriterBuilder(conf, cacheConf, fs)
     .withOutputDir(outputDir2)
     .withFileContext(meta)
@@ -105,12 +99,11 @@ public class TestCachedMobFile extends TestCase{
 
   @Test
   public void testReadKeyValue() throws Exception {
-    FileSystem fs = FileSystem.get(conf);
-    Path testDir = FSUtils.getRootDir(conf);
-    Path outputDir = new Path(new Path(testDir, TABLE), "familyname");
+    Path testDir = TEST_UTIL.getDataTestDir();
+    FileSystem fs = testDir.getFileSystem(conf);
     HFileContext meta = new HFileContextBuilder().withBlockSize(8 * 1024).build();
     StoreFile.Writer writer = new StoreFile.WriterBuilder(conf, cacheConf, fs)
-        .withOutputDir(outputDir).withFileContext(meta).build();
+        .withOutputDir(testDir).withFileContext(meta).build();
     String caseName = getName();
     MobTestUtil.writeStoreFile(writer, caseName);
     CachedMobFile cachedMobFile = CachedMobFile.create(fs, writer.getPath(), conf, cacheConf);

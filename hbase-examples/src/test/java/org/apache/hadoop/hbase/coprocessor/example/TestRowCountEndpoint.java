@@ -21,7 +21,6 @@ package org.apache.hadoop.hbase.coprocessor.example;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.client.coprocessor.Batch;
@@ -77,7 +76,7 @@ public class TestRowCountEndpoint {
     for (int i=0; i<5; i++) {
       byte[] iBytes = Bytes.toBytes(i);
       Put p = new Put(iBytes);
-      p.add(TEST_FAMILY, TEST_COLUMN, iBytes);
+      p.addColumn(TEST_FAMILY, TEST_COLUMN, iBytes);
       table.put(p);
     }
 

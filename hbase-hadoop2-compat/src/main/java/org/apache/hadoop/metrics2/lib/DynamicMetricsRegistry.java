@@ -60,6 +60,7 @@ public class DynamicMetricsRegistry {
       "_max",
       "_median",
       "_75th_percentile",
+      "_90th_percentile",
       "_95th_percentile",
       "_99th_percentile"};
 
@@ -283,6 +284,46 @@ public class DynamicMetricsRegistry {
   public MutableHistogram newHistogram(String name, String desc) {
     MutableHistogram histo = new MutableHistogram(name, desc);
     return addNewMetricIfAbsent(name, histo, MutableHistogram.class);
+  }
+  
+  /**
+   * Create a new histogram with time range counts.
+   * @param name Name of the histogram.
+   * @return A new MutableTimeHistogram
+   */
+  public MutableTimeHistogram newTimeHistogram(String name) {
+     return newTimeHistogram(name, "");
+  }
+
+  /**
+   * Create a new histogram with time range counts.
+   * @param name The name of the histogram
+   * @param desc The description of the data in the histogram.
+   * @return A new MutableTimeHistogram
+   */
+  public MutableTimeHistogram newTimeHistogram(String name, String desc) {
+    MutableTimeHistogram histo = new MutableTimeHistogram(name, desc);
+    return addNewMetricIfAbsent(name, histo, MutableTimeHistogram.class);
+  }
+  
+  /**
+   * Create a new histogram with size range counts.
+   * @param name Name of the histogram.
+   * @return A new MutableSizeHistogram
+   */
+  public MutableSizeHistogram newSizeHistogram(String name) {
+     return newSizeHistogram(name, "");
+  }
+
+  /**
+   * Create a new histogram with size range counts.
+   * @param name The name of the histogram
+   * @param desc The description of the data in the histogram.
+   * @return A new MutableSizeHistogram
+   */
+  public MutableSizeHistogram newSizeHistogram(String name, String desc) {
+    MutableSizeHistogram histo = new MutableSizeHistogram(name, desc);
+    return addNewMetricIfAbsent(name, histo, MutableSizeHistogram.class);
   }
 
   /**

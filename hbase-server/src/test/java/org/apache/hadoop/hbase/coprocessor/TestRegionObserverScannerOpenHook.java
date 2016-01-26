@@ -61,6 +61,7 @@ import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputController;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.apache.hadoop.hbase.testclassification.CoprocessorTests;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
@@ -177,7 +178,7 @@ public class TestRegionObserverScannerOpenHook {
     h.load(EmptyRegionObsever.class, Coprocessor.PRIORITY_USER, conf);
 
     Put put = new Put(ROW);
-    put.add(A, A, A);
+    put.addColumn(A, A, A);
     region.put(put);
 
     Get get = new Get(ROW);
@@ -203,7 +204,7 @@ public class TestRegionObserverScannerOpenHook {
 
     // put a row and flush it to disk
     Put put = new Put(ROW);
-    put.add(A, A, A);
+    put.addColumn(A, A, A);
     region.put(put);
     region.flush(true);
     Get get = new Get(ROW);
@@ -239,6 +240,14 @@ public class TestRegionObserverScannerOpenHook {
       if (ret) compactionStateChangeLatch.countDown();
       return ret;
     }
+
+    @Override
+    public boolean compact(CompactionContext compaction, Store store,
+        CompactionThroughputController throughputController, User user) throws IOException {
+      boolean ret = super.compact(compaction, store, throughputController, user);
+      if (ret) compactionStateChangeLatch.countDown();
+      return ret;
+    }
   }
 
   /**
@@ -269,7 +278,7 @@ public class TestRegionObserverScannerOpenHook {
 
     // put a row and flush it to disk
     Put put = new Put(ROW);
-    put.add(A, A, A);
+    put.addColumn(A, A, A);
     table.put(put);
 
     HRegionServer rs = UTIL.getRSForFirstRegionInTable(desc.getTableName());
@@ -282,7 +291,7 @@ public class TestRegionObserverScannerOpenHook {
 
     // put another row and flush that too
     put = new Put(Bytes.toBytes("anotherrow"));
-    put.add(A, A, A);
+    put.addColumn(A, A, A);
     table.put(put);
     admin.flushRegion(region.getRegionInfo().getRegionName());
 

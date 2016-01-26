@@ -17,7 +17,10 @@
  */
 package org.apache.hadoop.hbase;
 
-import javax.annotation.Nullable;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -43,6 +46,8 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+import javax.annotation.Nullable;
 
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.logging.Log;
@@ -83,6 +88,7 @@ import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.ipc.RpcServerInterface;
 import org.apache.hadoop.hbase.ipc.ServerNotRunningYetException;
 import org.apache.hadoop.hbase.mapreduce.MapreduceTestingShim;
+import org.apache.hadoop.hbase.master.AssignmentManager;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.RegionStates;
 import org.apache.hadoop.hbase.master.ServerManager;
@@ -128,10 +134,6 @@ import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.ZooKeeper.States;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 /**
  * Facility for testing HBase. Replacement for
  * old HBaseTestCase and HBaseClusterTestCase functionality.
@@ -157,8 +159,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * The default number of regions per regionserver when creating a pre-split
    * table.
    */
-  public static final int DEFAULT_REGIONS_PER_SERVER = 5;
+  public static final int DEFAULT_REGIONS_PER_SERVER = 3;
 
+
+  public static final String PRESPLIT_TEST_TABLE_KEY = "hbase.test.pre-split-table";
+  public static final boolean PRESPLIT_TEST_TABLE = true;
   /**
    * Set if we were passed a zkCluster.  If so, we won't shutdown zk as
    * part of general shutdown.
@@ -198,9 +203,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
 
   /** Filesystem URI used for map-reduce mini-cluster setup */
   private static String FS_URI;
-
-  /** A set of ports that have been claimed using {@link #randomFreePort()}. */
-  private static final Set<Integer> takenRandomPorts = new HashSet<Integer>();
 
   /** Compression algorithms to use in parameterized JUnit 4 tests */
   public static final List<Object[]> COMPRESSION_ALGORITHMS_PARAMETERIZED =
@@ -1173,7 +1175,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    */
   public void shutdownMiniHBaseCluster() throws IOException {
     if (hbaseAdmin != null) {
-      hbaseAdmin.close0();
+      hbaseAdmin.close();
       hbaseAdmin = null;
     }
 
@@ -1309,19 +1311,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   /**
    * Create a table.
    * @param tableName
-   * @param family
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[])}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[] family) throws IOException {
-    return createTable(TableName.valueOf(tableName), new byte[][] { family });
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
    * @param families
    * @return An HTable instance for the created table.
    * @throws IOException
@@ -1365,22 +1354,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return createTable(tableName, new byte[][] { family }, splitKeys);
   }
 
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][])}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families)
-  throws IOException {
-    return createTable(tableName, families,
-        new Configuration(getConfiguration()));
-  }
-
   /**
    * Create a table.
    * @param tableName
@@ -1415,20 +1388,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   public HTable createTable(TableName tableName, byte[][] families, byte[][] splitKeys)
       throws IOException {
     return createTable(tableName, families, splitKeys, new Configuration(getConfiguration()));
-  }
-
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families, int numVersions, byte[] startKey,
-      byte[] endKey, int numRegions) throws IOException {
-    return createTable(TableName.valueOf(tableName), families, numVersions, startKey, endKey,
-        numRegions);
-  }
-
-  @Deprecated
-  public HTable createTable(String tableName, byte[][] families, int numVersions, byte[] startKey,
-      byte[] endKey, int numRegions) throws IOException {
-    return createTable(TableName.valueOf(tableName), families, numVersions, startKey, endKey,
-        numRegions);
   }
 
   public HTable createTable(TableName tableName, byte[][] families,
@@ -1506,21 +1465,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * Create a table.
    * @param tableName
    * @param families
-   * @param c Configuration to use
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][])}
-   */
-  @Deprecated
-  public HTable createTable(TableName tableName, byte[][] families, final Configuration c)
-      throws IOException {
-    return createTable(tableName, families, (byte[][]) null, c);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
    * @param splitKeys
    * @param c Configuration to use
    * @return An HTable instance for the created table.
@@ -1534,95 +1478,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   /**
    * Create a table.
    * @param tableName
-   * @param families
-   * @param c Configuration to use
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][])}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families, final Configuration c)
-      throws IOException {
-    HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(tableName));
-    for(byte[] family : families) {
-      HColumnDescriptor hcd = new HColumnDescriptor(family);
-      // Disable blooms (they are on by default as of 0.95) but we disable them here because
-      // tests have hard coded counts of what to expect in block cache, etc., and blooms being
-      // on is interfering.
-      hcd.setBloomFilterType(BloomType.NONE);
-      desc.addFamily(hcd);
-    }
-    getHBaseAdmin().createTable(desc);
-    return (HTable) getConnection().getTable(desc.getTableName());
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
-   * @param c Configuration to use
-   * @param numVersions
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][], int)}
-   */
-  @Deprecated
-  public HTable createTable(TableName tableName, byte[][] families,
-      final Configuration c, int numVersions)
-  throws IOException {
-    HTableDescriptor desc = new HTableDescriptor(tableName);
-    for(byte[] family : families) {
-      HColumnDescriptor hcd = new HColumnDescriptor(family)
-          .setMaxVersions(numVersions);
-      desc.addFamily(hcd);
-    }
-    getHBaseAdmin().createTable(desc);
-    // HBaseAdmin only waits for regions to appear in hbase:meta we should wait until they are assigned
-    waitUntilAllRegionsAssigned(tableName);
-    return (HTable) getConnection().getTable(tableName);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
-   * @param c Configuration to use
-   * @param numVersions
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][], int)}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families,
-      final Configuration c, int numVersions)
-  throws IOException {
-    HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(tableName));
-    for (byte[] family : families) {
-      HColumnDescriptor hcd = new HColumnDescriptor(family).setMaxVersions(numVersions);
-      desc.addFamily(hcd);
-    }
-    getHBaseAdmin().createTable(desc);
-    return (HTable) getConnection().getTable(desc.getTableName());
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param family
-   * @param numVersions
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[], int)}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[] family, int numVersions)
-  throws IOException {
-    return createTable(tableName, new byte[][]{family}, numVersions);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
    * @param family
    * @param numVersions
    * @return An HTable instance for the created table.
@@ -1631,21 +1486,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   public HTable createTable(TableName tableName, byte[] family, int numVersions)
   throws IOException {
     return createTable(tableName, new byte[][]{family}, numVersions);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
-   * @param numVersions
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][], int)}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families, int numVersions)
-      throws IOException {
-    return createTable(TableName.valueOf(tableName), families, numVersions);
   }
 
   /**
@@ -1704,23 +1544,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param blockSize
    * @return An HTable instance for the created table.
    * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][], int, int)}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families,
-    int numVersions, int blockSize) throws IOException {
-    return createTable(TableName.valueOf(tableName),
-        families, numVersions, blockSize);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
-   * @param numVersions
-   * @param blockSize
-   * @return An HTable instance for the created table.
-   * @throws IOException
    */
   public HTable createTable(TableName tableName, byte[][] families,
     int numVersions, int blockSize) throws IOException {
@@ -1762,22 +1585,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param numVersions
    * @return An HTable instance for the created table.
    * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][], int)}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families,
-      int[] numVersions)
-  throws IOException {
-    return createTable(TableName.valueOf(tableName), families, numVersions);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
-   * @param numVersions
-   * @return An HTable instance for the created table.
-   * @throws IOException
    */
   public HTable createTable(TableName tableName, byte[][] families,
       int[] numVersions)
@@ -1794,21 +1601,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     // HBaseAdmin only waits for regions to appear in hbase:meta we should wait until they are assigned
     waitUntilAllRegionsAssigned(tableName);
     return (HTable) getConnection().getTable(tableName);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param family
-   * @param splitRows
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[], byte[][])}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[] family, byte[][] splitRows)
-    throws IOException{
-    return createTable(TableName.valueOf(tableName), family, splitRows);
   }
 
   /**
@@ -1839,29 +1631,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    */
   public HTable createMultiRegionTable(TableName tableName, byte[] family) throws IOException {
     return createTable(tableName, family, KEYS_FOR_HBA_CREATE_TABLE);
-  }
-
-  /**
-   * Create a table.
-   * @param tableName
-   * @param families
-   * @param splitRows
-   * @return An HTable instance for the created table.
-   * @throws IOException
-   * @deprecated use {@link #createTable(TableName, byte[][], byte[][])}
-   */
-  @Deprecated
-  public HTable createTable(byte[] tableName, byte[][] families, byte[][] splitRows)
-      throws IOException {
-    HTableDescriptor desc = new HTableDescriptor(TableName.valueOf(tableName));
-    for(byte[] family:families) {
-      HColumnDescriptor hcd = new HColumnDescriptor(family);
-      desc.addFamily(hcd);
-    }
-    getHBaseAdmin().createTable(desc, splitRows);
-    // HBaseAdmin only waits for regions to appear in hbase:meta we should wait until they are assigned
-    waitUntilAllRegionsAssigned(desc.getTableName());
-    return (HTable) getConnection().getTable(desc.getTableName());
   }
 
   /**
@@ -1902,26 +1671,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     desc.setRegionReplication(replicaCount);
     admin.modifyTable(desc.getTableName(), desc);
     admin.enableTable(table);
-  }
-
-  /**
-   * Drop an existing table
-   * @param tableName existing table
-   * @deprecated use {@link #deleteTable(TableName)}
-   */
-  @Deprecated
-  public void deleteTable(String tableName) throws IOException {
-    deleteTable(TableName.valueOf(tableName));
-  }
-
-  /**
-   * Drop an existing table
-   * @param tableName existing table
-   * @deprecated use {@link #deleteTable(TableName)}
-   */
-  @Deprecated
-  public void deleteTable(byte[] tableName) throws IOException {
-    deleteTable(TableName.valueOf(tableName));
   }
 
   /**
@@ -2102,19 +1851,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * @param tableName existing table
    * @return HTable to that new table
    * @throws IOException
-   * @deprecated use {@link #deleteTableData(TableName)}
-   */
-  @Deprecated
-  public HTable deleteTableData(byte[] tableName) throws IOException {
-    return deleteTableData(TableName.valueOf(tableName));
-  }
-
-  /**
-   * Provide an existing table name to truncate.
-   * Scans the table and issues a delete for each row read.
-   * @param tableName existing table
-   * @return HTable to that new table
-   * @throws IOException
    */
   public HTable deleteTableData(TableName tableName) throws IOException {
     HTable table = (HTable) getConnection().getTable(tableName);
@@ -2153,37 +1889,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    */
   public HTable truncateTable(final TableName tableName) throws IOException {
     return truncateTable(tableName, false);
-  }
-
-  /**
-   * Truncate a table using the admin command.
-   * Effectively disables, deletes, and recreates the table.
-   *
-   * @param tableName       table which must exist.
-   * @param preserveRegions keep the existing split points
-   * @return HTable for the new table
-   * @deprecated use {@link #truncateTable(TableName, boolean)}
-   */
-  @Deprecated
-  public HTable truncateTable(final byte[] tableName, final boolean preserveRegions)
-      throws IOException {
-    return truncateTable(TableName.valueOf(tableName), preserveRegions);
-  }
-
-  /**
-   * Truncate a table using the admin command.
-   * Effectively disables, deletes, and recreates the table.
-   * For previous behavior of issuing row deletes, see
-   * deleteTableData.
-   * Expressly does not preserve regions of existing table.
-   *
-   * @param tableName table which must exist.
-   * @return HTable for the new table
-   * @deprecated use {@link #truncateTable(TableName)}
-   */
-  @Deprecated
-  public HTable truncateTable(final byte[] tableName) throws IOException {
-    return truncateTable(TableName.valueOf(tableName), false);
   }
 
   /**
@@ -2245,7 +1950,8 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
       Put put = new Put(row);
       put.setDurability(writeToWAL ? Durability.USE_DEFAULT : Durability.SKIP_WAL);
       for (int i = 0; i < f.length; i++) {
-        put.add(f[i], null, value != null ? value : row);
+        byte[] value1 = value != null ? value : row;
+        put.addColumn(f[i], null, value1);
       }
       puts.add(put);
     }
@@ -2332,7 +2038,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
           k[2] = b3;
           Put put = new Put(k);
           put.setDurability(Durability.SKIP_WAL);
-          put.add(f, null, k);
+          put.addColumn(f, null, k);
           if (r.getWAL() == null) {
             put.setDurability(Durability.SKIP_WAL);
           }
@@ -2362,7 +2068,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     for (int i = startRow; i < endRow; i++) {
       byte[] data = Bytes.toBytes(String.valueOf(i));
       Put put = new Put(data);
-      put.add(f, null, data);
+      put.addColumn(f, null, data);
       t.put(put);
     }
   }
@@ -2426,7 +2132,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     for (int i = startRow; i < endRow; i++) {
       byte[] data = Bytes.toBytes(String.valueOf(i));
       Delete delete = new Delete(data);
-      delete.deleteFamily(f);
+      delete.addFamily(f);
       t.delete(delete);
     }
   }
@@ -2435,7 +2141,10 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    * Return the number of rows in the given table.
    */
   public int countRows(final Table table) throws IOException {
-    Scan scan = new Scan();
+    return countRows(table, new Scan());
+  }
+
+  public int countRows(final Table table, final Scan scan) throws IOException {
     ResultScanner results = table.getScanner(scan);
     int count = 0;
     for (@SuppressWarnings("unused") Result res : results) {
@@ -2623,7 +2332,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     List<byte[]> rows = new ArrayList<byte[]>();
     ResultScanner s = t.getScanner(new Scan());
     for (Result result : s) {
-      HRegionInfo info = HRegionInfo.getHRegionInfo(result);
+      HRegionInfo info = MetaTableAccessor.getHRegionInfo(result);
       if (info == null) {
         LOG.error("No region info for row " + Bytes.toString(result.getRow()));
         // TODO figure out what to do for this new hosed case.
@@ -2878,15 +2587,9 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
    expireSession(nodeZK, false);
   }
 
-  @Deprecated
-  public void expireSession(ZooKeeperWatcher nodeZK, Server server)
-    throws Exception {
-    expireSession(nodeZK, false);
-  }
-
   /**
    * Expire a ZooKeeper session as recommended in ZooKeeper documentation
-   * http://wiki.apache.org/hadoop/ZooKeeper/FAQ#A4
+   * http://hbase.apache.org/book.html#trouble.zookeeper
    * There are issues when doing this:
    * [1] http://www.mail-archive.com/dev@zookeeper.apache.org/msg01942.html
    * [2] https://issues.apache.org/jira/browse/ZOOKEEPER-1105
@@ -2979,38 +2682,35 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
 
   /**
    * Returns a Admin instance.
-   * This instance is shared between HBaseTestingUtility instance users.
-   * Closing it has no effect, it will be closed automatically when the
-   * cluster shutdowns
+   * This instance is shared between HBaseTestingUtility instance users. Closing it has no effect,
+   * it will be closed automatically when the cluster shutdowns
    *
-   * @return An Admin instance.
-   * @throws IOException
+   * @return HBaseAdmin instance which is guaranteed to support only {@link Admin} interface.
+   *   Functions in HBaseAdmin not provided by {@link Admin} interface can be changed/deleted
+   *   anytime.
+   * @deprecated Since 2.0. Will be removed in 3.0. Use {@link #getAdmin()} instead.
    */
+  @Deprecated
   public synchronized HBaseAdmin getHBaseAdmin()
   throws IOException {
     if (hbaseAdmin == null){
-      this.hbaseAdmin = new HBaseAdminForTests(getConnection());
+      this.hbaseAdmin = (HBaseAdmin) getConnection().getAdmin();
     }
     return hbaseAdmin;
   }
 
-  private HBaseAdminForTests hbaseAdmin = null;
-  private static class HBaseAdminForTests extends HBaseAdmin {
-    public HBaseAdminForTests(Connection connection) throws MasterNotRunningException,
-        ZooKeeperConnectionException, IOException {
-      super(connection);
+  /**
+   * Returns an Admin instance which is shared between HBaseTestingUtility instance users.
+   * Closing it has no effect, it will be closed automatically when the cluster shutdowns
+   */
+  public synchronized Admin getAdmin() throws IOException {
+    if (hbaseAdmin == null){
+      this.hbaseAdmin = (HBaseAdmin) getConnection().getAdmin();
     }
-
-    @Override
-    public synchronized void close() throws IOException {
-      LOG.warn("close() called on HBaseAdmin instance returned from " +
-        "HBaseTestingUtility.getHBaseAdmin()");
-    }
-
-    private synchronized void close0() throws IOException {
-      super.close();
-    }
+    return hbaseAdmin;
   }
+
+  private HBaseAdmin hbaseAdmin = null;
 
   /**
    * Returns a ZooKeeperWatcher instance.
@@ -3367,7 +3067,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
   /**
    * This method clones the passed <code>c</code> configuration setting a new
    * user into the clone.  Use it getting new instances of FileSystem.  Only
-   * works for DistributedFileSystem.
+   * works for DistributedFileSystem w/o Kerberos.
    * @param c Initial configuration
    * @param differentiatingSuffix Suffix to differentiate this user from others.
    * @return A new configuration instance with a different user set into it.
@@ -3377,7 +3077,7 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     final String differentiatingSuffix)
   throws IOException {
     FileSystem currentfs = FileSystem.get(c);
-    if (!(currentfs instanceof DistributedFileSystem)) {
+    if (!(currentfs instanceof DistributedFileSystem) || User.isHBaseSecurityEnabled(c)) {
       return User.getCurrent();
     }
     // Else distributed filesystem.  Make a new instance per daemon.  Below
@@ -3654,15 +3354,6 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
             HConstants.DEFAULT_ZOOKEEPER_ZNODE_PARENT);
   }
 
-  @Deprecated
-  public HTable createRandomTable(String tableName, final Collection<String> families,
-      final int maxVersions, final int numColsPerRow, final int numFlushes, final int numRegions,
-      final int numRowsPerFlush) throws IOException, InterruptedException {
-    return (HTable) this
-        .createRandomTable(TableName.valueOf(tableName), families, maxVersions, numColsPerRow,
-            numFlushes, numRegions, numRowsPerFlush);
-  }
-
   /** Creates a random table with the given parameters */
   public Table createRandomTable(TableName tableName,
       final Collection<String> families,
@@ -3721,11 +3412,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
             final byte[] value = Bytes.toBytes("value_for_row_" + iRow +
                 "_cf_" + Bytes.toStringBinary(cf) + "_col_" + iCol + "_ts_" +
                 ts + "_random_" + rand.nextLong());
-            put.add(cf, qual, ts, value);
+            put.addColumn(cf, qual, ts, value);
           } else if (rand.nextDouble() < 0.8) {
-            del.deleteColumn(cf, qual, ts);
+            del.addColumn(cf, qual, ts);
           } else {
-            del.deleteColumns(cf, qual, ts);
+            del.addColumns(cf, qual, ts);
           }
         }
 
@@ -3748,40 +3439,77 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
     return table;
   }
 
-  private static final int MIN_RANDOM_PORT = 0xc000;
-  private static final int MAX_RANDOM_PORT = 0xfffe;
   private static Random random = new Random();
 
-  /**
-   * Returns a random port. These ports cannot be registered with IANA and are
-   * intended for dynamic allocation (see http://bit.ly/dynports).
-   */
-  public static int randomPort() {
-    return MIN_RANDOM_PORT
-        + random.nextInt(MAX_RANDOM_PORT - MIN_RANDOM_PORT);
+  private static final PortAllocator portAllocator = new PortAllocator(random);
+
+  public static int randomFreePort() {
+    return portAllocator.randomFreePort();
   }
 
-  /**
-   * Returns a random free port and marks that port as taken. Not thread-safe. Expected to be
-   * called from single-threaded test setup code/
-   */
-  public static int randomFreePort() {
-    int port = 0;
-    do {
-      port = randomPort();
-      if (takenRandomPorts.contains(port)) {
-        continue;
-      }
-      takenRandomPorts.add(port);
+  static class PortAllocator {
+    private static final int MIN_RANDOM_PORT = 0xc000;
+    private static final int MAX_RANDOM_PORT = 0xfffe;
 
-      try {
-        ServerSocket sock = new ServerSocket(port);
-        sock.close();
-      } catch (IOException ex) {
-        port = 0;
-      }
-    } while (port == 0);
-    return port;
+    /** A set of ports that have been claimed using {@link #randomFreePort()}. */
+    private final Set<Integer> takenRandomPorts = new HashSet<Integer>();
+
+    private final Random random;
+    private final AvailablePortChecker portChecker;
+
+    public PortAllocator(Random random) {
+      this.random = random;
+      this.portChecker = new AvailablePortChecker() {
+        public boolean available(int port) {
+          try {
+            ServerSocket sock = new ServerSocket(port);
+            sock.close();
+            return true;
+          } catch (IOException ex) {
+            return false;
+          }
+        }
+      };
+    }
+
+    public PortAllocator(Random random, AvailablePortChecker portChecker) {
+      this.random = random;
+      this.portChecker = portChecker;
+    }
+
+    /**
+     * Returns a random free port and marks that port as taken. Not thread-safe. Expected to be
+     * called from single-threaded test setup code/
+     */
+    public int randomFreePort() {
+      int port = 0;
+      do {
+        port = randomPort();
+        if (takenRandomPorts.contains(port)) {
+          port = 0;
+          continue;
+        }
+        takenRandomPorts.add(port);
+
+        if (!portChecker.available(port)) {
+          port = 0;
+        }
+      } while (port == 0);
+      return port;
+    }
+
+    /**
+     * Returns a random port. These ports cannot be registered with IANA and are
+     * intended for dynamic allocation (see http://bit.ly/dynports).
+     */
+    private int randomPort() {
+      return MIN_RANDOM_PORT
+          + random.nextInt(MAX_RANDOM_PORT - MIN_RANDOM_PORT);
+    }
+
+    interface AvailablePortChecker {
+      boolean available(int port);
+    }
   }
 
 
@@ -4052,8 +3780,11 @@ public class HBaseTestingUtility extends HBaseCommonTestingUtility {
 
       @Override
       public boolean evaluate() throws IOException {
-        final RegionStates regionStates = getMiniHBaseCluster().getMaster()
-            .getAssignmentManager().getRegionStates();
+        HMaster master = getMiniHBaseCluster().getMaster();
+        if (master == null) return false;
+        AssignmentManager am = master.getAssignmentManager();
+        if (am == null) return false;
+        final RegionStates regionStates = am.getRegionStates();
         return !regionStates.isRegionsInTransition();
       }
     };

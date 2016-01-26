@@ -20,7 +20,6 @@ package org.apache.hadoop.hbase.master;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -424,8 +423,6 @@ public class RegionStates {
       ServerName oldServerName = regionAssignments.put(hri, serverName);
       if (!serverName.equals(oldServerName)) {
         if (LOG.isDebugEnabled()) {
-          LOG.debug("Onlined " + hri.getShortNameToLog() + " on " + serverName);
-        } else {
           LOG.debug("Onlined " + hri.getShortNameToLog() + " on " + serverName);
         }
         addToServerHoldings(serverName, hri);

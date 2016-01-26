@@ -21,6 +21,8 @@ package org.apache.hadoop.hbase.regionserver;
 
 import java.io.IOException;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
@@ -28,7 +30,6 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.NotServingRegionException;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Table;
@@ -49,7 +50,6 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
-import org.mortbay.log.Log;
 
 import com.google.protobuf.ServiceException;
 
@@ -59,6 +59,7 @@ import com.google.protobuf.ServiceException;
 @Category({RegionServerTests.class, MediumTests.class})
 public class TestRegionServerNoMaster {
 
+  private static final Log LOG = LogFactory.getLog(TestRegionServerNoMaster.class);
   private static final int NB_SERVERS = 1;
   private static Table table;
   private static final byte[] row = "ee".getBytes();
@@ -77,7 +78,7 @@ public class TestRegionServerNoMaster {
     // Create table then get the single region for our new table.
     table = HTU.createTable(tableName,HConstants.CATALOG_FAMILY);
     Put p = new Put(row);
-    p.add(HConstants.CATALOG_FAMILY, row, row);
+    p.addColumn(HConstants.CATALOG_FAMILY, row, row);
     table.put(p);
 
     try (RegionLocator locator = HTU.getConnection().getRegionLocator(tableName)) {
@@ -96,7 +97,7 @@ public class TestRegionServerNoMaster {
     ServerName masterAddr = master.getServerName();
     master.stopMaster();
 
-    Log.info("Waiting until master thread exits");
+    LOG.info("Waiting until master thread exits");
     while (masterThread != null && masterThread.isAlive()) {
       Threads.sleep(100);
     }

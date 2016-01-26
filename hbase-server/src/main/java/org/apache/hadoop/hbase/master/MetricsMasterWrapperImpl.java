@@ -40,6 +40,16 @@ public class MetricsMasterWrapperImpl implements MetricsMasterWrapper {
   }
 
   @Override
+  public long getSplitPlanCount() {
+    return master.getSplitPlanCount();
+  }
+
+  @Override
+  public long getMergePlanCount() {
+    return master.getMergePlanCount();
+  }
+
+  @Override
   public String getClusterId() {
     return master.getClusterId();
   }
@@ -118,4 +128,10 @@ public class MetricsMasterWrapperImpl implements MetricsMasterWrapper {
   public boolean getIsActiveMaster() {
     return master.isActiveMaster();
   }
+
+  @Override
+  public long getNumWALFiles() {
+    return master.getNumWALFiles();
+  }
+
 }

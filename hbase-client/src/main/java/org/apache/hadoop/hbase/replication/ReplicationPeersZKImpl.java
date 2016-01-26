@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Abortable;
@@ -46,6 +47,7 @@ import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil.ZKUtilOp;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.KeeperException.NoNodeException;
 
 import com.google.protobuf.ByteString;
 
@@ -81,14 +83,16 @@ public class ReplicationPeersZKImpl extends ReplicationStateZKBase implements Re
   // Map of peer clusters keyed by their id
   private Map<String, ReplicationPeerZKImpl> peerClusters;
   private final String tableCFsNodeName;
+  private final ReplicationQueuesClient queuesClient;
 
   private static final Log LOG = LogFactory.getLog(ReplicationPeersZKImpl.class);
 
   public ReplicationPeersZKImpl(final ZooKeeperWatcher zk, final Configuration conf,
-      Abortable abortable) {
+      final ReplicationQueuesClient queuesClient, Abortable abortable) {
     super(zk, conf, abortable);
     this.tableCFsNodeName = conf.get("zookeeper.znode.replication.peers.tableCFs", "tableCFs");
     this.peerClusters = new ConcurrentHashMap<String, ReplicationPeerZKImpl>();
+    this.queuesClient = queuesClient;
   }
 
   @Override
@@ -116,7 +120,22 @@ public class ReplicationPeersZKImpl extends ReplicationStateZKBase implements Re
         throw new IllegalArgumentException("Found invalid peer name:" + id);
       }
 
+      checkQueuesDeleted(id);
+
       ZKUtil.createWithParents(this.zookeeper, this.peersZNode);
+
+      // If only bulk load hfile replication is enabled then add peerId node to hfile-refs node
+      if (replicationForBulkLoadEnabled) {
+        try {
+          String peerId = ZKUtil.joinZNode(this.hfileRefsZNode, id);
+          LOG.info("Adding peer " + peerId + " to hfile reference queue.");
+          ZKUtil.createWithParents(this.zookeeper, peerId);
+        } catch (KeeperException e) {
+          throw new ReplicationException("Failed to add peer with id=" + id
+              + ", node under hfile references node.", e);
+        }
+      }
+
       List<ZKUtilOp> listOfOps = new ArrayList<ZKUtil.ZKUtilOp>();
       ZKUtilOp op1 = ZKUtilOp.createAndFailSilent(ZKUtil.joinZNode(this.peersZNode, id),
         toByteArray(peerConfig));
@@ -146,6 +165,16 @@ public class ReplicationPeersZKImpl extends ReplicationStateZKBase implements Re
             + " because that id does not exist.");
       }
       ZKUtil.deleteNodeRecursively(this.zookeeper, ZKUtil.joinZNode(this.peersZNode, id));
+      // Delete peerId node from hfile-refs node irrespective of whether bulk loaded hfile
+      // replication is enabled or not
+
+      String peerId = ZKUtil.joinZNode(this.hfileRefsZNode, id);
+      try {
+        LOG.info("Removing peer " + peerId + " from hfile reference queue.");
+        ZKUtil.deleteNodeRecursively(this.zookeeper, peerId);
+      } catch (NoNodeException e) {
+        LOG.info("Did not find node " + peerId + " to delete.", e);
+      }
     } catch (KeeperException e) {
       throw new ReplicationException("Could not remove peer with id=" + id, e);
     }
@@ -314,11 +343,9 @@ public class ReplicationPeersZKImpl extends ReplicationStateZKBase implements Re
       return null;
     }
 
-    Configuration otherConf = new Configuration(this.conf);
+    Configuration otherConf;
     try {
-      if (peerConfig.getClusterKey() != null && !peerConfig.getClusterKey().isEmpty()) {
-        ZKUtil.applyClusterKeyToConf(otherConf, peerConfig.getClusterKey());
-      }
+      otherConf = HBaseConfiguration.createClusterConf(this.conf, peerConfig.getClusterKey());
     } catch (IOException e) {
       LOG.error("Can't get peer configuration for peerId=" + peerId + " because:", e);
       return null;
@@ -561,5 +588,22 @@ public class ReplicationPeersZKImpl extends ReplicationStateZKBase implements Re
     return ProtobufUtil.prependPBMagic(bytes);
   }
 
-
+  private void checkQueuesDeleted(String peerId) throws ReplicationException {
+    if (queuesClient == null) return;
+    try {
+      List<String> replicators = queuesClient.getListOfReplicators();
+      for (String replicator : replicators) {
+        List<String> queueIds = queuesClient.getAllQueues(replicator);
+        for (String queueId : queueIds) {
+          ReplicationQueueInfo queueInfo = new ReplicationQueueInfo(queueId);
+          if (queueInfo.getPeerId().equals(peerId)) {
+            throw new ReplicationException("undeleted queue for peerId: " + peerId
+                + ", replicator: " + replicator + ", queueId: " + queueId);
+          }
+        }
+      }
+    } catch (KeeperException e) {
+      throw new ReplicationException("Could not check queues deleted with id=" + peerId, e);
+    }
+  }
 }

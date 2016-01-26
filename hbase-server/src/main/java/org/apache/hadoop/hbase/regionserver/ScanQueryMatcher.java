@@ -160,7 +160,12 @@ public class ScanQueryMatcher {
   public ScanQueryMatcher(Scan scan, ScanInfo scanInfo, NavigableSet<byte[]> columns,
       ScanType scanType, long readPointToUse, long earliestPutTs, long oldestUnexpiredTS,
       long now, RegionCoprocessorHost regionCoprocessorHost) throws IOException {
-    this.tr = scan.getTimeRange();
+    TimeRange timeRange = scan.getColumnFamilyTimeRange().get(scanInfo.getFamily());
+    if (timeRange == null) {
+      this.tr = scan.getTimeRange();
+    } else {
+      this.tr = timeRange;
+    }
     this.rowComparator = scanInfo.getComparator();
     this.regionCoprocessorHost = regionCoprocessorHost;
     this.deletes =  instantiateDeleteTracker();
@@ -275,30 +280,36 @@ public class ScanQueryMatcher {
    *      caused by a data corruption.
    */
   public MatchCode match(Cell cell) throws IOException {
-    if (filter != null && filter.filterAllRemaining()) {
+      if (filter != null && filter.filterAllRemaining()) {
       return MatchCode.DONE_SCAN;
     }
-    int ret = this.rowComparator.compareRows(curCell, cell);
-    if (!this.isReversed) {
-      if (ret <= -1) {
-        return MatchCode.DONE;
-      } else if (ret >= 1) {
-        // could optimize this, if necessary?
-        // Could also be called SEEK_TO_CURRENT_ROW, but this
-        // should be rare/never happens.
-        return MatchCode.SEEK_NEXT_ROW;
+    if (curCell != null) {
+      int ret = this.rowComparator.compareRows(curCell, cell);
+      if (!this.isReversed) {
+        if (ret <= -1) {
+          return MatchCode.DONE;
+        } else if (ret >= 1) {
+          // could optimize this, if necessary?
+          // Could also be called SEEK_TO_CURRENT_ROW, but this
+          // should be rare/never happens.
+          return MatchCode.SEEK_NEXT_ROW;
+        }
+      } else {
+        if (ret <= -1) {
+          return MatchCode.SEEK_NEXT_ROW;
+        } else if (ret >= 1) {
+          return MatchCode.DONE;
+        }
       }
     } else {
-      if (ret <= -1) {
-        return MatchCode.SEEK_NEXT_ROW;
-      } else if (ret >= 1) {
-        return MatchCode.DONE;
-      }
+      // Since the curCell is null it means we are already sure that we have moved over to the next row
+      return MatchCode.DONE;
     }
 
     // optimize case.
-    if (this.stickyNextRow)
+    if (this.stickyNextRow) {
       return MatchCode.SEEK_NEXT_ROW;
+    }
 
     if (this.columns.done()) {
       stickyNextRow = true;

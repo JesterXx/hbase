@@ -302,7 +302,7 @@ public class MetaTableAccessor {
       parsedInfo = parseRegionInfoFromRegionName(regionName);
       row = getMetaKeyForRegion(parsedInfo);
     } catch (Exception parseEx) {
-      // Ignore. This is used with tableName passed as regionName.
+      ; // Ignore. This is used with tableName passed as regionName.
     }
     Get get = new Get(row);
     get.addFamily(HConstants.CATALOG_FAMILY);
@@ -919,7 +919,8 @@ public class MetaTableAccessor {
    * @return A ServerName instance or null if necessary fields not found or empty.
    */
   @Nullable
-  private static ServerName getServerName(final Result r, final int replicaId) {
+  @InterfaceAudience.Private // for use by HMaster#getTableRegionRow which is used for testing only
+  public static ServerName getServerName(final Result r, final int replicaId) {
     byte[] serverColumn = getServerColumn(replicaId);
     Cell cell = r.getColumnLatestCell(getCatalogFamily(), serverColumn);
     if (cell == null || cell.getValueLength() == 0) return null;
@@ -928,8 +929,13 @@ public class MetaTableAccessor {
     byte[] startcodeColumn = getStartCodeColumn(replicaId);
     cell = r.getColumnLatestCell(getCatalogFamily(), startcodeColumn);
     if (cell == null || cell.getValueLength() == 0) return null;
-    return ServerName.valueOf(hostAndPort,
-      Bytes.toLong(cell.getValueArray(), cell.getValueOffset(), cell.getValueLength()));
+    try {
+      return ServerName.valueOf(hostAndPort,
+          Bytes.toLong(cell.getValueArray(), cell.getValueOffset(), cell.getValueLength()));
+    } catch (IllegalArgumentException e) {
+      LOG.error("Ignoring invalid region for server " + hostAndPort + "; cell=" + cell, e);
+      return null;
+    }
   }
 
   /**
@@ -966,7 +972,9 @@ public class MetaTableAccessor {
     // iterate until all serverName columns are seen
     int replicaId = 0;
     byte[] serverColumn = getServerColumn(replicaId);
-    SortedMap<byte[], byte[]> serverMap = infoMap.tailMap(serverColumn, false);
+    SortedMap<byte[], byte[]> serverMap = null;
+    serverMap = infoMap.tailMap(serverColumn, false);
+
     if (serverMap.isEmpty()) return new RegionLocations(locations);
 
     for (Map.Entry<byte[], byte[]> entry : serverMap.entrySet()) {
@@ -1235,19 +1243,6 @@ public class MetaTableAccessor {
       }
       return super.visit(rowResult);
     }
-  }
-
-  /**
-   * Count regions in <code>hbase:meta</code> for passed table.
-   * @param c Configuration object
-   * @param tableName table name to count regions for
-   * @return Count or regions in table <code>tableName</code>
-   * @throws IOException
-   */
-  @Deprecated
-  public static int getRegionCount(final Configuration c, final String tableName)
-      throws IOException {
-    return getRegionCount(c, TableName.valueOf(tableName));
   }
 
   /**
@@ -1713,7 +1708,7 @@ public class MetaTableAccessor {
   public static Put makePutFromTableState(TableState state) {
     long time = EnvironmentEdgeManager.currentTime();
     Put put = new Put(state.getTableName().getName(), time);
-    put.add(getTableFamily(), getStateColumn(), state.convert().toByteArray());
+    put.addColumn(getTableFamily(), getStateColumn(), state.convert().toByteArray());
     return put;
   }
 

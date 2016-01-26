@@ -61,6 +61,9 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 /** memstore test case */
 @Category({RegionServerTests.class, MediumTests.class})
 public class TestDefaultMemStore extends TestCase {
@@ -102,8 +105,9 @@ public class TestDefaultMemStore extends TestCase {
     List<KeyValueScanner> memstorescanners = this.memstore.getScanners(0);
     Scan scan = new Scan();
     List<Cell> result = new ArrayList<Cell>();
+    Configuration conf = HBaseConfiguration.create();
     ScanInfo scanInfo =
-        new ScanInfo(null, 0, 1, HConstants.LATEST_TIMESTAMP, KeepDeletedCells.FALSE, 0,
+        new ScanInfo(conf, null, 0, 1, HConstants.LATEST_TIMESTAMP, KeepDeletedCells.FALSE, 0,
             this.memstore.comparator);
     ScanType scanType = ScanType.USER_SCAN;
     StoreScanner s = new StoreScanner(scan, scanInfo, scanType, null, memstorescanners);
@@ -522,9 +526,10 @@ public class TestDefaultMemStore extends TestCase {
       }
     }
     //starting from each row, validate results should contain the starting row
+    Configuration conf = HBaseConfiguration.create();
     for (int startRowId = 0; startRowId < ROW_COUNT; startRowId++) {
-      ScanInfo scanInfo = new ScanInfo(FAMILY, 0, 1, Integer.MAX_VALUE, KeepDeletedCells.FALSE,
-          0, this.memstore.comparator);
+      ScanInfo scanInfo = new ScanInfo(conf, FAMILY, 0, 1, Integer.MAX_VALUE,
+        KeepDeletedCells.FALSE, 0, this.memstore.comparator);
       ScanType scanType = ScanType.USER_SCAN;
       InternalScanner scanner = new StoreScanner(new Scan(
           Bytes.toBytes(startRowId)), scanInfo, scanType, null,
@@ -743,29 +748,32 @@ public class TestDefaultMemStore extends TestCase {
   /**
    * Test to ensure correctness when using Memstore with multiple timestamps
    */
-  public void testMultipleTimestamps() throws IOException {
+  public void testMultipleTimestamps() throws Exception {
     long[] timestamps = new long[] {20,10,5,1};
     Scan scan = new Scan();
 
     for (long timestamp: timestamps)
       addRows(memstore,timestamp);
 
-    scan.setTimeRange(0, 2);
-    assertTrue(memstore.shouldSeek(scan, Long.MIN_VALUE));
+    byte[] fam = Bytes.toBytes("fam");
+    HColumnDescriptor hcd = mock(HColumnDescriptor.class);
+    when(hcd.getName()).thenReturn(fam);
+    Store store = mock(Store.class);
+    when(store.getFamily()).thenReturn(hcd);
+    scan.setColumnFamilyTimeRange(fam, 0, 2);
+    assertTrue(memstore.shouldSeek(scan, store, Long.MIN_VALUE));
 
-    scan.setTimeRange(20, 82);
-    assertTrue(memstore.shouldSeek(scan, Long.MIN_VALUE));
+    scan.setColumnFamilyTimeRange(fam, 20, 82);
+    assertTrue(memstore.shouldSeek(scan, store, Long.MIN_VALUE));
 
-    scan.setTimeRange(10, 20);
-    assertTrue(memstore.shouldSeek(scan, Long.MIN_VALUE));
+    scan.setColumnFamilyTimeRange(fam, 10, 20);
+    assertTrue(memstore.shouldSeek(scan, store, Long.MIN_VALUE));
 
-    scan.setTimeRange(8, 12);
-    assertTrue(memstore.shouldSeek(scan, Long.MIN_VALUE));
+    scan.setColumnFamilyTimeRange(fam, 8, 12);
+    assertTrue(memstore.shouldSeek(scan, store, Long.MIN_VALUE));
 
-    /*This test is not required for correctness but it should pass when
-     * timestamp range optimization is on*/
-    //scan.setTimeRange(28, 42);
-    //assertTrue(!memstore.shouldSeek(scan));
+    scan.setColumnFamilyTimeRange(fam, 28, 42);
+    assertTrue(!memstore.shouldSeek(scan, store, Long.MIN_VALUE));
   }
 
   ////////////////////////////////////
@@ -942,10 +950,10 @@ public class TestDefaultMemStore extends TestCase {
 
   public void testShouldFlushMeta() throws Exception {
     // write an edit in the META and ensure the shouldFlush (that the periodic memstore
-    // flusher invokes) returns true after META_CACHE_FLUSH_INTERVAL (even though
+    // flusher invokes) returns true after SYSTEM_CACHE_FLUSH_INTERVAL (even though
     // the MEMSTORE_PERIODIC_FLUSH_INTERVAL is set to a higher value)
     Configuration conf = new Configuration();
-    conf.setInt(HRegion.MEMSTORE_PERIODIC_FLUSH_INTERVAL, HRegion.META_CACHE_FLUSH_INTERVAL * 10);
+    conf.setInt(HRegion.MEMSTORE_PERIODIC_FLUSH_INTERVAL, HRegion.SYSTEM_CACHE_FLUSH_INTERVAL * 10);
     HBaseTestingUtility hbaseUtility = HBaseTestingUtility.createLocalHTU(conf);
     Path testDir = hbaseUtility.getDataTestDir();
     EnvironmentEdgeForMemstoreTest edge = new EnvironmentEdgeForMemstoreTest();
@@ -967,7 +975,7 @@ public class TestDefaultMemStore extends TestCase {
     edge.setCurrentTimeMillis(1234 + 100);
     StringBuffer sb = new StringBuffer();
     assertTrue(meta.shouldFlush(sb) == false);
-    edge.setCurrentTimeMillis(edge.currentTime() + HRegion.META_CACHE_FLUSH_INTERVAL + 1);
+    edge.setCurrentTimeMillis(edge.currentTime() + HRegion.SYSTEM_CACHE_FLUSH_INTERVAL + 1);
     assertTrue(meta.shouldFlush(sb) == true);
   }
 

@@ -49,6 +49,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagRewriteCell;
 import org.apache.hadoop.hbase.TagType;
+import org.apache.hadoop.hbase.TagUtil;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Delete;
@@ -273,8 +274,10 @@ public class VisibilityController extends BaseMasterAndRegionObserver implements
     // Read the entire labels table and populate the zk
     if (e.getEnvironment().getRegion().getRegionInfo().getTable().equals(LABELS_TABLE_NAME)) {
       this.labelsRegion = true;
-      this.accessControllerAvailable = CoprocessorHost.getLoadedCoprocessors()
+      synchronized (this) {
+        this.accessControllerAvailable = CoprocessorHost.getLoadedCoprocessors()
           .contains(AccessController.class.getName());
+      }
       // Defer the init of VisibilityLabelService on labels region until it is in recovering state.
       if (!e.getEnvironment().getRegion().isRecovering()) {
         initVisibilityLabelService(e.getEnvironment());
@@ -340,8 +343,7 @@ public class VisibilityController extends BaseMasterAndRegionObserver implements
           Tag tag = pair.getSecond();
           if (cellVisibility == null && tag != null) {
             // May need to store only the first one
-            cellVisibility = new CellVisibility(Bytes.toString(tag.getBuffer(), tag.getTagOffset(),
-                tag.getTagLength()));
+            cellVisibility = new CellVisibility(TagUtil.getValueAsString(tag));
             modifiedTagFound = true;
           }
         }
@@ -368,14 +370,13 @@ public class VisibilityController extends BaseMasterAndRegionObserver implements
             List<Cell> updatedCells = new ArrayList<Cell>();
             for (CellScanner cellScanner = m.cellScanner(); cellScanner.advance();) {
               Cell cell = cellScanner.current();
-              List<Tag> tags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(),
-                  cell.getTagsLength());
+              List<Tag> tags = CellUtil.getTags(cell);
               if (modifiedTagFound) {
                 // Rewrite the tags by removing the modified tags.
                 removeReplicationVisibilityTag(tags);
               }
               tags.addAll(visibilityTags);
-              Cell updatedCell = new TagRewriteCell(cell, Tag.fromList(tags));
+              Cell updatedCell = new TagRewriteCell(cell, TagUtil.fromList(tags));
               updatedCells.add(updatedCell);
             }
             m.getFamilyCellMap().clear();
@@ -450,13 +451,11 @@ public class VisibilityController extends BaseMasterAndRegionObserver implements
    * Checks whether cell contains any tag with type as VISIBILITY_TAG_TYPE. This
    * tag type is reserved and should not be explicitly set by user.
    *
-   * @param cell
-   *          - the cell under consideration
-   * @param pair - an optional pair of type <Boolean, Tag> which would be reused
-   *               if already set and new one will be created if null is passed
-   * @return a pair<Boolean, Tag> - if the boolean is false then it indicates
-   *         that the cell has a RESERVERD_VIS_TAG and with boolean as true, not
-   *         null tag indicates that a string modified tag was found.
+   * @param cell The cell under consideration
+   * @param pair An optional pair of type {@code <Boolean, Tag>} which would be reused if already
+   *     set and new one will be created if NULL is passed
+   * @return If the boolean is false then it indicates that the cell has a RESERVERD_VIS_TAG and
+   *     with boolean as true, not null tag indicates that a string modified tag was found.
    */
   private Pair<Boolean, Tag> checkForReservedVisibilityTagPresence(Cell cell,
       Pair<Boolean, Tag> pair) throws IOException {
@@ -474,28 +473,22 @@ public class VisibilityController extends BaseMasterAndRegionObserver implements
       // cell visiblilty tags
       // have been modified
       Tag modifiedTag = null;
-      if (cell.getTagsLength() > 0) {
-        Iterator<Tag> tagsIterator = CellUtil.tagsIterator(cell.getTagsArray(),
-            cell.getTagsOffset(), cell.getTagsLength());
-        while (tagsIterator.hasNext()) {
-          Tag tag = tagsIterator.next();
-          if (tag.getType() == TagType.STRING_VIS_TAG_TYPE) {
-            modifiedTag = tag;
-            break;
-          }
+      Iterator<Tag> tagsIterator = CellUtil.tagsIterator(cell);
+      while (tagsIterator.hasNext()) {
+        Tag tag = tagsIterator.next();
+        if (tag.getType() == TagType.STRING_VIS_TAG_TYPE) {
+          modifiedTag = tag;
+          break;
         }
       }
       pair.setFirst(true);
       pair.setSecond(modifiedTag);
       return pair;
     }
-    if (cell.getTagsLength() > 0) {
-      Iterator<Tag> tagsItr = CellUtil.tagsIterator(cell.getTagsArray(), cell.getTagsOffset(),
-          cell.getTagsLength());
-      while (tagsItr.hasNext()) {
-        if (RESERVED_VIS_TAG_TYPES.contains(tagsItr.next().getType())) {
-          return pair;
-        }
+    Iterator<Tag> tagsItr = CellUtil.tagsIterator(cell);
+    while (tagsItr.hasNext()) {
+      if (RESERVED_VIS_TAG_TYPES.contains(tagsItr.next().getType())) {
+        return pair;
       }
     }
     pair.setFirst(true);
@@ -522,13 +515,10 @@ public class VisibilityController extends BaseMasterAndRegionObserver implements
     if (isSystemOrSuperUser()) {
       return true;
     }
-    if (cell.getTagsLength() > 0) {
-      Iterator<Tag> tagsItr = CellUtil.tagsIterator(cell.getTagsArray(), cell.getTagsOffset(),
-          cell.getTagsLength());
-      while (tagsItr.hasNext()) {
-        if (RESERVED_VIS_TAG_TYPES.contains(tagsItr.next().getType())) {
-          return false;
-        }
+    Iterator<Tag> tagsItr = CellUtil.tagsIterator(cell);
+    while (tagsItr.hasNext()) {
+      if (RESERVED_VIS_TAG_TYPES.contains(tagsItr.next().getType())) {
+        return false;
       }
     }
     return true;
@@ -741,21 +731,17 @@ public class VisibilityController extends BaseMasterAndRegionObserver implements
     boolean authCheck = authorizationEnabled && checkAuths && !(isSystemOrSuperUser());
     tags.addAll(this.visibilityLabelService.createVisibilityExpTags(cellVisibility.getExpression(),
         true, authCheck));
-    // Save an object allocation where we can
-    if (newCell.getTagsLength() > 0) {
-      // Carry forward all other tags
-      Iterator<Tag> tagsItr = CellUtil.tagsIterator(newCell.getTagsArray(),
-          newCell.getTagsOffset(), newCell.getTagsLength());
-      while (tagsItr.hasNext()) {
-        Tag tag = tagsItr.next();
-        if (tag.getType() != TagType.VISIBILITY_TAG_TYPE
-            && tag.getType() != TagType.VISIBILITY_EXP_SERIALIZATION_FORMAT_TAG_TYPE) {
-          tags.add(tag);
-        }
+    // Carry forward all other tags
+    Iterator<Tag> tagsItr = CellUtil.tagsIterator(newCell);
+    while (tagsItr.hasNext()) {
+      Tag tag = tagsItr.next();
+      if (tag.getType() != TagType.VISIBILITY_TAG_TYPE
+          && tag.getType() != TagType.VISIBILITY_EXP_SERIALIZATION_FORMAT_TAG_TYPE) {
+        tags.add(tag);
       }
     }
 
-    Cell rewriteCell = new TagRewriteCell(newCell, Tag.fromList(tags));
+    Cell rewriteCell = new TagRewriteCell(newCell, TagUtil.fromList(tags));
     return rewriteCell;
   }
 

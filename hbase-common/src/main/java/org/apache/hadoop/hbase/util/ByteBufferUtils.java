@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
-import org.apache.hadoop.hbase.io.ByteBufferOutputStream;
+import org.apache.hadoop.hbase.io.ByteBufferSupportOutputStream;
 import org.apache.hadoop.hbase.io.util.StreamUtils;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.WritableUtils;
@@ -38,6 +38,7 @@ import sun.nio.ch.DirectBuffer;
  * Utility functions for working with byte buffers, such as reading/writing
  * variable-length long numbers.
  */
+@SuppressWarnings("restriction")
 @InterfaceAudience.Public
 @InterfaceStability.Evolving
 public final class ByteBufferUtils {
@@ -47,6 +48,7 @@ public final class ByteBufferUtils {
   public final static int NEXT_BIT_SHIFT = 7;
   public final static int NEXT_BIT_MASK = 1 << 7;
   private static final boolean UNSAFE_AVAIL = UnsafeAccess.isAvailable();
+  private static final boolean UNSAFE_UNALIGNED = UnsafeAccess.unaligned();
 
   private ByteBufferUtils() {
   }
@@ -140,8 +142,8 @@ public final class ByteBufferUtils {
      // We have writeInt in ByteBufferOutputStream so that it can directly write
      // int to underlying
      // ByteBuffer in one step.
-     if (out instanceof ByteBufferOutputStream) {
-       ((ByteBufferOutputStream) out).writeInt(value);
+     if (out instanceof ByteBufferSupportOutputStream) {
+       ((ByteBufferSupportOutputStream) out).writeInt(value);
      } else {
        StreamUtils.writeInt(out, value);
      }
@@ -178,12 +180,13 @@ public final class ByteBufferUtils {
    */
   public static void copyBufferToStream(OutputStream out, ByteBuffer in,
       int offset, int length) throws IOException {
-    if (in.hasArray()) {
-      out.write(in.array(), in.arrayOffset() + offset,
-          length);
+    if (out instanceof ByteBufferSupportOutputStream) {
+      ((ByteBufferSupportOutputStream) out).write(in, offset, length);
+    } else if (in.hasArray()) {
+      out.write(in.array(), in.arrayOffset() + offset, length);
     } else {
       for (int i = 0; i < length; ++i) {
-        out.write(in.get(offset + i));
+        out.write(toByte(in, offset + i));
       }
     }
   }
@@ -392,9 +395,12 @@ public final class ByteBufferUtils {
     } else if (UNSAFE_AVAIL) {
       UnsafeAccess.copy(in, sourceOffset, out, destinationOffset, length);
     } else {
-      for (int i = 0; i < length; ++i) {
-        putByte(out, destinationOffset + i, toByte(in, sourceOffset + i));
-      }
+      int outOldPos = out.position();
+      out.position(destinationOffset);
+      ByteBuffer inDup = in.duplicate();
+      inDup.position(sourceOffset).limit(sourceOffset + length);
+      out.put(inDup);
+      out.position(outOldPos);
     }
     return destinationOffset + length;
   }
@@ -414,15 +420,15 @@ public final class ByteBufferUtils {
     if (in.hasArray() && out.hasArray()) {
       System.arraycopy(in.array(), sourceOffset + in.arrayOffset(), out.array(), out.position()
           + out.arrayOffset(), length);
+      skip(out, length);
     } else if (UNSAFE_AVAIL) {
       UnsafeAccess.copy(in, sourceOffset, out, out.position(), length);
+      skip(out, length);
     } else {
-      int destOffset = out.position();
-      for (int i = 0; i < length; ++i) {
-        putByte(out, destOffset + i, toByte(in, sourceOffset + i));
-      }
+      ByteBuffer inDup = in.duplicate();
+      inDup.position(sourceOffset).limit(sourceOffset + length);
+      out.put(inDup);
     }
-    skip(out, length);
   }
 
   /**
@@ -463,6 +469,28 @@ public final class ByteBufferUtils {
 
     while (result < length &&
         left[leftOffset + result] == right[rightOffset + result]) {
+      result++;
+    }
+
+    return result;
+  }
+
+  /**
+   * Find length of common prefix in two arrays.
+   * @param left ByteBuffer to be compared.
+   * @param leftOffset Offset in left ByteBuffer.
+   * @param leftLength Length of left ByteBuffer.
+   * @param right ByteBuffer to be compared.
+   * @param rightOffset Offset in right ByteBuffer.
+   * @param rightLength Length of right ByteBuffer.
+   */
+  public static int findCommonPrefix(ByteBuffer left, int leftOffset, int leftLength,
+      ByteBuffer right, int rightOffset, int rightLength) {
+    int length = Math.min(leftLength, rightLength);
+    int result = 0;
+
+    while (result < length && ByteBufferUtils.toByte(left, leftOffset + result) == ByteBufferUtils
+        .toByte(right, rightOffset + result)) {
       result++;
     }
 
@@ -552,7 +580,7 @@ public final class ByteBufferUtils {
   }
 
   public static int compareTo(ByteBuffer buf1, int o1, int l1, ByteBuffer buf2, int o2, int l2) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       long offset1Adj, offset2Adj;
       Object refObj1 = null, refObj2 = null;
       if (buf1.isDirect()) {
@@ -589,8 +617,35 @@ public final class ByteBufferUtils {
     return compareTo(buf1, o1, l1, buf2, o2, l2) == 0;
   }
 
+  public static int compareTo(byte [] buf1, int o1, int l1, ByteBuffer buf2, int o2, int l2) {
+    // This method is nearly same as the compareTo that follows but hard sharing code given
+    // byte array and bytebuffer types and this is a hot code path
+    if (UNSAFE_UNALIGNED) {
+      long offset2Adj;
+      Object refObj2 = null;
+      if (buf2.isDirect()) {
+        offset2Adj = o2 + ((DirectBuffer)buf2).address();
+      } else {
+        offset2Adj = o2 + buf2.arrayOffset() + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET;
+        refObj2 = buf2.array();
+      }
+      return compareToUnsafe(buf1, o1 + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET, l1,
+          refObj2, offset2Adj, l2);
+    }
+    int end1 = o1 + l1;
+    int end2 = o2 + l2;
+    for (int i = o1, j = o2; i < end1 && j < end2; i++, j++) {
+      int a = buf1[i] & 0xFF;
+      int b = buf2.get(i) & 0xFF;
+      if (a != b) {
+        return a - b;
+      }
+    }
+    return l1 - l2;
+  }
+
   public static int compareTo(ByteBuffer buf1, int o1, int l1, byte[] buf2, int o2, int l2) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       long offset1Adj;
       Object refObj1 = null;
       if (buf1.isDirect()) {
@@ -599,8 +654,8 @@ public final class ByteBufferUtils {
         offset1Adj = o1 + buf1.arrayOffset() + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET;
         refObj1 = buf1.array();
       }
-      return compareToUnsafe(refObj1, offset1Adj, l1, buf2, o2
-          + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET, l2);
+      return compareToUnsafe(refObj1, offset1Adj, l1,
+          buf2, o2 + UnsafeAccess.BYTE_ARRAY_BASE_OFFSET, l2);
     }
     int end1 = o1 + l1;
     int end2 = o2 + l2;
@@ -703,7 +758,7 @@ public final class ByteBufferUtils {
    * @return short value at offset
    */
   public static short toShort(ByteBuffer buffer, int offset) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.toShort(buffer, offset);
     } else {
       return buffer.getShort(offset);
@@ -717,11 +772,34 @@ public final class ByteBufferUtils {
    * @return int value at offset
    */
   public static int toInt(ByteBuffer buffer, int offset) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.toInt(buffer, offset);
     } else {
       return buffer.getInt(offset);
     }
+  }
+
+  /**
+   * Converts a ByteBuffer to an int value
+   *
+   * @param buf The ByteBuffer
+   * @param offset Offset to int value
+   * @param length Number of bytes used to store the int value.
+   * @return the int value
+   * @throws IllegalArgumentException
+   *           if there's not enough bytes left in the buffer after the given offset
+   */
+  public static int readAsInt(ByteBuffer buf, int offset, final int length) {
+    if (offset + length > buf.limit()) {
+      throw new IllegalArgumentException("offset (" + offset + ") + length (" + length
+          + ") exceed the" + " limit of the buffer: " + buf.limit());
+    }
+    int n = 0;
+    for(int i = offset; i < (offset + length); i++) {
+      n <<= 8;
+      n ^= toByte(buf, i) & 0xFF;
+    }
+    return n;
   }
 
   /**
@@ -731,7 +809,7 @@ public final class ByteBufferUtils {
    * @return long value at offset
    */
   public static long toLong(ByteBuffer buffer, int offset) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.toLong(buffer, offset);
     } else {
       return buffer.getLong(offset);
@@ -745,7 +823,7 @@ public final class ByteBufferUtils {
    * @param val int to write out
    */
   public static void putInt(ByteBuffer buffer, int val) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       int newPos = UnsafeAccess.putInt(buffer, buffer.position(), val);
       buffer.position(newPos);
     } else {
@@ -788,7 +866,7 @@ public final class ByteBufferUtils {
    * @param val short to write out
    */
   public static void putShort(ByteBuffer buffer, short val) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       int newPos = UnsafeAccess.putShort(buffer, buffer.position(), val);
       buffer.position(newPos);
     } else {
@@ -803,7 +881,7 @@ public final class ByteBufferUtils {
    * @param val long to write out
    */
   public static void putLong(ByteBuffer buffer, long val) {
-    if (UNSAFE_AVAIL) {
+    if (UNSAFE_UNALIGNED) {
       int newPos = UnsafeAccess.putLong(buffer, buffer.position(), val);
       buffer.position(newPos);
     } else {
@@ -848,25 +926,13 @@ public final class ByteBufferUtils {
     } else if (UNSAFE_AVAIL) {
       UnsafeAccess.copy(in, sourceOffset, out, destinationOffset, length);
     } else {
-      for (int i = 0; i < length; i++) {
-        out[destinationOffset + i] = in.get(sourceOffset + i);
-      }
+      int oldPos = in.position();
+      in.position(sourceOffset);
+      in.get(out, destinationOffset, length);
+      in.position(oldPos);
     }
   }
 
-  public static void writeByteBuffer(OutputStream out, ByteBuffer b, int offset, int length)
-      throws IOException {
-    // We have write which takes ByteBuffer in ByteBufferOutputStream so that it
-    // can directly write
-    // bytes from the src ByteBuffer to the destination ByteBuffer. This avoid
-    // need for temp array
-    // creation and copy
-    if (out instanceof ByteBufferOutputStream) {
-      ((ByteBufferOutputStream) out).write(b, offset, length);
-    } else {
-      ByteBufferUtils.copyBufferToStream(out, b, offset, length);
-    }
-  }
   // For testing purpose
   public static String toStringBinary(final ByteBuffer b, int off, int len) {
     StringBuilder result = new StringBuilder();

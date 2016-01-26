@@ -43,7 +43,7 @@ import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionProgress;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionRequest;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputController;
-import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.security.User;
 
 /**
  * Interface for objects that hold a column family in a Region. Its a memstore and a set of zero or
@@ -105,6 +105,25 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
     byte[] stopRow,
     long readPt
   ) throws IOException;
+
+  /**
+   * Create scanners on the given files and if needed on the memstore with no filtering based on TTL
+   * (that happens further down the line).
+   * @param files the list of files on which the scanners has to be created
+   * @param cacheBlocks cache the blocks or not
+   * @param isGet true if it is get, false if not
+   * @param usePread true to use pread, false if not
+   * @param isCompaction true if the scanner is created for compaction
+   * @param matcher the scan query matcher
+   * @param startRow the start row
+   * @param stopRow the stop row
+   * @param readPt the read point of the current scan
+   * @param includeMemstoreScanner true if memstore has to be included
+   * @return scanners on the given files and on the memstore if specified
+   */
+   List<KeyValueScanner> getScanners(List<StoreFile> files, boolean cacheBlocks, boolean isGet,
+          boolean usePread, boolean isCompaction, ScanQueryMatcher matcher, byte[] startRow,
+          byte[] stopRow, long readPt, boolean includeMemstoreScanner) throws IOException;
   
   ScanInfo getScanInfo();
 
@@ -126,9 +145,9 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
   /**
    * Adds a value to the memstore
    * @param cell
-   * @return memstore size delta &amp; newly added KV which maybe different than the passed in KV
+   * @return memstore size delta
    */
-  Pair<Long, Cell> add(Cell cell);
+  long add(Cell cell);
 
   /**
    * When was the last edit done in the memstore
@@ -193,13 +212,27 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
 
   CompactionContext requestCompaction() throws IOException;
 
+  /**
+   * @deprecated see requestCompaction(int, CompactionRequest, User)
+   */
+  @Deprecated
   CompactionContext requestCompaction(int priority, CompactionRequest baseRequest)
+      throws IOException;
+
+  CompactionContext requestCompaction(int priority, CompactionRequest baseRequest, User user)
       throws IOException;
 
   void cancelRequestedCompaction(CompactionContext compaction);
 
+  /**
+   * @deprecated see compact(CompactionContext, CompactionThroughputController, User)
+   */
+  @Deprecated
   List<StoreFile> compact(CompactionContext compaction,
       CompactionThroughputController throughputController) throws IOException;
+
+  List<StoreFile> compact(CompactionContext compaction,
+    CompactionThroughputController throughputController, User user) throws IOException;
 
   /**
    * @return true if we should run a major compaction.
@@ -452,4 +485,9 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
   void bulkLoadHFile(StoreFileInfo fileInfo) throws IOException;
 
   boolean isPrimaryReplicaStore();
+
+  /**
+   * Closes and archives the compacted files under this store
+   */
+  void closeAndArchiveCompactedFiles() throws IOException;
 }

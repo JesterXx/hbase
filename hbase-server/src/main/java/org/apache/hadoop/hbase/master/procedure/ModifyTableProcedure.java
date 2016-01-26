@@ -43,7 +43,6 @@ import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.client.TableState;
-import org.apache.hadoop.hbase.executor.EventType;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
 import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProcedureProtos;
@@ -215,15 +214,13 @@ public class ModifyTableProcedure
 
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
-    if (!env.isInitialized()) return false;
-    return env.getProcedureQueue().tryAcquireTableExclusiveLock(
-      getTableName(),
-      EventType.C_M_MODIFY_TABLE.toString());
+    if (env.waitInitialized(this)) return false;
+    return env.getProcedureQueue().tryAcquireTableExclusiveLock(this, getTableName());
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseTableExclusiveLock(getTableName());
+    env.getProcedureQueue().releaseTableExclusiveLock(this, getTableName());
   }
 
   @Override

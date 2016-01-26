@@ -141,6 +141,15 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-source-plugin</artifactId>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>jar</goal>
+              <goal>test-jar</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
       <!-- General ant tasks, bound to different build phases -->
       <plugin>
@@ -334,15 +343,6 @@
             </lifecycleMappingMetadata>
           </configuration>
         </plugin>
-        <plugin>
-          <artifactId>maven-surefire-plugin</artifactId>
-          <version>${surefire.version}</version>
-          <configuration>
-            <!-- Have to set the groups here because we only do
-            split tests in this package, so groups on live in this module -->
-            <groups>${surefire.firstPartGroups}</groups>
-          </configuration>
-        </plugin>
       </plugins>
     </pluginManagement>
   </build>
@@ -435,7 +435,7 @@
        <optional>true</optional>
     </dependency>
     <dependency>
-      <groupId>com.yammer.metrics</groupId>
+      <groupId>io.dropwizard.metrics</groupId>
       <artifactId>metrics-core</artifactId>
     </dependency>
     <dependency>
@@ -612,22 +612,6 @@
       </properties>
     </profile>
     <!-- Special builds -->
-    <profile>
-      <id>hadoop-snappy</id>
-      <activation>
-        <activeByDefault>false</activeByDefault>
-        <property>
-          <name>snappy</name>
-        </property>
-      </activation>
-      <dependencies>
-        <dependency>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-snappy</artifactId>
-          <version>${hadoop-snappy.version}</version>
-        </dependency>
-      </dependencies>
-    </profile>
     <profile>
       <id>native</id>
       <activation>

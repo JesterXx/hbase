@@ -52,6 +52,7 @@ import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import javax.servlet.http.HttpServlet;
 
+import org.apache.commons.lang.SystemUtils;
 import org.apache.commons.lang.math.RandomUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -78,6 +79,7 @@ import org.apache.hadoop.hbase.YouAreDeadException;
 import org.apache.hadoop.hbase.ZNodeClearer;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.ClusterConnection;
+import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionUtils;
 import org.apache.hadoop.hbase.client.RpcRetryingCallerFactory;
 import org.apache.hadoop.hbase.conf.ConfigurationManager;
@@ -132,6 +134,7 @@ import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.Repor
 import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.ReportRegionStateTransitionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.ReportRegionStateTransitionResponse;
 import org.apache.hadoop.hbase.quotas.RegionServerQuotaManager;
+import org.apache.hadoop.hbase.regionserver.compactions.CompactionConfiguration;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionProgress;
 import org.apache.hadoop.hbase.regionserver.handler.CloseMetaHandler;
 import org.apache.hadoop.hbase.regionserver.handler.CloseRegionHandler;
@@ -186,6 +189,8 @@ import com.google.protobuf.RpcCallback;
 import com.google.protobuf.RpcController;
 import com.google.protobuf.Service;
 import com.google.protobuf.ServiceException;
+import sun.misc.Signal;
+import sun.misc.SignalHandler;
 
 /**
  * HRegionServer makes a set of HRegions available to clients. It checks in with
@@ -193,8 +198,7 @@ import com.google.protobuf.ServiceException;
  */
 @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.TOOLS)
 @SuppressWarnings("deprecation")
-public class HRegionServer extends HasThread implements
-    RegionServerServices, LastSequenceId {
+public class HRegionServer extends HasThread implements RegionServerServices, LastSequenceId {
 
   private static final Log LOG = LogFactory.getLog(HRegionServer.class);
 
@@ -481,6 +485,8 @@ public class HRegionServer extends HasThread implements
    */
   protected final ConfigurationManager configurationManager;
 
+  private CompactedHFilesDischarger compactedFileDischarger;
+
   /**
    * Starts a HRegionServer at the default location.
    * @param conf
@@ -602,7 +608,26 @@ public class HRegionServer extends HasThread implements
     rpcServices.start();
     putUpWebUI();
     this.walRoller = new LogRoller(this, this);
-    this.choreService = new ChoreService(getServerName().toString());
+    this.choreService = new ChoreService(getServerName().toString(), true);
+
+    if (!SystemUtils.IS_OS_WINDOWS) {
+      Signal.handle(new Signal("HUP"), new SignalHandler() {
+        public void handle(Signal signal) {
+          getConfiguration().reloadConfiguration();
+          configurationManager.notifyAllObservers(getConfiguration());
+        }
+      });
+    }
+    // Create the CompactedFileDischarger chore service. This chore helps to
+    // remove the compacted files
+    // that will no longer be used in reads.
+    // Default is 2 mins. The default value for TTLCleaner is 5 mins so we set this to
+    // 2 mins so that compacted files can be archived before the TTLCleaner runs
+    int cleanerInterval =
+        conf.getInt("hbase.hfile.compaction.discharger.interval", 2 * 60 * 1000);
+    this.compactedFileDischarger =
+        new CompactedHFilesDischarger(cleanerInterval, (Stoppable)this, (RegionServerServices)this);
+    choreService.scheduleChore(compactedFileDischarger);
   }
 
   protected TableDescriptors getFsTableDescriptors() throws IOException {
@@ -873,6 +898,7 @@ public class HRegionServer extends HasThread implements
   private void registerConfigurationObservers() {
     // Registering the compactSplitThread object with the ConfigurationManager.
     configurationManager.registerObserver(this.compactSplitThread);
+    configurationManager.registerObserver(this.rpcServices);
   }
 
   /**
@@ -1403,6 +1429,7 @@ public class HRegionServer extends HasThread implements
   private void createMyEphemeralNode() throws KeeperException, IOException {
     RegionServerInfo.Builder rsInfo = RegionServerInfo.newBuilder();
     rsInfo.setInfoPort(infoServer != null ? infoServer.getPort() : -1);
+    rsInfo.setVersionInfo(ProtobufUtil.getVersionInfo());
     byte[] data = ProtobufUtil.prependPBMagic(rsInfo.build().toByteArray());
     ZKUtil.createEphemeralNodeAndWatch(this.zooKeeper,
       getMyEphemeralNodePath(), data);
@@ -1560,8 +1587,8 @@ public class HRegionServer extends HasThread implements
 
   static class PeriodicMemstoreFlusher extends ScheduledChore {
     final HRegionServer server;
-    final static int RANGE_OF_DELAY = 20000; //millisec
-    final static int MIN_DELAY_TIME = 3000; //millisec
+    final static int RANGE_OF_DELAY = 5 * 60 * 1000; // 5 min in milliseconds
+    final static int MIN_DELAY_TIME = 0; // millisec
     public PeriodicMemstoreFlusher(int cacheFlushInterval, final HRegionServer server) {
       super(server.getServerName() + "-MemstoreFlusherChore", server, cacheFlushInterval);
       this.server = server;
@@ -1702,7 +1729,9 @@ public class HRegionServer extends HasThread implements
     }
     this.service.startExecutorService(ExecutorType.RS_LOG_REPLAY_OPS, conf.getInt(
        "hbase.regionserver.wal.max.splitters", SplitLogWorkerCoordination.DEFAULT_MAX_SPLITTERS));
-
+    // Start the threads for compacted files discharger
+    this.service.startExecutorService(ExecutorType.RS_COMPACTED_FILES_DISCHARGER,
+      conf.getInt(CompactionConfiguration.HBASE_HFILE_COMPACTION_DISCHARGER_THREAD_COUNT, 10));
     if (ServerRegionReplicaUtil.isRegionReplicaWaitForPrimaryFlushEnabled(conf)) {
       this.service.startExecutorService(ExecutorType.RS_REGION_REPLICA_FLUSH_OPS,
         conf.getInt("hbase.regionserver.region.replica.flusher.threads",
@@ -1853,7 +1882,12 @@ public class HRegionServer extends HasThread implements
   }
 
   @Override
-  public ClusterConnection getConnection() {
+  public Connection getConnection() {
+    return getClusterConnection();
+  }
+
+  @Override
+  public ClusterConnection getClusterConnection() {
     return this.clusterConnection;
   }
 
@@ -2706,6 +2740,15 @@ public class HRegionServer extends HasThread implements
      return tableRegions;
    }
 
+  @Override
+  public List<Region> getOnlineRegions() {
+    List<Region> allRegions = new ArrayList<Region>();
+    synchronized (this.onlineRegions) {
+      // Return a clone copy of the onlineRegions
+      allRegions.addAll(onlineRegions.values());
+    }
+    return allRegions;
+  }
   /**
    * Gets the online tables in this RS.
    * This method looks at the in-memory onlineRegions.

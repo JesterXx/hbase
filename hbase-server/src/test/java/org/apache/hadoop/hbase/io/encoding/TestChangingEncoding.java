@@ -133,8 +133,7 @@ public class TestChangingEncoding {
     for (int i = 0; i < NUM_ROWS_PER_BATCH; ++i) {
       Put put = new Put(getRowKey(batchId, i));
       for (int j = 0; j < NUM_COLS_PER_ROW; ++j) {
-        put.add(CF_BYTES, getQualifier(j),
-            getValue(batchId, i, j));
+        put.addColumn(CF_BYTES, getQualifier(j), getValue(batchId, i, j));
       }
       put.setDurability(Durability.SKIP_WAL);
       puts.add(put);
@@ -221,7 +220,7 @@ public class TestChangingEncoding {
   private void compactAndWait() throws IOException, InterruptedException {
     LOG.debug("Compacting table " + tableName);
     HRegionServer rs = TEST_UTIL.getMiniHBaseCluster().getRegionServer(0);
-    HBaseAdmin admin = TEST_UTIL.getHBaseAdmin();
+    Admin admin = TEST_UTIL.getHBaseAdmin();
     admin.majorCompact(tableName);
 
     // Waiting for the compaction to start, at least .5s.

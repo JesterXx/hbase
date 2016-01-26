@@ -1505,21 +1505,27 @@ public class WALSplitter {
       if (maxSeqIdInStores == null || maxSeqIdInStores.isEmpty()) {
         return;
       }
-      List<Cell> skippedCells = new ArrayList<Cell>();
+      // Create the array list for the cells that aren't filtered.
+      // We make the assumption that most cells will be kept.
+      ArrayList<Cell> keptCells = new ArrayList<Cell>(logEntry.getEdit().getCells().size());
       for (Cell cell : logEntry.getEdit().getCells()) {
-        if (!CellUtil.matchingFamily(cell, WALEdit.METAFAMILY)) {
+        if (CellUtil.matchingFamily(cell, WALEdit.METAFAMILY)) {
+          keptCells.add(cell);
+        } else {
           byte[] family = CellUtil.cloneFamily(cell);
           Long maxSeqId = maxSeqIdInStores.get(family);
           // Do not skip cell even if maxSeqId is null. Maybe we are in a rolling upgrade,
           // or the master was crashed before and we can not get the information.
-          if (maxSeqId != null && maxSeqId.longValue() >= logEntry.getKey().getLogSeqNum()) {
-            skippedCells.add(cell);
+          if (maxSeqId == null || maxSeqId.longValue() < logEntry.getKey().getLogSeqNum()) {
+            keptCells.add(cell);
           }
         }
       }
-      if (!skippedCells.isEmpty()) {
-        logEntry.getEdit().getCells().removeAll(skippedCells);
-      }
+
+      // Anything in the keptCells array list is still live.
+      // So rather than removing the cells from the array list
+      // which would be an O(n^2) operation, we just replace the list
+      logEntry.getEdit().setCells(keptCells);
     }
 
     @Override
@@ -1643,7 +1649,7 @@ public class WALSplitter {
         .synchronizedMap(new TreeMap<TableName, HConnection>());
     /**
      * Map key -> value layout
-     * <servername>:<table name> -> Queue<Row>
+     * {@literal <servername>:<table name> -> Queue<Row>}
      */
     private Map<String, List<Pair<HRegionLocation, Entry>>> serverToBufferQueueMap =
         new ConcurrentHashMap<String, List<Pair<HRegionLocation, Entry>>>();
@@ -2173,7 +2179,7 @@ public class WALSplitter {
     }
     private TableName getTableFromLocationStr(String loc) {
       /**
-       * location key is in format <server name:port>#<table name>
+       * location key is in format {@literal <server name:port>#<table name>}
        */
       String[] splits = loc.split(KEY_DELIMITER);
       if (splits.length != 2) {

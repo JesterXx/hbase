@@ -21,6 +21,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
+import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -85,10 +86,19 @@ public class TestRestoreSnapshotHelper {
 
   @Test
   public void testRestore() throws IOException {
+    restoreAndVerify("snapshot", "testRestore");
+  }
+
+  @Test
+  public void testRestoreWithNamespace() throws IOException {
+    restoreAndVerify("snapshot", "namespace1:testRestoreWithNamespace");
+  }
+
+  private void restoreAndVerify(final String snapshotName, final String tableName) throws IOException {
     // Test Rolling-Upgrade like Snapshot.
     // half machines writing using v1 and the others using v2 format.
     SnapshotMock snapshotMock = createSnapshotMock();
-    SnapshotMock.SnapshotBuilder builder = snapshotMock.createSnapshotV2("snapshot");
+    SnapshotMock.SnapshotBuilder builder = snapshotMock.createSnapshotV2("snapshot", tableName);
     builder.addRegionV1();
     builder.addRegionV2();
     builder.addRegionV2();
@@ -115,12 +125,12 @@ public class TestRestoreSnapshotHelper {
 
   private void verifyRestore(final Path rootDir, final HTableDescriptor sourceHtd,
       final HTableDescriptor htdClone) throws IOException {
-    String[] files = SnapshotTestingUtils.listHFileNames(fs,
+    List<String> files = SnapshotTestingUtils.listHFileNames(fs,
       FSUtils.getTableDir(rootDir, htdClone.getTableName()));
-    assertEquals(12, files.length);
-    for (int i = 0; i < files.length; i += 2) {
-      String linkFile = files[i];
-      String refFile = files[i+1];
+    assertEquals(12, files.size());
+    for (int i = 0; i < files.size(); i += 2) {
+      String linkFile = files.get(i);
+      String refFile = files.get(i+1);
       assertTrue(linkFile + " should be a HFileLink", HFileLink.isHFileLink(linkFile));
       assertTrue(refFile + " should be a Referene", StoreFileInfo.isReference(refFile));
       assertEquals(sourceHtd.getTableName(), HFileLink.getReferencedTableName(linkFile));

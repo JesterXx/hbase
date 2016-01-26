@@ -19,7 +19,8 @@
 package org.apache.hadoop.hbase;
 
 import com.google.common.base.Objects;
-import com.yammer.metrics.core.Histogram;
+import com.google.common.collect.Sets;
+import com.codahale.metrics.Histogram;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -33,6 +34,7 @@ import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.ipc.RpcClient;
 import org.apache.hadoop.hbase.regionserver.DisabledRegionSplitPolicy;
 import org.apache.hadoop.hbase.testclassification.IntegrationTests;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.YammerHistogramUtils;
 import org.apache.hadoop.mapreduce.Counters;
 import org.apache.hadoop.mapreduce.Job;
@@ -71,12 +73,12 @@ public class IntegrationTestRegionReplicaPerf extends IntegrationTestBase {
   private static final String NUM_RS_KEY = "numRs";
   private static final String NUM_RS_DEFAULT = "" + 3;
 
-  /** Extract a descriptive statistic from a {@link com.yammer.metrics.core.Histogram}. */
+  /** Extract a descriptive statistic from a {@link com.codahale.metrics.Histogram}. */
   private enum Stat {
     STDEV {
       @Override
       double apply(Histogram hist) {
-        return hist.stdDev();
+        return hist.getSnapshot().getStdDev();
       }
     },
     FOUR_9S {
@@ -234,7 +236,7 @@ public class IntegrationTestRegionReplicaPerf extends IntegrationTestBase {
 
   @Override
   protected Set<String> getColumnFamilies() {
-    return null;
+    return Sets.newHashSet(Bytes.toString(PerformanceEvaluation.FAMILY_NAME));
   }
 
   /** Compute the mean of the given {@code stat} from a timing results. */

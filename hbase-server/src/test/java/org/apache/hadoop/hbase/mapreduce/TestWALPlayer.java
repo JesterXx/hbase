@@ -73,12 +73,10 @@ public class TestWALPlayer {
   @BeforeClass
   public static void beforeClass() throws Exception {
     cluster = TEST_UTIL.startMiniCluster();
-    TEST_UTIL.startMiniMapReduceCluster();
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    TEST_UTIL.shutdownMiniMapReduceCluster();
     TEST_UTIL.shutdownMiniCluster();
   }
 
@@ -99,12 +97,12 @@ public class TestWALPlayer {
 
     // put a row into the first table
     Put p = new Put(ROW);
-    p.add(FAMILY, COLUMN1, COLUMN1);
-    p.add(FAMILY, COLUMN2, COLUMN2);
+    p.addColumn(FAMILY, COLUMN1, COLUMN1);
+    p.addColumn(FAMILY, COLUMN2, COLUMN2);
     t1.put(p);
     // delete one column
     Delete d = new Delete(ROW);
-    d.deleteColumns(FAMILY, COLUMN1);
+    d.addColumns(FAMILY, COLUMN1);
     t1.delete(d);
 
     // replay the WAL, map table 1 to table 2

@@ -18,21 +18,21 @@
 */
 package org.apache.hadoop.hbase.mob;
 
-import java.util.List;
 import java.util.Random;
 
-import org.apache.hadoop.hbase.Cell;
-import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.AfterClass;
-import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -47,7 +47,7 @@ public class TestMobDataBlockEncoding {
   private final static byte [] qf2 = Bytes.toBytes("qualifier2");
   protected final byte[] qf3 = Bytes.toBytes("qualifier3");
   private static Table table;
-  private static HBaseAdmin admin;
+  private static Admin admin;
   private static HColumnDescriptor hcd;
   private static HTableDescriptor desc;
   private static Random random = new Random();
@@ -117,19 +117,6 @@ public class TestMobDataBlockEncoding {
 
     Scan scan = new Scan();
     scan.setMaxVersions(4);
-
-    ResultScanner results = table.getScanner(scan);
-    int count = 0;
-    for (Result res : results) {
-      List<Cell> cells = res.listCells();
-      for(Cell cell : cells) {
-        // Verify the value
-        Assert.assertEquals(Bytes.toString(value),
-            Bytes.toString(CellUtil.cloneValue(cell)));
-        count++;
-      }
-    }
-    results.close();
-    Assert.assertEquals(3, count);
+    MobTestUtil.assertCellsValue(table, scan, value, 3);
   }
 }

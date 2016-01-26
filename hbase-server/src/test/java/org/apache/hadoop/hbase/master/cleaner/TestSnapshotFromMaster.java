@@ -22,9 +22,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
@@ -38,7 +36,6 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.snapshot.DisabledTableSnapshotHandler;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotHFileCleaner;
@@ -49,8 +46,10 @@ import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.GetCompletedSnaps
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.GetCompletedSnapshotsResponse;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsSnapshotDoneRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsSnapshotDoneResponse;
+import org.apache.hadoop.hbase.regionserver.CompactedHFilesDischarger;
 import org.apache.hadoop.hbase.regionserver.ConstantSizeRegionSplitPolicy;
 import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.snapshot.SnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotReferenceUtil;
 import org.apache.hadoop.hbase.snapshot.SnapshotTestingUtils;
@@ -60,6 +59,7 @@ import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.JVMClusterUtil.RegionServerThread;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -112,7 +112,7 @@ public class TestSnapshotFromMaster {
     conf.setInt("hbase.hregion.memstore.flush.size", 25000);
     // so make sure we get a compaction when doing a load, but keep around some
     // files in the store
-    conf.setInt("hbase.hstore.compaction.min", 3);
+    conf.setInt("hbase.hstore.compaction.min", 2);
     conf.setInt("hbase.hstore.compactionThreshold", 5);
     // block writes if we get to 12 store files
     conf.setInt("hbase.hstore.blockingStoreFiles", 12);
@@ -124,6 +124,7 @@ public class TestSnapshotFromMaster {
     conf.setLong(SnapshotHFileCleaner.HFILE_CACHE_REFRESH_PERIOD_CONF_KEY, cacheRefreshPeriod);
     conf.set(HConstants.HBASE_REGION_SPLIT_POLICY_KEY,
       ConstantSizeRegionSplitPolicy.class.getName());
+    conf.setInt("hbase.hfile.compactions.cleaner.interval", 20 * 1000);
 
   }
 
@@ -289,11 +290,12 @@ public class TestSnapshotFromMaster {
     HTableDescriptor htd = new HTableDescriptor(TABLE_NAME);
     htd.setCompactionEnabled(false);
     UTIL.createTable(htd, new byte[][] { TEST_FAM }, null);
-    // load the table (creates 4 hfiles)
-    UTIL.loadTable(UTIL.getConnection().getTable(TABLE_NAME), TEST_FAM);
-    UTIL.flush(TABLE_NAME);
-    // Put some more data into the table so for sure we get more storefiles.
-    UTIL.loadTable(UTIL.getConnection().getTable(TABLE_NAME), TEST_FAM);
+
+    // load the table (creates at least 4 hfiles)
+    for ( int i = 0; i < 5; i++) {
+      UTIL.loadTable(UTIL.getConnection().getTable(TABLE_NAME), TEST_FAM);
+      UTIL.flush(TABLE_NAME);
+    }
 
     // disable the table so we can take a snapshot
     admin.disableTable(TABLE_NAME);
@@ -320,8 +322,19 @@ public class TestSnapshotFromMaster {
     List<HRegion> regions = UTIL.getHBaseCluster().getRegions(TABLE_NAME);
     for (HRegion region : regions) {
       region.waitForFlushesAndCompactions(); // enable can trigger a compaction, wait for it.
-      region.compactStores(); // min is 3 so will compact and archive
+      region.compactStores(); // min is 2 so will compact and archive
     }
+    List<RegionServerThread> regionServerThreads = UTIL.getMiniHBaseCluster()
+        .getRegionServerThreads();
+    HRegionServer hrs = null;
+    for (RegionServerThread rs : regionServerThreads) {
+      if (!rs.getRegionServer().getOnlineRegions(TABLE_NAME).isEmpty()) {
+        hrs = rs.getRegionServer();
+        break;
+      }
+    }
+    CompactedHFilesDischarger cleaner = new CompactedHFilesDischarger(100, null, hrs, false);
+    cleaner.chore();
     LOG.info("After compaction File-System state");
     FSUtils.logFileSystemState(fs, rootDir, LOG);
 
@@ -380,17 +393,7 @@ public class TestSnapshotFromMaster {
   private final Collection<String> getArchivedHFiles(Path archiveDir, Path rootDir,
       FileSystem fs, TableName tableName) throws IOException {
     Path tableArchive = FSUtils.getTableDir(archiveDir, tableName);
-    Path[] archivedHFiles = SnapshotTestingUtils.listHFiles(fs, tableArchive);
-    List<String> files = new ArrayList<String>(archivedHFiles.length);
-    LOG.debug("Have archived hfiles: " + tableArchive);
-    for (Path file : archivedHFiles) {
-      LOG.debug(file);
-      files.add(file.getName());
-    }
-    // sort the archived files
-
-    Collections.sort(files);
-    return files;
+    return SnapshotTestingUtils.listHFileNames(fs, tableArchive);
   }
 
   /**

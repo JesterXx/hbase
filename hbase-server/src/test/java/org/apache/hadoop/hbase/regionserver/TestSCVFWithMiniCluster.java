@@ -36,7 +36,6 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Durability;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -91,27 +90,27 @@ public class TestSCVFWithMiniCluster {
     /* Add a row with 'a:foo' = false */
     Put put = new Put(Bytes.toBytes("1"));
     put.setDurability(Durability.SKIP_WAL);
-    put.add(FAMILY_A, QUALIFIER_FOO, Bytes.toBytes("false"));
-    put.add(FAMILY_A, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
-    put.add(FAMILY_B, QUALIFIER_FOO, Bytes.toBytes("_flag_"));
-    put.add(FAMILY_B, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_A, QUALIFIER_FOO, Bytes.toBytes("false"));
+    put.addColumn(FAMILY_A, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_B, QUALIFIER_FOO, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_B, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
     puts.add(put);
 
     /* Add a row with 'a:foo' = true */
     put = new Put(Bytes.toBytes("2"));
     put.setDurability(Durability.SKIP_WAL);
-    put.add(FAMILY_A, QUALIFIER_FOO, Bytes.toBytes("true"));
-    put.add(FAMILY_A, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
-    put.add(FAMILY_B, QUALIFIER_FOO, Bytes.toBytes("_flag_"));
-    put.add(FAMILY_B, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_A, QUALIFIER_FOO, Bytes.toBytes("true"));
+    put.addColumn(FAMILY_A, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_B, QUALIFIER_FOO, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_B, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
     puts.add(put);
 
     /* Add a row with 'a:foo' qualifier not set */
     put = new Put(Bytes.toBytes("3"));
     put.setDurability(Durability.SKIP_WAL);
-    put.add(FAMILY_A, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
-    put.add(FAMILY_B, QUALIFIER_FOO, Bytes.toBytes("_flag_"));
-    put.add(FAMILY_B, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_A, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_B, QUALIFIER_FOO, Bytes.toBytes("_flag_"));
+    put.addColumn(FAMILY_B, QUALIFIER_BAR, Bytes.toBytes("_flag_"));
     puts.add(put);
 
     htable.put(puts);

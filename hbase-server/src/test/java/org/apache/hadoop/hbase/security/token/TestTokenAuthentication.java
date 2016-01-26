@@ -141,7 +141,11 @@ public class TestTokenAuthentication {
         AuthenticationProtos.AuthenticationService.BlockingInterface.class));
       this.rpcServer =
         new RpcServer(this, "tokenServer", sai, initialIsa, conf, new FifoRpcScheduler(conf, 1));
-      this.isa = this.rpcServer.getListenerAddress();
+      InetSocketAddress address = rpcServer.getListenerAddress();
+      if (address == null) {
+        throw new IOException("Listener channel is closed");
+      }
+      this.isa = address;
       this.sleeper = new Sleeper(1000, this);
     }
 
@@ -328,6 +332,12 @@ public class TestTokenAuthentication {
 
     @Override
     public ChoreService getChoreService() {
+      return null;
+    }
+
+    @Override
+    public ClusterConnection getClusterConnection() {
+      // TODO Auto-generated method stub
       return null;
     }
   }

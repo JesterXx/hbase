@@ -309,7 +309,7 @@ public class TestSeekOptimizations {
 
   public void put(String qual, long ts) {
     if (!putTimestamps.contains(ts)) {
-      put.add(FAMILY_BYTES, Bytes.toBytes(qual), ts, createValue(ts));
+      put.addColumn(FAMILY_BYTES, Bytes.toBytes(qual), ts, createValue(ts));
       putTimestamps.add(ts);
     }
     if (VERBOSE) {
@@ -323,7 +323,7 @@ public class TestSeekOptimizations {
   }
 
   public void delAtTimestamp(String qual, long ts) {
-    del.deleteColumn(FAMILY_BYTES, Bytes.toBytes(qual), ts);
+    del.addColumn(FAMILY_BYTES, Bytes.toBytes(qual), ts);
     logDelete(qual, ts, "at");
   }
 
@@ -336,7 +336,7 @@ public class TestSeekOptimizations {
   }
 
   private void delUpToTimestamp(String qual, long upToTS) {
-    del.deleteColumns(FAMILY_BYTES, Bytes.toBytes(qual), upToTS);
+    del.addColumns(FAMILY_BYTES, Bytes.toBytes(qual), upToTS);
     logDelete(qual, upToTS, "up to and including");
   }
 

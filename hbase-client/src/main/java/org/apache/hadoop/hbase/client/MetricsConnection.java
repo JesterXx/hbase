@@ -20,27 +20,33 @@ package org.apache.hadoop.hbase.client;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.Descriptors.MethodDescriptor;
 import com.google.protobuf.Message;
-import com.yammer.metrics.core.Counter;
-import com.yammer.metrics.core.Histogram;
-import com.yammer.metrics.core.MetricsRegistry;
-import com.yammer.metrics.core.Timer;
-import com.yammer.metrics.reporting.JmxReporter;
-import com.yammer.metrics.util.RatioGauge;
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.Timer;
+import com.codahale.metrics.JmxReporter;
+import com.codahale.metrics.RatioGauge;
+import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.ClientService;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutateRequest;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutationProto.MutationType;
+import org.apache.hadoop.hbase.util.Bytes;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+
+import static com.codahale.metrics.MetricRegistry.name;
 
 /**
  * This class is for maintaining the various connection statistics and publishing them through
  * the metrics interfaces.
  *
- * This class manages its own {@link MetricsRegistry} and {@link JmxReporter} so as to not
+ * This class manages its own {@link MetricRegistry} and {@link JmxReporter} so as to not
  * conflict with other uses of Yammer Metrics within the client application. Instantiating
  * this class implicitly creates and "starts" instances of these classes; be sure to call
  * {@link #shutdown()} to terminate the thread pools they allocate.
@@ -54,6 +60,8 @@ public class MetricsConnection {
   private static final String DRTN_BASE = "rpcCallDurationMs_";
   private static final String REQ_BASE = "rpcCallRequestSizeBytes_";
   private static final String RESP_BASE = "rpcCallResponseSizeBytes_";
+  private static final String MEMLOAD_BASE = "memstoreLoad_";
+  private static final String HEAP_BASE = "heapOccupancy_";
   private static final String CLIENT_SVC = ClientService.getDescriptor().getName();
 
   /** A container class for collecting details about the RPC call as it percolates. */
@@ -97,24 +105,27 @@ public class MetricsConnection {
   }
 
   @VisibleForTesting
-  protected final class CallTracker {
+  protected static final class CallTracker {
     private final String name;
     @VisibleForTesting final Timer callTimer;
     @VisibleForTesting final Histogram reqHist;
     @VisibleForTesting final Histogram respHist;
 
-    private CallTracker(MetricsRegistry registry, String name, String subName, String scope) {
+    private CallTracker(MetricRegistry registry, String name, String subName, String scope) {
       StringBuilder sb = new StringBuilder(CLIENT_SVC).append("_").append(name);
       if (subName != null) {
         sb.append("(").append(subName).append(")");
       }
       this.name = sb.toString();
-      this.callTimer = registry.newTimer(MetricsConnection.class, DRTN_BASE + this.name, scope);
-      this.reqHist = registry.newHistogram(MetricsConnection.class, REQ_BASE + this.name, scope);
-      this.respHist = registry.newHistogram(MetricsConnection.class, RESP_BASE + this.name, scope);
+      this.callTimer = registry.timer(name(MetricsConnection.class,
+        DRTN_BASE + this.name, scope));
+      this.reqHist = registry.histogram(name(MetricsConnection.class,
+        REQ_BASE + this.name, scope));
+      this.respHist = registry.histogram(name(MetricsConnection.class,
+        RESP_BASE + this.name, scope));
     }
 
-    private CallTracker(MetricsRegistry registry, String name, String scope) {
+    private CallTracker(MetricRegistry registry, String name, String scope) {
       this(registry, name, null, scope);
     }
 
@@ -129,6 +140,91 @@ public class MetricsConnection {
       return "CallTracker:" + name;
     }
   }
+
+  protected static class RegionStats {
+    final String name;
+    final Histogram memstoreLoadHist;
+    final Histogram heapOccupancyHist;
+
+    public RegionStats(MetricRegistry registry, String name) {
+      this.name = name;
+      this.memstoreLoadHist = registry.histogram(name(MetricsConnection.class,
+          MEMLOAD_BASE + this.name));
+      this.heapOccupancyHist = registry.histogram(name(MetricsConnection.class,
+          HEAP_BASE + this.name));
+    }
+
+    public void update(ClientProtos.RegionLoadStats regionStatistics) {
+      this.memstoreLoadHist.update(regionStatistics.getMemstoreLoad());
+      this.heapOccupancyHist.update(regionStatistics.getHeapOccupancy());
+    }
+  }
+
+  @VisibleForTesting
+  protected static class RunnerStats {
+    final Counter normalRunners;
+    final Counter delayRunners;
+    final Histogram delayIntevalHist;
+
+    public RunnerStats(MetricRegistry registry) {
+      this.normalRunners = registry.counter(
+        name(MetricsConnection.class, "normalRunnersCount"));
+      this.delayRunners = registry.counter(
+        name(MetricsConnection.class, "delayRunnersCount"));
+      this.delayIntevalHist = registry.histogram(
+        name(MetricsConnection.class, "delayIntervalHist"));
+    }
+
+    public void incrNormalRunners() {
+      this.normalRunners.inc();
+    }
+
+    public void incrDelayRunners() {
+      this.delayRunners.inc();
+    }
+
+    public void updateDelayInterval(long interval) {
+      this.delayIntevalHist.update(interval);
+    }
+  }
+
+  @VisibleForTesting
+  protected ConcurrentHashMap<ServerName, ConcurrentMap<byte[], RegionStats>> serverStats
+          = new ConcurrentHashMap<ServerName, ConcurrentMap<byte[], RegionStats>>();
+
+  public void updateServerStats(ServerName serverName, byte[] regionName,
+                                Object r) {
+    if (!(r instanceof Result)) {
+      return;
+    }
+    Result result = (Result) r;
+    ClientProtos.RegionLoadStats stats = result.getStats();
+    if(stats == null){
+      return;
+    }
+    String name = serverName.getServerName() + "," + Bytes.toStringBinary(regionName);
+    ConcurrentMap<byte[], RegionStats> rsStats = null;
+    if (serverStats.containsKey(serverName)) {
+      rsStats = serverStats.get(serverName);
+    } else {
+      rsStats = serverStats.putIfAbsent(serverName,
+          new ConcurrentSkipListMap<byte[], RegionStats>(Bytes.BYTES_COMPARATOR));
+      if (rsStats == null) {
+        rsStats = serverStats.get(serverName);
+      }
+    }
+    RegionStats regionStats = null;
+    if (rsStats.containsKey(regionName)) {
+      regionStats = rsStats.get(regionName);
+    } else {
+      regionStats = rsStats.putIfAbsent(regionName, new RegionStats(this.registry, name));
+      if (regionStats == null) {
+        regionStats = rsStats.get(regionName);
+      }
+    }
+    regionStats.update(stats);
+  }
+
 
   /** A lambda for dispatching to the appropriate metric factory method */
   private static interface NewMetric<T> {
@@ -145,19 +241,19 @@ public class MetricsConnection {
    */
   private static final int CONCURRENCY_LEVEL = 256;
 
-  private final MetricsRegistry registry;
+  private final MetricRegistry registry;
   private final JmxReporter reporter;
   private final String scope;
 
   private final NewMetric<Timer> timerFactory = new NewMetric<Timer>() {
     @Override public Timer newMetric(Class<?> clazz, String name, String scope) {
-      return registry.newTimer(clazz, name, scope);
+      return registry.timer(name(clazz, name, scope));
     }
   };
 
   private final NewMetric<Histogram> histogramFactory = new NewMetric<Histogram>() {
     @Override public Histogram newMetric(Class<?> clazz, String name, String scope) {
-      return registry.newHistogram(clazz, name, scope);
+      return registry.histogram(name(clazz, name, scope));
     }
   };
 
@@ -172,6 +268,7 @@ public class MetricsConnection {
   @VisibleForTesting protected final CallTracker incrementTracker;
   @VisibleForTesting protected final CallTracker putTracker;
   @VisibleForTesting protected final CallTracker multiTracker;
+  @VisibleForTesting protected final RunnerStats runnerStats;
 
   // dynamic metrics
 
@@ -186,30 +283,26 @@ public class MetricsConnection {
 
   public MetricsConnection(final ConnectionImplementation conn) {
     this.scope = conn.toString();
-    this.registry = new MetricsRegistry();
+    this.registry = new MetricRegistry();
     final ThreadPoolExecutor batchPool = (ThreadPoolExecutor) conn.getCurrentBatchPool();
     final ThreadPoolExecutor metaPool = (ThreadPoolExecutor) conn.getCurrentMetaLookupPool();
 
-    this.registry.newGauge(this.getClass(), "executorPoolActiveThreads", scope,
+    this.registry.register(name(this.getClass(), "executorPoolActiveThreads", scope),
         new RatioGauge() {
-          @Override protected double getNumerator() {
-            return batchPool.getActiveCount();
-          }
-          @Override protected double getDenominator() {
-            return batchPool.getMaximumPoolSize();
+          @Override
+          protected Ratio getRatio() {
+            return Ratio.of(batchPool.getActiveCount(), batchPool.getMaximumPoolSize());
           }
         });
-    this.registry.newGauge(this.getClass(), "metaPoolActiveThreads", scope,
+    this.registry.register(name(this.getClass(), "metaPoolActiveThreads", scope),
         new RatioGauge() {
-          @Override protected double getNumerator() {
-            return metaPool.getActiveCount();
-          }
-          @Override protected double getDenominator() {
-            return metaPool.getMaximumPoolSize();
+          @Override
+          protected Ratio getRatio() {
+            return Ratio.of(metaPool.getActiveCount(), metaPool.getMaximumPoolSize());
           }
         });
-    this.metaCacheHits = registry.newCounter(this.getClass(), "metaCacheHits", scope);
-    this.metaCacheMisses = registry.newCounter(this.getClass(), "metaCacheMisses", scope);
+    this.metaCacheHits = registry.counter(name(this.getClass(), "metaCacheHits", scope));
+    this.metaCacheMisses = registry.counter(name(this.getClass(), "metaCacheMisses", scope));
     this.getTracker = new CallTracker(this.registry, "Get", scope);
     this.scanTracker = new CallTracker(this.registry, "Scan", scope);
     this.appendTracker = new CallTracker(this.registry, "Mutate", "Append", scope);
@@ -217,13 +310,14 @@ public class MetricsConnection {
     this.incrementTracker = new CallTracker(this.registry, "Mutate", "Increment", scope);
     this.putTracker = new CallTracker(this.registry, "Mutate", "Put", scope);
     this.multiTracker = new CallTracker(this.registry, "Multi", scope);
-    this.reporter = new JmxReporter(this.registry);
+    this.runnerStats = new RunnerStats(this.registry);
+
+    this.reporter = JmxReporter.forRegistry(this.registry).build();
     this.reporter.start();
   }
 
   public void shutdown() {
-    this.reporter.shutdown();
-    this.registry.shutdown();
+    this.reporter.stop();
   }
 
   /** Produce an instance of {@link CallStats} for clients to attach to RPCs. */
@@ -240,6 +334,21 @@ public class MetricsConnection {
   /** Increment the number of meta cache misses. */
   public void incrMetaCacheMiss() {
     metaCacheMisses.inc();
+  }
+
+  /** Increment the number of normal runner counts. */
+  public void incrNormalRunners() {
+    this.runnerStats.incrNormalRunners();
+  }
+
+  /** Increment the number of delay runner counts. */
+  public void incrDelayRunners() {
+    this.runnerStats.incrDelayRunners();
+  }
+
+  /** Update delay interval of delay runner. */
+  public void updateDelayInterval(long interval) {
+    this.runnerStats.updateDelayInterval(interval);
   }
 
   /**

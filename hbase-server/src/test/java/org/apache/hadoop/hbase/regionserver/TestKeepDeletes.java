@@ -103,16 +103,16 @@ public class TestKeepDeletes {
 
     long ts = EnvironmentEdgeManager.currentTime();
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
     p = new Put(T1, ts+1);
-    p.add(c0, c0, T2);
+    p.addColumn(c0, c0, T2);
     region.put(p);
     p = new Put(T1, ts+2);
-    p.add(c0, c0, T3);
+    p.addColumn(c0, c0, T3);
     region.put(p);
     p = new Put(T1, ts+4);
-    p.add(c0, c0, T4);
+    p.addColumn(c0, c0, T4);
     region.put(p);
 
     // now place a delete marker at ts+2
@@ -156,16 +156,16 @@ public class TestKeepDeletes {
 
     // two more puts, this will expire the older puts.
     p = new Put(T1, ts+5);
-    p.add(c0, c0, T5);
+    p.addColumn(c0, c0, T5);
     region.put(p);
     p = new Put(T1, ts+6);
-    p.add(c0, c0, T6);
+    p.addColumn(c0, c0, T6);
     region.put(p);
 
     // also add an old put again
     // (which is past the max versions)
     p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
     r = region.get(g);
     assertTrue(r.isEmpty());
@@ -200,11 +200,11 @@ public class TestKeepDeletes {
 
     long ts = EnvironmentEdgeManager.currentTime();
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     Delete d = new Delete(T1, ts);
-    d.deleteColumn(c0, c0, ts);
+    d.addColumn(c0, c0, ts);
     region.delete(d);
 
     // scan still returns delete markers and deletes rows
@@ -245,7 +245,7 @@ public class TestKeepDeletes {
 
     long ts = EnvironmentEdgeManager.currentTime();
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     Get gOne = new Get(T1);
@@ -256,7 +256,7 @@ public class TestKeepDeletes {
 
 
     Delete d = new Delete(T1, ts+2);
-    d.deleteColumn(c0, c0, ts);
+    d.addColumn(c0, c0, ts);
     region.delete(d);
 
     // "past" get does not see rows behind delete marker
@@ -322,24 +322,24 @@ public class TestKeepDeletes {
 
     long ts = EnvironmentEdgeManager.currentTime();
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
     p = new Put(T1, ts+2);
-    p.add(c0, c0, T2);
+    p.addColumn(c0, c0, T2);
     region.put(p);
     p = new Put(T1, ts+4);
-    p.add(c0, c0, T3);
+    p.addColumn(c0, c0, T3);
     region.put(p);
 
     Delete d = new Delete(T1, ts+1);
     region.delete(d);
 
     d = new Delete(T1, ts+2);
-    d.deleteColumn(c0, c0, ts+2);
+    d.addColumn(c0, c0, ts+2);
     region.delete(d);
 
     d = new Delete(T1, ts+3);
-    d.deleteColumns(c0, c0, ts+3);
+    d.addColumns(c0, c0, ts+3);
     region.delete(d);
 
     Scan s = new Scan();
@@ -413,19 +413,19 @@ public class TestKeepDeletes {
     long ts = EnvironmentEdgeManager.currentTime();
 
     Delete d = new Delete(T1, ts);
-    d.deleteColumns(c0, c0, ts);
+    d.addColumns(c0, c0, ts);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteFamily(c0);
+    d.addFamily(c0);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteColumn(c0, c0, ts+1);
+    d.addColumn(c0, c0, ts+1);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteColumn(c0, c0, ts+2);
+    d.addColumn(c0, c0, ts+2);
     region.delete(d);
 
     // 1 family marker, 1 column marker, 2 version markers
@@ -456,29 +456,29 @@ public class TestKeepDeletes {
     long ts = EnvironmentEdgeManager.currentTime();
 
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     // a put into another store (CF) should have no effect
     p = new Put(T1, ts-10);
-    p.add(c1, c0, T1);
+    p.addColumn(c1, c0, T1);
     region.put(p);
 
     // all the following deletes affect the put
     Delete d = new Delete(T1, ts);
-    d.deleteColumns(c0, c0, ts);
+    d.addColumns(c0, c0, ts);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteFamily(c0, ts);
+    d.addFamily(c0, ts);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteColumn(c0, c0, ts+1);
+    d.addColumn(c0, c0, ts+1);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteColumn(c0, c0, ts+2);
+    d.addColumn(c0, c0, ts+2);
     region.delete(d);
 
     // 1 family marker, 1 column marker, 2 version markers
@@ -491,7 +491,7 @@ public class TestKeepDeletes {
 
     // another put will push out the earlier put...
     p = new Put(T1, ts+3);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     region.flush(true);
@@ -519,29 +519,29 @@ public class TestKeepDeletes {
     long ts = EnvironmentEdgeManager.currentTime();
 
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     // a put another (older) row in the same store
     p = new Put(T2, ts-10);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     // all the following deletes affect the put
     Delete d = new Delete(T1, ts);
-    d.deleteColumns(c0, c0, ts);
+    d.addColumns(c0, c0, ts);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteFamily(c0, ts);
+    d.addFamily(c0, ts);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteColumn(c0, c0, ts+1);
+    d.addColumn(c0, c0, ts+1);
     region.delete(d);
 
     d = new Delete(T1, ts);
-    d.deleteColumn(c0, c0, ts+2);
+    d.addColumn(c0, c0, ts+2);
     region.delete(d);
 
     // 1 family marker, 1 column marker, 2 version markers
@@ -554,7 +554,7 @@ public class TestKeepDeletes {
 
     // another put will push out the earlier put...
     p = new Put(T1, ts+3);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     region.flush(true);
@@ -569,7 +569,7 @@ public class TestKeepDeletes {
 
     // another put will push out the earlier put...
     p = new Put(T1, ts+4);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     // this pushed out the column and version marker
@@ -596,48 +596,48 @@ public class TestKeepDeletes {
 
     long ts = EnvironmentEdgeManager.currentTime();
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
-    p.add(c0, c1, T1);
-    p.add(c1, c0, T1);
-    p.add(c1, c1, T1);
+    p.addColumn(c0, c0, T1);
+    p.addColumn(c0, c1, T1);
+    p.addColumn(c1, c0, T1);
+    p.addColumn(c1, c1, T1);
     region.put(p);
 
     p = new Put(T2, ts);
-    p.add(c0, c0, T1);
-    p.add(c0, c1, T1);
-    p.add(c1, c0, T1);
-    p.add(c1, c1, T1);
+    p.addColumn(c0, c0, T1);
+    p.addColumn(c0, c1, T1);
+    p.addColumn(c1, c0, T1);
+    p.addColumn(c1, c1, T1);
     region.put(p);
 
     p = new Put(T1, ts+1);
-    p.add(c0, c0, T2);
-    p.add(c0, c1, T2);
-    p.add(c1, c0, T2);
-    p.add(c1, c1, T2);
+    p.addColumn(c0, c0, T2);
+    p.addColumn(c0, c1, T2);
+    p.addColumn(c1, c0, T2);
+    p.addColumn(c1, c1, T2);
     region.put(p);
 
     p = new Put(T2, ts+1);
-    p.add(c0, c0, T2);
-    p.add(c0, c1, T2);
-    p.add(c1, c0, T2);
-    p.add(c1, c1, T2);
+    p.addColumn(c0, c0, T2);
+    p.addColumn(c0, c1, T2);
+    p.addColumn(c1, c0, T2);
+    p.addColumn(c1, c1, T2);
     region.put(p);
 
     Delete d = new Delete(T1, ts+2);
-    d.deleteColumns(c0, c0, ts+2);
+    d.addColumns(c0, c0, ts+2);
     region.delete(d);
 
     d = new Delete(T1, ts+2);
-    d.deleteFamily(c1, ts+2);
+    d.addFamily(c1, ts+2);
     region.delete(d);
 
     d = new Delete(T2, ts+2);
-    d.deleteFamily(c0, ts+2);
+    d.addFamily(c0, ts+2);
     region.delete(d);
 
     // add an older delete, to make sure it is filtered
     d = new Delete(T1, ts-10);
-    d.deleteFamily(c1, ts-10);
+    d.addFamily(c1, ts-10);
     region.delete(d);
 
     // ts + 2 does NOT include the delete at ts+2
@@ -678,26 +678,26 @@ public class TestKeepDeletes {
 
     long ts = EnvironmentEdgeManager.currentTime();
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     // this prevents marker collection based on earliestPut
     // (cannot keep earliest put per column in the store file)
     p = new Put(T1, ts-10);
-    p.add(c0, c1, T1);
+    p.addColumn(c0, c1, T1);
     region.put(p);
 
     Delete d = new Delete(T1, ts);
     // test corner case (Put and Delete have same TS)
-    d.deleteColumns(c0, c0, ts);
+    d.addColumns(c0, c0, ts);
     region.delete(d);
 
     d = new Delete(T1, ts+1);
-    d.deleteColumn(c0, c0, ts+1);
+    d.addColumn(c0, c0, ts+1);
     region.delete(d);
 
     d = new Delete(T1, ts+3);
-    d.deleteColumn(c0, c0, ts+3);
+    d.addColumn(c0, c0, ts+3);
     region.delete(d);
 
     region.flush(true);
@@ -709,14 +709,14 @@ public class TestKeepDeletes {
     // the 2nd put (and all delete markers following)
     // will be removed.
     p = new Put(T1, ts+2);
-    p.add(c0, c0, T2);
+    p.addColumn(c0, c0, T2);
     region.put(p);
 
     // delete, put, delete, delete, put
     assertEquals(3, countDeleteMarkers(region));
 
     p = new Put(T1, ts+3);
-    p.add(c0, c0, T3);
+    p.addColumn(c0, c0, T3);
     region.put(p);
 
     // This is potentially questionable behavior.
@@ -746,7 +746,7 @@ public class TestKeepDeletes {
 
     // add one more put
     p = new Put(T1, ts+4);
-    p.add(c0, c0, T4);
+    p.addColumn(c0, c0, T4);
     region.put(p);
 
     region.flush(true);
@@ -771,17 +771,17 @@ public class TestKeepDeletes {
     long ts = EnvironmentEdgeManager.currentTime();
 
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T1);
-    p.add(c0, c1, T1);
-    p.add(c1, c0, T1);
-    p.add(c1, c1, T1);
+    p.addColumn(c0, c0, T1);
+    p.addColumn(c0, c1, T1);
+    p.addColumn(c1, c0, T1);
+    p.addColumn(c1, c1, T1);
     region.put(p);
 
     p = new Put(T2, ts+1);
-    p.add(c0, c0, T2);
-    p.add(c0, c1, T2);
-    p.add(c1, c0, T2);
-    p.add(c1, c1, T2);
+    p.addColumn(c0, c0, T2);
+    p.addColumn(c0, c1, T2);
+    p.addColumn(c1, c0, T2);
+    p.addColumn(c1, c1, T2);
     region.put(p);
 
     // family markers are each family
@@ -823,16 +823,16 @@ public class TestKeepDeletes {
     long ts = EnvironmentEdgeManager.currentTime() - 2000; // 2s in the past
 
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T3);
+    p.addColumn(c0, c0, T3);
     region.put(p);
     p = new Put(T1, ts-1);
-    p.add(c0, c0, T2);
+    p.addColumn(c0, c0, T2);
     region.put(p);
     p = new Put(T1, ts-3);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
     p = new Put(T1, ts-4);
-    p.add(c0, c0, T0);
+    p.addColumn(c0, c0, T0);
     region.put(p);
 
     // all puts now are just retained because of min versions = 3
@@ -842,7 +842,7 @@ public class TestKeepDeletes {
     region.delete(d);
     // and a column delete marker
     d = new Delete(T1, ts-2);
-    d.deleteColumns(c0, c0, ts-1);
+    d.addColumns(c0, c0, ts-1);
     region.delete(d);
 
     Get g = new Get(T1);
@@ -861,7 +861,7 @@ public class TestKeepDeletes {
     r = region.get(g);
     checkResult(r, c0, c0, T1);
     p = new Put(T1, ts+1);
-    p.add(c0, c0, T4);
+    p.addColumn(c0, c0, T4);
     region.put(p);
     region.flush(true);
 
@@ -873,7 +873,7 @@ public class TestKeepDeletes {
     // this will push out the last put before
     // family delete marker
     p = new Put(T1, ts+2);
-    p.add(c0, c0, T5);
+    p.addColumn(c0, c0, T5);
     region.put(p);
 
     region.flush(true);
@@ -902,12 +902,12 @@ public class TestKeepDeletes {
     long ts = EnvironmentEdgeManager.currentTime() - 2000; // 2s in the past
 
     Put p = new Put(T1, ts);
-    p.add(c0, c0, T3);
+    p.addColumn(c0, c0, T3);
     region.put(p);
 
     // place an old row, to make the family marker expires anyway
     p = new Put(T2, ts-10);
-    p.add(c0, c0, T1);
+    p.addColumn(c0, c0, T1);
     region.put(p);
 
     checkGet(region, T1, c0, c0, ts+1, T3);

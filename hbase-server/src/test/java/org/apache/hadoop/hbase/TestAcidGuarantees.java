@@ -28,10 +28,10 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.MultithreadedTestUtil.RepeatingTestThread;
 import org.apache.hadoop.hbase.MultithreadedTestUtil.TestContext;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -88,7 +88,7 @@ public class TestAcidGuarantees implements Tool {
       // force mob enabled such that all data is mob data
       hcd.setMobEnabled(true);
       hcd.setMobThreshold(4);
-      util.getHBaseAdmin().modifyColumn(TABLE_NAME, hcd);
+      util.getHBaseAdmin().modifyColumnFamily(TABLE_NAME, hcd);
     }
   }
 
@@ -135,7 +135,7 @@ public class TestAcidGuarantees implements Tool {
       for (byte[] family : targetFamilies) {
         for (int i = 0; i < NUM_COLS_TO_CHECK; i++) {
           byte qualifier[] = Bytes.toBytes("col" + i);
-          p.add(family, qualifier, data);
+          p.addColumn(family, qualifier, data);
         }
       }
       table.put(p);
@@ -304,7 +304,7 @@ public class TestAcidGuarantees implements Tool {
     }
     // Add a flusher
     ctx.addThread(new RepeatingTestThread(ctx) {
-      HBaseAdmin admin = util.getHBaseAdmin();
+      Admin admin = util.getHBaseAdmin();
       public void doAnAction() throws Exception {
         try {
           admin.flush(TABLE_NAME);

@@ -70,7 +70,6 @@ import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.snapshot.ClientSnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.HBaseSnapshotException;
 import org.apache.hadoop.hbase.snapshot.RestoreSnapshotException;
-import org.apache.hadoop.hbase.snapshot.RestoreSnapshotHelper;
 import org.apache.hadoop.hbase.snapshot.SnapshotCreationException;
 import org.apache.hadoop.hbase.snapshot.SnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotDoesNotExistException;
@@ -121,15 +120,6 @@ public class SnapshotManager extends MasterProcedureManager implements Stoppable
    * completion.
    */
   private static final String SNAPSHOT_WAKE_MILLIS_KEY = "hbase.snapshot.master.wakeMillis";
-
-  /** By default, check to see if the snapshot is complete (ms) */
-  private static final int SNAPSHOT_TIMEOUT_MILLIS_DEFAULT = 60000;
-
-  /**
-   * Conf key for # of ms elapsed before injecting a snapshot timeout error when waiting for
-   * completion.
-   */
-  private static final String SNAPSHOT_TIMEOUT_MILLIS_KEY = "hbase.snapshot.master.timeoutMillis";
 
   /** Name of the operation to use in the controller */
   public static final String ONLINE_SNAPSHOT_CONTROLLER_DESCRIPTION = "online-snapshot";
@@ -750,7 +740,7 @@ public class SnapshotManager extends MasterProcedureManager implements Stoppable
         cpHost.postRestoreSnapshot(reqSnapshot, snapshotTableDesc);
       }
     } else {
-      HTableDescriptor htd = RestoreSnapshotHelper.cloneTableSchema(snapshotTableDesc, tableName);
+      HTableDescriptor htd = new HTableDescriptor(tableName, snapshotTableDesc);
       if (cpHost != null) {
         cpHost.preCloneSnapshot(reqSnapshot, htd);
       }
@@ -770,7 +760,7 @@ public class SnapshotManager extends MasterProcedureManager implements Stoppable
       }
     }
   }
-  
+
   private void checkAndUpdateNamespaceQuota(SnapshotManifest manifest, TableName tableName)
       throws IOException {
     if (this.master.getMasterQuotaManager().isQuotaEnabled()) {
@@ -1078,7 +1068,10 @@ public class SnapshotManager extends MasterProcedureManager implements Stoppable
     // get the configuration for the coordinator
     Configuration conf = master.getConfiguration();
     long wakeFrequency = conf.getInt(SNAPSHOT_WAKE_MILLIS_KEY, SNAPSHOT_WAKE_MILLIS_DEFAULT);
-    long timeoutMillis = conf.getLong(SNAPSHOT_TIMEOUT_MILLIS_KEY, SNAPSHOT_TIMEOUT_MILLIS_DEFAULT);
+    long timeoutMillis = Math.max(conf.getLong(SnapshotDescriptionUtils.SNAPSHOT_TIMEOUT_MILLIS_KEY,
+                    SnapshotDescriptionUtils.SNAPSHOT_TIMEOUT_MILLIS_DEFAULT),
+            conf.getLong(SnapshotDescriptionUtils.MASTER_SNAPSHOT_TIMEOUT_MILLIS,
+                    SnapshotDescriptionUtils.DEFAULT_MAX_WAIT_TIME));
     int opThreads = conf.getInt(SNAPSHOT_POOL_THREADS_KEY, SNAPSHOT_POOL_THREADS_DEFAULT);
 
     // setup the default procedure coordinator

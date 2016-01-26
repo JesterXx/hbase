@@ -82,6 +82,7 @@ message Get {
   optional bool existence_only = 10 [default = false];
 
   optional Consistency consistency = 12 [default = STRONG];
+  repeated ColumnFamilyTimeRange cf_time_range = 13;
 }
 
 message Result {
@@ -251,6 +252,8 @@ message Scan {
   optional bool reversed = 15 [default = false];
   optional Consistency consistency = 16 [default = STRONG];
   optional uint32 caching = 17;
+  optional bool allow_partial_results = 18;
+  repeated ColumnFamilyTimeRange cf_time_range = 19;
 }
 
 /**
@@ -274,6 +277,7 @@ message ScanRequest {
   optional bool client_handles_partials = 7;
   optional bool client_handles_heartbeats = 8;
   optional bool track_scan_metrics = 9;
+  optional bool renew = 10 [default = false];
 }
 
 /**
@@ -394,6 +398,8 @@ message RegionLoadStats {
   // Percent JVM heap occupancy. Guaranteed to be positive, between 0 and 100.
   // We can move this to "ServerLoadStats" should we develop them.
   optional int32 heapOccupancy = 2 [default = 0];
+  // Compaction pressure. Guaranteed to be positive, between 0 and 100.
+  optional int32 compactionPressure = 3 [default = 0];
 }
 
 /**

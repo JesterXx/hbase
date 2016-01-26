@@ -32,7 +32,6 @@ import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.testclassification.MapReduceTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.LauncherSecurityManager;
-import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.util.ToolRunner;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -64,14 +63,12 @@ public class TestCellCounter {
   @BeforeClass
   public static void beforeClass() throws Exception {
     UTIL.startMiniCluster();
-    UTIL.startMiniMapReduceCluster();
     FQ_OUTPUT_DIR = new Path(OUTPUT_DIR).makeQualified(new LocalFileSystem());
     FileUtil.fullyDelete(new File(OUTPUT_DIR));
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    UTIL.shutdownMiniMapReduceCluster();
     UTIL.shutdownMiniCluster();
   }
 
@@ -86,14 +83,14 @@ public class TestCellCounter {
     Table t = UTIL.createTable(sourceTable, families);
     try{
       Put p = new Put(ROW1);
-      p.add(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
-      p.add(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
-      p.add(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
+      p.addColumn(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
       t.put(p);
       p = new Put(ROW2);
-      p.add(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
-      p.add(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
-      p.add(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
+      p.addColumn(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
       t.put(p);
       String[] args = { sourceTable.getNameAsString(), FQ_OUTPUT_DIR.toString(), ";", "^row1" };
       runCount(args);
@@ -123,31 +120,32 @@ public class TestCellCounter {
     byte[][] families = { FAMILY_A, FAMILY_B };
     Table t = UTIL.createTable(sourceTable, families);
     try{
-    Put p = new Put(ROW1);
-    p.add(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
-    p.add(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
-    p.add(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
-    t.put(p);
-    p = new Put(ROW2);
-    p.add(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
-    p.add(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
-    p.add(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
-    t.put(p);
-    String[] args = {
-      sourceTable.getNameAsString(), FQ_OUTPUT_DIR.toString(),  ";", "^row1", "--starttime=" + now,
-      "--endtime=" + now + 2 };
-    runCount(args);
-    FileInputStream inputStream = new FileInputStream(OUTPUT_DIR + File.separator +
-        "part-r-00000");
-    String data = IOUtils.toString(inputStream);
-    inputStream.close();
-    assertTrue(data.contains("Total Families Across all Rows" + "\t" + "2"));
-    assertTrue(data.contains("Total Qualifiers across all Rows" + "\t" + "2"));
-    assertTrue(data.contains("Total ROWS" + "\t" + "1"));
-    assertTrue(data.contains("b;q" + "\t" + "1"));
-    assertTrue(data.contains("a;q" + "\t" + "1"));
-    assertTrue(data.contains("row1;a;q_Versions" + "\t" + "1"));
-    assertTrue(data.contains("row1;b;q_Versions" + "\t" + "1"));
+      Put p = new Put(ROW1);
+      p.addColumn(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
+      t.put(p);
+      p = new Put(ROW2);
+      p.addColumn(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
+      t.put(p);
+      String[] args = {
+          sourceTable.getNameAsString(), FQ_OUTPUT_DIR.toString(),  ";", "^row1",
+          "--starttime=" + now,
+          "--endtime=" + now + 2 };
+      runCount(args);
+      FileInputStream inputStream = new FileInputStream(OUTPUT_DIR + File.separator +
+          "part-r-00000");
+      String data = IOUtils.toString(inputStream);
+      inputStream.close();
+      assertTrue(data.contains("Total Families Across all Rows" + "\t" + "2"));
+      assertTrue(data.contains("Total Qualifiers across all Rows" + "\t" + "2"));
+      assertTrue(data.contains("Total ROWS" + "\t" + "1"));
+      assertTrue(data.contains("b;q" + "\t" + "1"));
+      assertTrue(data.contains("a;q" + "\t" + "1"));
+      assertTrue(data.contains("row1;a;q_Versions" + "\t" + "1"));
+      assertTrue(data.contains("row1;b;q_Versions" + "\t" + "1"));
     }finally{
       t.close();
       FileUtil.fullyDelete(new File(OUTPUT_DIR));
@@ -163,38 +161,38 @@ public class TestCellCounter {
     byte[][] families = { FAMILY_A, FAMILY_B };
     Table t = UTIL.createTable(sourceTable, families);
     try{
-    Put p = new Put(ROW1);
-    p.add(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
-    p.add(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
-    p.add(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
-    t.put(p);
-    p = new Put(ROW2);
-    p.add(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
-    p.add(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
-    p.add(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
-    t.put(p);
-    String[] args = {
-      sourceTable.getNameAsString(), FQ_OUTPUT_DIR.toString(),  ";", "^row1",
-        "--endtime=" + now + 1 };
-    runCount(args);
-    FileInputStream inputStream = new FileInputStream(OUTPUT_DIR + File.separator +
-        "part-r-00000");
-    String data = IOUtils.toString(inputStream);
-    inputStream.close();
-    assertTrue(data.contains("Total Families Across all Rows" + "\t" + "2"));
-    assertTrue(data.contains("Total Qualifiers across all Rows" + "\t" + "2"));
-    assertTrue(data.contains("Total ROWS" + "\t" + "1"));
-    assertTrue(data.contains("b;q" + "\t" + "1"));
-    assertTrue(data.contains("a;q" + "\t" + "1"));
-    assertTrue(data.contains("row1;a;q_Versions" + "\t" + "1"));
-    assertTrue(data.contains("row1;b;q_Versions" + "\t" + "1"));
+      Put p = new Put(ROW1);
+      p.addColumn(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
+      t.put(p);
+      p = new Put(ROW2);
+      p.addColumn(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
+      t.put(p);
+      String[] args = {
+          sourceTable.getNameAsString(), FQ_OUTPUT_DIR.toString(),  ";", "^row1",
+          "--endtime=" + now + 1 };
+      runCount(args);
+      FileInputStream inputStream = new FileInputStream(OUTPUT_DIR + File.separator +
+          "part-r-00000");
+      String data = IOUtils.toString(inputStream);
+      inputStream.close();
+      assertTrue(data.contains("Total Families Across all Rows" + "\t" + "2"));
+      assertTrue(data.contains("Total Qualifiers across all Rows" + "\t" + "2"));
+      assertTrue(data.contains("Total ROWS" + "\t" + "1"));
+      assertTrue(data.contains("b;q" + "\t" + "1"));
+      assertTrue(data.contains("a;q" + "\t" + "1"));
+      assertTrue(data.contains("row1;a;q_Versions" + "\t" + "1"));
+      assertTrue(data.contains("row1;b;q_Versions" + "\t" + "1"));
     }finally{
       t.close();
       FileUtil.fullyDelete(new File(OUTPUT_DIR));
     }
   }
 
-   /**
+  /**
    * Test CellCounter with time range all data should print to output
    */
   @Test (timeout=300000)
@@ -203,27 +201,27 @@ public class TestCellCounter {
     byte[][] families = { FAMILY_A, FAMILY_B };
     Table t = UTIL.createTable(sourceTable, families);
     try{
-    Put p = new Put(ROW1);
-    p.add(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
-    p.add(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
-    p.add(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
-    t.put(p);
-    p = new Put(ROW2);
-    p.add(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
-    p.add(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
-    p.add(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
-    t.put(p);
-    String[] args = {
+      Put p = new Put(ROW1);
+      p.addColumn(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
+      t.put(p);
+      p = new Put(ROW2);
+      p.addColumn(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
+      t.put(p);
+      String[] args = {
       sourceTable.getNameAsString(), FQ_OUTPUT_DIR.toString(),  ";", "--starttime=" + now + 1,
-      "--endtime=" + now + 2 };
+          "--endtime=" + now + 2 };
 
-    runCount(args);
-    FileInputStream inputStream = new FileInputStream(OUTPUT_DIR + File.separator +
-        "part-r-00000");
-    String data = IOUtils.toString(inputStream);
+      runCount(args);
+      FileInputStream inputStream = new FileInputStream(OUTPUT_DIR + File.separator +
+          "part-r-00000");
+      String data = IOUtils.toString(inputStream);
     inputStream.close();
-    // nothing should hace been emitted to the reducer
-    assertTrue(data.isEmpty());
+      // nothing should hace been emitted to the reducer
+      assertTrue(data.isEmpty());
     }finally{
       t.close();
       FileUtil.fullyDelete(new File(OUTPUT_DIR));
@@ -286,14 +284,14 @@ public class TestCellCounter {
     Table t = UTIL.createTable(sourceTable, families);
     try {
       Put p = new Put(ROW1);
-      p.add(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
-      p.add(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
-      p.add(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
+      p.addColumn(FAMILY_A, QUALIFIER, now, Bytes.toBytes("Data11"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 1, Bytes.toBytes("Data12"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 2, Bytes.toBytes("Data13"));
       t.put(p);
       p = new Put(ROW2);
-      p.add(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
-      p.add(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
-      p.add(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
+      p.addColumn(FAMILY_B, QUALIFIER, now, Bytes.toBytes("Dat21"));
+      p.addColumn(FAMILY_A, QUALIFIER, now + 1, Bytes.toBytes("Data22"));
+      p.addColumn(FAMILY_B, QUALIFIER, now + 2, Bytes.toBytes("Data23"));
       t.put(p);
       String[] args = { sourceTable.getNameAsString(), outputDir.toString(), ";" };
       runCount(args);

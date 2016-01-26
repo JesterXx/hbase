@@ -337,7 +337,7 @@ public class TestOperation {
 
     // produce a Put operation
     Put put = new Put(ROW);
-    put.add(FAMILY, QUALIFIER, VALUE);
+    put.addColumn(FAMILY, QUALIFIER, VALUE);
     // get its JSON representation, and parse it
     json = put.toJSON();
     parsedJSON = mapper.readValue(json, HashMap.class);
@@ -358,7 +358,7 @@ public class TestOperation {
 
     // produce a Delete operation
     Delete delete = new Delete(ROW);
-    delete.deleteColumn(FAMILY, QUALIFIER);
+    delete.addColumn(FAMILY, QUALIFIER);
     // get its JSON representation, and parse it
     json = delete.toJSON();
     parsedJSON = mapper.readValue(json, HashMap.class);

@@ -149,7 +149,7 @@ public class TestScannersWithFilters {
         Put p = new Put(ROW);
         p.setDurability(Durability.SKIP_WAL);
         for(byte [] QUALIFIER : QUALIFIERS_ONE) {
-          p.add(FAMILIES[0], QUALIFIER, VALUES[0]);
+          p.addColumn(FAMILIES[0], QUALIFIER, VALUES[0]);
         }
         table.put(p);
       }
@@ -157,7 +157,7 @@ public class TestScannersWithFilters {
         Put p = new Put(ROW);
         p.setDurability(Durability.SKIP_WAL);
         for(byte [] QUALIFIER : QUALIFIERS_TWO) {
-          p.add(FAMILIES[1], QUALIFIER, VALUES[1]);
+          p.addColumn(FAMILIES[1], QUALIFIER, VALUES[1]);
         }
         table.put(p);
       }
@@ -167,7 +167,7 @@ public class TestScannersWithFilters {
         Put p = new Put(ROW);
         p.setDurability(Durability.SKIP_WAL);
         for(byte [] QUALIFIER : QUALIFIERS_ONE) {
-          p.add(FAMILIES[1], QUALIFIER, VALUES[0]);
+          p.addColumn(FAMILIES[1], QUALIFIER, VALUES[0]);
         }
         table.put(p);
       }
@@ -175,7 +175,7 @@ public class TestScannersWithFilters {
         Put p = new Put(ROW);
         p.setDurability(Durability.SKIP_WAL);
         for(byte [] QUALIFIER : QUALIFIERS_TWO) {
-          p.add(FAMILIES[0], QUALIFIER, VALUES[1]);
+          p.addColumn(FAMILIES[0], QUALIFIER, VALUES[1]);
         }
         table.put(p);
       }
@@ -183,14 +183,14 @@ public class TestScannersWithFilters {
       // Delete the second qualifier from all rows and families
       for(byte [] ROW : ROWS_ONE) {
         Delete d = new Delete(ROW);
-        d.deleteColumns(FAMILIES[0], QUALIFIERS_ONE[1]);
-        d.deleteColumns(FAMILIES[1], QUALIFIERS_ONE[1]);
+        d.addColumns(FAMILIES[0], QUALIFIERS_ONE[1]);
+        d.addColumns(FAMILIES[1], QUALIFIERS_ONE[1]);
         table.delete(d);
       }
       for(byte [] ROW : ROWS_TWO) {
         Delete d = new Delete(ROW);
-        d.deleteColumns(FAMILIES[0], QUALIFIERS_TWO[1]);
-        d.deleteColumns(FAMILIES[1], QUALIFIERS_TWO[1]);
+        d.addColumns(FAMILIES[0], QUALIFIERS_TWO[1]);
+        d.addColumns(FAMILIES[1], QUALIFIERS_TWO[1]);
         table.delete(d);
       }
       colsPerRow -= 2;
@@ -198,14 +198,14 @@ public class TestScannersWithFilters {
       // Delete the second rows from both groups, one column at a time
       for(byte [] QUALIFIER : QUALIFIERS_ONE) {
         Delete d = new Delete(ROWS_ONE[1]);
-        d.deleteColumns(FAMILIES[0], QUALIFIER);
-        d.deleteColumns(FAMILIES[1], QUALIFIER);
+        d.addColumns(FAMILIES[0], QUALIFIER);
+        d.addColumns(FAMILIES[1], QUALIFIER);
         table.delete(d);
       }
       for(byte [] QUALIFIER : QUALIFIERS_TWO) {
         Delete d = new Delete(ROWS_TWO[1]);
-        d.deleteColumns(FAMILIES[0], QUALIFIER);
-        d.deleteColumns(FAMILIES[1], QUALIFIER);
+        d.addColumns(FAMILIES[0], QUALIFIER);
+        d.addColumns(FAMILIES[1], QUALIFIER);
         table.delete(d);
       }
       numRows -= 2;

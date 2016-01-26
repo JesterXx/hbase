@@ -43,13 +43,15 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.TagRewriteCell;
 import org.apache.hadoop.hbase.TagType;
+import org.apache.hadoop.hbase.TagUtil;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -186,7 +188,7 @@ public class TestVisibilityLabelsReplication {
     // Wait for the labels table to become available
     TEST_UTIL.waitTableEnabled(LABELS_TABLE_NAME.getName(), 50000);
     TEST_UTIL1.startMiniCluster(1);
-    HBaseAdmin hBaseAdmin = TEST_UTIL.getHBaseAdmin();
+    Admin hBaseAdmin = TEST_UTIL.getHBaseAdmin();
     HTableDescriptor table = new HTableDescriptor(TABLE_NAME);
     HColumnDescriptor desc = new HColumnDescriptor(fam);
     desc.setScope(HConstants.REPLICATION_SCOPE_GLOBAL);
@@ -198,7 +200,7 @@ public class TestVisibilityLabelsReplication {
         hBaseAdmin.close();
       }
     }
-    HBaseAdmin hBaseAdmin1 = TEST_UTIL1.getHBaseAdmin();
+    Admin hBaseAdmin1 = TEST_UTIL1.getHBaseAdmin();
     try {
       hBaseAdmin1.createTable(table);
     } finally {
@@ -284,11 +286,11 @@ public class TestVisibilityLabelsReplication {
     for (Cell cell : cells) {
       if ((Bytes.equals(cell.getRowArray(), cell.getRowOffset(), cell.getRowLength(), row, 0,
           row.length))) {
-        List<Tag> tags = Tag
-            .asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
+        List<Tag> tags = TagUtil.asList(cell.getTagsArray(), cell.getTagsOffset(),
+            cell.getTagsLength());
         for (Tag tag : tags) {
           if (tag.getType() == TagType.STRING_VIS_TAG_TYPE) {
-            assertEquals(visTag, Bytes.toString(tag.getValue()));
+            assertEquals(visTag, TagUtil.getValueAsString(tag));
             tagFound = true;
             break;
           }
@@ -330,7 +332,7 @@ public class TestVisibilityLabelsReplication {
           boolean foundNonVisTag = false;
           for (Tag t : TestCoprocessorForTagsAtSink.tags) {
             if (t.getType() == NON_VIS_TAG_TYPE) {
-              assertEquals(TEMP, Bytes.toString(t.getValue()));
+              assertEquals(TEMP, TagUtil.getValueAsString(t));
               foundNonVisTag = true;
               break;
             }
@@ -381,7 +383,7 @@ public class TestVisibilityLabelsReplication {
     List<Put> puts = new ArrayList<Put>();
     for (String labelExp : labelExps) {
       Put put = new Put(Bytes.toBytes("row" + i));
-      put.add(fam, qual, HConstants.LATEST_TIMESTAMP, value);
+      put.addColumn(fam, qual, HConstants.LATEST_TIMESTAMP, value);
       put.setCellVisibility(new CellVisibility(labelExp));
       put.setAttribute(NON_VISIBILITY, Bytes.toBytes(TEMP));
       puts.add(put);
@@ -407,11 +409,11 @@ public class TestVisibilityLabelsReplication {
             if (cf == null) {
               cf = CellUtil.cloneFamily(kv);
             }
-            Tag tag = new Tag((byte) NON_VIS_TAG_TYPE, attribute);
+            Tag tag = new ArrayBackedTag((byte) NON_VIS_TAG_TYPE, attribute);
             List<Tag> tagList = new ArrayList<Tag>();
             tagList.add(tag);
             tagList.addAll(kv.getTags());
-            byte[] fromList = Tag.fromList(tagList);
+            byte[] fromList = TagUtil.fromList(tagList);
             TagRewriteCell newcell = new TagRewriteCell(kv, fromList);
             ((List<Cell>) updatedCells).add(newcell);
           }
@@ -433,7 +435,7 @@ public class TestVisibilityLabelsReplication {
         // Check tag presence in the 1st cell in 1st Result
         if (!results.isEmpty()) {
           Cell cell = results.get(0);
-          tags = Tag.asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
+          tags = TagUtil.asList(cell.getTagsArray(), cell.getTagsOffset(), cell.getTagsLength());
         }
       }
     }

@@ -487,7 +487,10 @@ public interface Admin extends Abortable, Closeable {
    * @return Pair indicating the number of regions updated Pair.getFirst() is the regions that are
    * yet to be updated Pair.getSecond() is the total number of regions of the table
    * @throws IOException if a remote or network exception occurs
+   * @deprecated Since 2.0.0. Will be removed in 3.0.0. Use {@link #getAlterStatus(TableName)}
+   *     instead.
    */
+  @Deprecated
   Pair<Integer, Integer> getAlterStatus(final byte[] tableName) throws IOException;
 
   /**
@@ -507,13 +510,19 @@ public interface Admin extends Abortable, Closeable {
 
   /**
    * Add a column family to an existing table. Asynchronous operation.
+   * You can use Future.get(long, TimeUnit) to wait on the operation to complete.
+   * It may throw ExecutionException if there was an error while executing the operation
+   * or TimeoutException in case the wait timeout was not long enough to allow the
+   * operation to complete.
    *
    * @param tableName name of the table to add column family to
    * @param columnFamily column family descriptor of column family to be added
    * @throws IOException if a remote or network exception occurs
+   * @return the result of the async add column family. You can use Future.get(long, TimeUnit) to
+   *         wait on the operation to complete.
    */
-  void addColumnFamily(final TableName tableName, final HColumnDescriptor columnFamily)
-    throws IOException;
+  Future<Void> addColumnFamily(final TableName tableName, final HColumnDescriptor columnFamily)
+      throws IOException;
 
   /**
    * Delete a column family from a table. Asynchronous operation.
@@ -531,15 +540,26 @@ public interface Admin extends Abortable, Closeable {
 
   /**
    * Delete a column family from a table. Asynchronous operation.
+   * You can use Future.get(long, TimeUnit) to wait on the operation to complete.
+   * It may throw ExecutionException if there was an error while executing the operation
+   * or TimeoutException in case the wait timeout was not long enough to allow the
+   * operation to complete.
    *
    * @param tableName name of table
    * @param columnFamily name of column family to be deleted
    * @throws IOException if a remote or network exception occurs
+   * @return the result of the async delete column family. You can use Future.get(long, TimeUnit) to
+   *         wait on the operation to complete.
    */
-  void deleteColumnFamily(final TableName tableName, final byte[] columnFamily) throws IOException;
+  Future<Void> deleteColumnFamily(final TableName tableName, final byte[] columnFamily)
+      throws IOException;
 
   /**
    * Modify an existing column family on a table. Asynchronous operation.
+   * You can use Future.get(long, TimeUnit) to wait on the operation to complete.
+   * It may throw ExecutionException if there was an error while executing the operation
+   * or TimeoutException in case the wait timeout was not long enough to allow the
+   * operation to complete.
    *
    * @param tableName name of table
    * @param columnFamily new column family descriptor to use
@@ -559,8 +579,10 @@ public interface Admin extends Abortable, Closeable {
    * @param tableName name of table
    * @param columnFamily new column family descriptor to use
    * @throws IOException if a remote or network exception occurs
+   * @return the result of the async modify column family. You can use Future.get(long, TimeUnit) to
+   *         wait on the operation to complete.
    */
-  void modifyColumnFamily(final TableName tableName, final HColumnDescriptor columnFamily)
+  Future<Void> modifyColumnFamily(final TableName tableName, final HColumnDescriptor columnFamily)
       throws IOException;
 
 
@@ -845,13 +867,13 @@ public interface Admin extends Abortable, Closeable {
   /**
    * Merge two regions. Asynchronous operation.
    *
-   * @param encodedNameOfRegionA encoded name of region a
-   * @param encodedNameOfRegionB encoded name of region b
+   * @param nameOfRegionA encoded or full name of region a
+   * @param nameOfRegionB encoded or full name of region b
    * @param forcible true if do a compulsory merge, otherwise we will only merge two adjacent
    * regions
    * @throws IOException
    */
-  void mergeRegions(final byte[] encodedNameOfRegionA, final byte[] encodedNameOfRegionB,
+  void mergeRegions(final byte[] nameOfRegionA, final byte[] nameOfRegionB,
       final boolean forcible) throws IOException;
 
   /**
@@ -943,49 +965,77 @@ public interface Admin extends Abortable, Closeable {
   Configuration getConfiguration();
 
   /**
+   * Create a new namespace. Blocks until namespace has been successfully created or an exception
+   * is thrown.
+   *
+   * @param descriptor descriptor which describes the new namespace
+   */
+  void createNamespace(final NamespaceDescriptor descriptor)
+  throws IOException;
+
+  /**
    * Create a new namespace
    *
    * @param descriptor descriptor which describes the new namespace
-   * @throws IOException
+   * @return the result of the async create namespace operation. Use Future.get(long, TimeUnit) to
+   *  wait on the operation to complete.
    */
-  void createNamespace(final NamespaceDescriptor descriptor)
-      throws IOException;
+  Future<Void> createNamespaceAsync(final NamespaceDescriptor descriptor)
+  throws IOException;
+
+  /**
+   * Modify an existing namespace.  Blocks until namespace has been successfully modified or an
+   * exception is thrown.
+   *
+   * @param descriptor descriptor which describes the new namespace
+   */
+  void modifyNamespace(final NamespaceDescriptor descriptor)
+  throws IOException;
 
   /**
    * Modify an existing namespace
    *
    * @param descriptor descriptor which describes the new namespace
-   * @throws IOException
+   * @return the result of the async modify namespace operation. Use Future.get(long, TimeUnit) to
+   *  wait on the operation to complete.
    */
-  void modifyNamespace(final NamespaceDescriptor descriptor)
-      throws IOException;
+  Future<Void> modifyNamespaceAsync(final NamespaceDescriptor descriptor)
+  throws IOException;
+
+  /**
+   * Delete an existing namespace. Only empty namespaces (no tables) can be removed.
+   * Blocks until namespace has been successfully deleted or an
+   * exception is thrown.
+   *
+   * @param name namespace name
+   */
+  void deleteNamespace(final String name) throws IOException;
 
   /**
    * Delete an existing namespace. Only empty namespaces (no tables) can be removed.
    *
    * @param name namespace name
-   * @throws IOException
+   * @return the result of the async delete namespace operation. Use Future.get(long, TimeUnit) to
+   *  wait on the operation to complete.
    */
-  void deleteNamespace(final String name) throws IOException;
+  Future<Void> deleteNamespaceAsync(final String name) throws IOException;
 
   /**
    * Get a namespace descriptor by name
    *
    * @param name name of namespace descriptor
    * @return A descriptor
-   * @throws IOException
    */
   NamespaceDescriptor getNamespaceDescriptor(final String name)
-      throws IOException;
+  throws IOException;
 
   /**
    * List available namespace descriptors
    *
    * @return List of descriptors
-   * @throws IOException
    */
   NamespaceDescriptor[] listNamespaceDescriptors()
-    throws IOException;
+  throws IOException;
 
   /**
    * Get list of table descriptors by namespace
@@ -1162,9 +1212,8 @@ public interface Admin extends Abortable, Closeable {
       throws IOException, SnapshotCreationException, IllegalArgumentException;
 
   /**
-   * public void snapshot(final String snapshotName, Create a timestamp consistent snapshot for the
-   * given table. final byte[] tableName) throws IOException, Snapshots are considered unique based
-   * on <b>the name of the snapshot</b>. Attempts to take a snapshot with the same name (even a
+   * Create a timestamp consistent snapshot for the given table. Snapshots are considered unique
+   * based on <b>the name of the snapshot</b>. Attempts to take a snapshot with the same name (even
    * different type or with different parameters) will fail with a {@link SnapshotCreationException}
    * indicating the duplicate naming. Snapshot names follow the same naming constraints as tables in
    * HBase.

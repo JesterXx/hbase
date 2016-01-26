@@ -51,7 +51,7 @@ String framed = conf.get("hbase.regionserver.thrift.framed", "false");
 
   <body>
   <div class="navbar  navbar-fixed-top navbar-default">
-      <div class="container">
+      <div class="container-fluid">
           <div class="navbar-header">
               <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
                   <span class="icon-bar"></span>
@@ -75,7 +75,7 @@ String framed = conf.get("hbase.regionserver.thrift.framed", "false");
       </div>
     </div>
 
-<div class="container">
+<div class="container-fluid content">
     <div class="row inner_header">
         <div class="page-header">
             <h1>ThriftServer <small><%= listenPort %></small></h1>
@@ -126,7 +126,7 @@ String framed = conf.get("hbase.regionserver.thrift.framed", "false");
     </div>
     <div class="row">
         <section>
-            <a href="http://wiki.apache.org/hadoop/Hbase/ThriftApi">Apache HBase Wiki on Thrift</a>
+            <a href="http://hbase.apache.org/book.html#_thrift">Apache HBase Reference Guide chapter on Thrift</a>
         </section>
     </div>
 </div>

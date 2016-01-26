@@ -107,4 +107,18 @@ public interface MetricsMasterWrapper {
    */
   int getNumDeadRegionServers();
 
+  /**
+   * Get the number of master WAL files.
+   */
+  long getNumWALFiles();
+
+  /**
+   * Get the number of region split plans executed.
+   */
+  long getSplitPlanCount();
+
+  /**
+   * Get the number of region merge plans executed.
+   */
+  long getMergePlanCount();
 }

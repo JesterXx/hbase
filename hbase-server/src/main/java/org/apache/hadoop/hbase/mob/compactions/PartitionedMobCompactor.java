@@ -32,6 +32,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HColumnDescriptor;
@@ -67,6 +68,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFile.Writer;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
+import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
@@ -111,8 +113,8 @@ public class PartitionedMobCompactor extends MobCompactor {
     Configuration copyOfConf = new Configuration(conf);
     copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
     compactionCacheConfig = new CacheConfig(copyOfConf);
-    tableNameTag = new Tag(TagType.MOB_TABLE_NAME_TAG_TYPE, tableName.getName());
-    cryptoContext = MobUtils.createEncryptionContext(copyOfConf, column);
+    tableNameTag = new ArrayBackedTag(TagType.MOB_TABLE_NAME_TAG_TYPE, tableName.getName());
+    cryptoContext = EncryptionUtil.createEncryptionContext(copyOfConf, column);
   }
 
   @Override
@@ -457,7 +459,7 @@ public class PartitionedMobCompactor extends MobCompactor {
     Scan scan = new Scan();
     scan.setMaxVersions(column.getMaxVersions());
     long ttl = HStore.determineTTLFromFamily(column);
-    ScanInfo scanInfo = new ScanInfo(column, ttl, 0, CellComparator.COMPARATOR);
+    ScanInfo scanInfo = new ScanInfo(conf, column, ttl, 0, CellComparator.COMPARATOR);
     StoreScanner scanner = new StoreScanner(scan, scanInfo, scanType, null, scanners, 0L,
       HConstants.LATEST_TIMESTAMP);
     return scanner;

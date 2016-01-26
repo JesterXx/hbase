@@ -19,11 +19,37 @@
 
 package org.apache.hadoop.hbase.ipc;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.protobuf.Descriptors.MethodDescriptor;
-import com.google.protobuf.Message;
-import com.google.protobuf.Message.Builder;
-import com.google.protobuf.RpcCallback;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.security.PrivilegedExceptionAction;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.net.SocketFactory;
+import javax.security.sasl.SaslException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -70,37 +96,11 @@ import org.apache.htrace.Span;
 import org.apache.htrace.Trace;
 import org.apache.htrace.TraceScope;
 
-import javax.net.SocketFactory;
-import javax.security.sasl.SaslException;
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.Closeable;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InterruptedIOException;
-import java.io.OutputStream;
-import java.net.ConnectException;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.net.SocketAddress;
-import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
-import java.security.PrivilegedExceptionAction;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.Descriptors.MethodDescriptor;
+import com.google.protobuf.Message;
+import com.google.protobuf.Message.Builder;
+import com.google.protobuf.RpcCallback;
 
 /**
  * Does RPC against a cluster.  Manages connections per regionserver in the cluster.
@@ -383,7 +383,7 @@ public class RpcClientImpl extends AbstractRpcClient {
       }
     }
 
-    private UserInformation getUserInfo(UserGroupInformation ugi) {
+    private synchronized UserInformation getUserInfo(UserGroupInformation ugi) {
       if (ugi == null || authMethod == AuthMethod.DIGEST) {
         // Don't send user for token auth
         return null;
@@ -792,7 +792,7 @@ public class RpcClientImpl extends AbstractRpcClient {
     }
 
     /**
-     * Write the RPC header: <MAGIC WORD -- 'HBas'> <ONEBYTE_VERSION> <ONEBYTE_AUTH_TYPE>
+     * Write the RPC header: {@code <MAGIC WORD -- 'HBas'> <ONEBYTE_VERSION> <ONEBYTE_AUTH_TYPE>}
      */
     private void writeConnectionHeaderPreamble(OutputStream outStream) throws IOException {
       // Assemble the preamble up in a buffer first and then send it.  Writing individual elements,
@@ -804,7 +804,9 @@ public class RpcClientImpl extends AbstractRpcClient {
       byte [] preamble = new byte [rpcHeaderLen + 2];
       System.arraycopy(HConstants.RPC_HEADER, 0, preamble, 0, rpcHeaderLen);
       preamble[rpcHeaderLen] = HConstants.RPC_CURRENT_VERSION;
-      preamble[rpcHeaderLen + 1] = authMethod.code;
+      synchronized (this) {
+        preamble[rpcHeaderLen + 1] = authMethod.code;
+      }
       outStream.write(preamble);
       outStream.flush();
     }
@@ -880,6 +882,8 @@ public class RpcClientImpl extends AbstractRpcClient {
      * threads.
      * @see #readResponse()
      */
+    @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="IS2_INCONSISTENT_SYNC",
+        justification="Findbugs is misinterpreting locking missing fact that this.outLock is held")
     private void writeRequest(Call call, final int priority, Span span) throws IOException {
       RequestHeader.Builder builder = RequestHeader.newBuilder();
       builder.setCallId(call.id);
@@ -913,8 +917,8 @@ public class RpcClientImpl extends AbstractRpcClient {
         checkIsOpen(); // Now we're checking that it didn't became idle in between.
 
         try {
-          call.callStats.setRequestSizeBytes(
-              IPCUtil.write(this.out, header, call.param, cellBlock));
+          call.callStats.setRequestSizeBytes(IPCUtil.write(this.out, header, call.param,
+              cellBlock));
         } catch (IOException e) {
           // We set the value inside the synchronized block, this way the next in line
           //  won't even try to write. Otherwise we might miss a call in the calls map?
@@ -926,19 +930,24 @@ public class RpcClientImpl extends AbstractRpcClient {
 
       // call close outside of the synchronized (outLock) to prevent deadlock - HBASE-14474
       if (writeException != null) {
-        if (markClosed(writeException)) {
-          close();
-        }
+        markClosed(writeException);
+        close();
       }
 
       // We added a call, and may be started the connection close. In both cases, we
       //  need to notify the reader.
-      synchronized (this) {
-        notifyAll();
-      }
+      doNotify();
 
       // Now that we notified, we can rethrow the exception if any. Otherwise we're good.
       if (writeException != null) throw writeException;
+    }
+
+    @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="NN_NAKED_NOTIFY",
+        justification="Presume notifyAll is because we are closing/shutting down")
+    private synchronized void doNotify() {
+      // Make a separate method so can do synchronize and add findbugs annotation; only one
+      // annotation at at time in source 1.7.
+      notifyAll(); // Findbugs: NN_NAKED_NOTIFY
     }
 
     /* Receive a response.
@@ -1266,36 +1275,6 @@ public class RpcClientImpl extends AbstractRpcClient {
     return new Pair<Message, CellScanner>(call.response, call.cells);
   }
 
-
-  /**
-   * Take an IOException and the address we were trying to connect to
-   * and return an IOException with the input exception as the cause.
-   * The new exception provides the stack trace of the place where
-   * the exception is thrown and some extra diagnostics information.
-   * If the exception is ConnectException or SocketTimeoutException,
-   * return a new one of the same type; Otherwise return an IOException.
-   *
-   * @param addr target address
-   * @param exception the relevant exception
-   * @return an exception to throw
-   */
-  protected IOException wrapException(InetSocketAddress addr,
-                                         IOException exception) {
-    if (exception instanceof ConnectException) {
-      //connection refused; include the host:port in the error
-      return (ConnectException)new ConnectException(
-         "Call to " + addr + " failed on connection exception: " + exception).initCause(exception);
-    } else if (exception instanceof SocketTimeoutException) {
-      return (SocketTimeoutException)new SocketTimeoutException("Call to " + addr +
-        " failed because " + exception).initCause(exception);
-    } else if (exception instanceof ConnectionClosingException){
-      return (ConnectionClosingException) new ConnectionClosingException(
-          "Call to " + addr + " failed on local exception: " + exception).initCause(exception);
-    } else {
-      return (IOException)new IOException("Call to " + addr + " failed on local exception: " +
-        exception).initCause(exception);
-    }
-  }
 
   /**
    * Interrupt the connections to the given ip:port server. This should be called if the server

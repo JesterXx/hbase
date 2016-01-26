@@ -28,7 +28,6 @@ import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Table;
@@ -94,10 +93,10 @@ public class TestZooKeeperScanPolicyObserver {
 
     long ts = now - 2000;
     Put p = new Put(R);
-    p.add(F, Q, ts, Q);
+    p.addColumn(F, Q, ts, Q);
     t.put(p);
     p = new Put(R);
-    p.add(F, Q, ts+1, Q);
+    p.addColumn(F, Q, ts + 1, Q);
     t.put(p);
 
     // these two should be expired but for the override

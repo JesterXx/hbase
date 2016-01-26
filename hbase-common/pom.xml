@@ -53,6 +53,10 @@
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-remote-resources-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-site-plugin</artifactId>
         <configuration>
           <skip>true</skip>
@@ -74,11 +78,6 @@
               <target>
                 <replace file="${project.build.outputDirectory}/hbase-default.xml"
                   token="@@@VERSION@@@" value="${project.version}" />
-                <mkdir dir="${project.build.directory}/nativelib"/>
-                <exec executable="tar" dir="${project.build.directory}/nativelib" failonerror="false">
-                  <arg value="xf"/>
-                  <arg value="hadoop-snappy-nativelibs.tar"/>
-                </exec>
               </target>
             </configuration>
             <goals>
@@ -153,11 +152,9 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-source-plugin</artifactId>
           <configuration>
-            <excludeResources>true</excludeResources>
-            <includes>
-              <include>src/main/java</include>
-              <include>${project.build.outputDirectory}/META-INF</include>
-            </includes>
+            <excludes>
+              <exclude>hbase-default.xml</exclude>
+            </excludes>
           </configuration>
         </plugin>
     </plugins>

@@ -89,8 +89,8 @@ GIT is our repository of record for all but the Apache HBase website.
 We used to be on SVN.
 We migrated.
 See link:https://issues.apache.org/jira/browse/INFRA-7768[Migrate Apache HBase SVN Repos to Git].
-Updating hbase.apache.org still requires use of SVN (See <<hbase.org,hbase.org>>). See link:http://hbase.apache.org/source-repository.html[Source Code
-                Management] page for contributor and committer links or seach for HBase on the link:http://git.apache.org/[Apache Git] page.
+See link:http://hbase.apache.org/source-repository.html[Source Code
+                Management] page for contributor and committer links or search for HBase on the link:http://git.apache.org/[Apache Git] page.
 
 == IDEs
 
@@ -133,7 +133,7 @@ If you cloned the project via git, download and install the Git plugin (EGit). A
 ==== HBase Project Setup in Eclipse using `m2eclipse`
 
 The easiest way is to use the +m2eclipse+ plugin for Eclipse.
-Eclipse Indigo or newer includes +m2eclipse+, or you can download it from link:http://www.eclipse.org/m2e//. It provides Maven integration for Eclipse, and even lets you use the direct Maven commands from within Eclipse to compile and test your project.
+Eclipse Indigo or newer includes +m2eclipse+, or you can download it from http://www.eclipse.org/m2e/. It provides Maven integration for Eclipse, and even lets you use the direct Maven commands from within Eclipse to compile and test your project.
 
 To import the project, click  and select the HBase root directory. `m2eclipse`                    locates all the hbase modules for you.
 
@@ -146,7 +146,7 @@ If you install +m2eclipse+ and import HBase in your workspace, do the following 
 ----
 Failed to execute goal
 org.apache.maven.plugins:maven-antrun-plugin:1.6:run (default) on project hbase:
-'An Ant BuildException has occured: Replace: source file .../target/classes/hbase-default.xml
+'An Ant BuildException has occurred: Replace: source file .../target/classes/hbase-default.xml
 doesn't exist
 ----
 +
@@ -213,7 +213,7 @@ For additional information on setting up Eclipse for HBase development on Window
 
 === IntelliJ IDEA
 
-You can set up IntelliJ IDEA for similar functinoality as Eclipse.
+You can set up IntelliJ IDEA for similar functionality as Eclipse.
 Follow these steps.
 
 . Select
@@ -227,7 +227,7 @@ Using the Eclipse Code Formatter plugin for IntelliJ IDEA, you can import the HB
 
 === Other IDEs
 
-It would be userful to mirror the <<eclipse,eclipse>> set-up instructions for other IDEs.
+It would be useful to mirror the <<eclipse,eclipse>> set-up instructions for other IDEs.
 If you would like to assist, please have a look at link:https://issues.apache.org/jira/browse/HBASE-11704[HBASE-11704].
 
 [[build]]
@@ -331,13 +331,13 @@ Tests may not all pass so you may need to pass `-DskipTests` unless you are incl
 ====
 You will see ERRORs like the above title if you pass the _default_ profile; e.g.
 if you pass +hadoop.profile=1.1+ when building 0.96 or +hadoop.profile=2.0+ when building hadoop 0.98; just drop the hadoop.profile stipulation in this case to get your build to run again.
-This seems to be a maven pecularity that is probably fixable but we've not spent the time trying to figure it.
+This seems to be a maven peculiarity that is probably fixable but we've not spent the time trying to figure it.
 ====
 
 Similarly, for 3.0, you would just replace the profile value.
-Note that Hadoop-3.0.0-SNAPSHOT does not currently have a deployed maven artificat - you will need to build and install your own in your local maven repository if you want to run against this profile.
+Note that Hadoop-3.0.0-SNAPSHOT does not currently have a deployed maven artifact - you will need to build and install your own in your local maven repository if you want to run against this profile.
 
-In earilier versions of Apache HBase, you can build against older versions of Apache Hadoop, notably, Hadoop 0.22.x and 0.23.x.
+In earlier versions of Apache HBase, you can build against older versions of Apache Hadoop, notably, Hadoop 0.22.x and 0.23.x.
 If you are running, for example HBase-0.94 and wanted to build against Hadoop 0.23.x, you would run with:
 
 [source,bourne]
@@ -415,15 +415,9 @@ mvn -DskipTests package assembly:single deploy
 ==== Build Gotchas
 
 If you see `Unable to find resource 'VM_global_library.vm'`, ignore it.
-Its not an error.
+It's not an error.
 It is link:http://jira.codehaus.org/browse/MSITE-286[officially
                         ugly] though.
-
-[[build.snappy]]
-==== Building in snappy compression support
-
-Pass `-Psnappy` to trigger the `hadoop-snappy` maven profile for building Google Snappy native libraries into HBase.
-See also <<snappy.compression.installation,snappy.compression.installation>>
 
 [[releasing]]
 == Releasing Apache HBase
@@ -510,7 +504,7 @@ For building earlier versions, the process is different.
 See this section under the respective release documentation folders.
 
 .Point Releases
-If you are making a point release (for example to quickly address a critical incompatability or security problem) off of a release branch instead of a development branch, the tagging instructions are slightly different.
+If you are making a point release (for example to quickly address a critical incompatibility or security problem) off of a release branch instead of a development branch, the tagging instructions are slightly different.
 I'll prefix those special steps with _Point Release Only_.
 
 .Before You Begin
@@ -522,7 +516,7 @@ You should also have tried recent branch tips out on a cluster under load, perha
 [NOTE]
 ====
 At this point you should tag the previous release branch (ex: 0.96.1) with the new point release tag (e.g.
-0.96.1.1 tag). Any commits with changes for the point release should be appled to the new tag.
+0.96.1.1 tag). Any commits with changes for the point release should be applied to the new tag.
 ====
 
 The Hadoop link:http://wiki.apache.org/hadoop/HowToRelease[How To
@@ -570,7 +564,8 @@ Checkin the _CHANGES.txt_ and any version changes.
 . Update the documentation.
 +
 Update the documentation under _src/main/asciidoc_.
-This usually involves copying the latest from master and making version-particular adjustments to suit this release candidate version. 
+This usually involves copying the latest from master and making version-particular
+adjustments to suit this release candidate version.
 
 . Build the source tarball.
 +
@@ -589,8 +584,8 @@ $ mvn clean install -DskipTests assembly:single -Dassembly.file=hbase-assembly/s
 Extract the tarball and make sure it looks good.
 A good test for the src tarball being 'complete' is to see if you can build new tarballs from this source bundle.
 If the source tarball is good, save it off to a _version directory_, a directory somewhere where you are collecting all of the tarballs you will publish as part of the release candidate.
-For example if you were building a hbase-0.96.0 release candidate, you might call the directory _hbase-0.96.0RC0_.
-Later you will publish this directory as our release candidate up on http://people.apache.org/~YOU.
+For example if you were building an hbase-0.96.0 release candidate, you might call the directory _hbase-0.96.0RC0_.
+Later you will publish this directory as our release candidate up on pass:[http://people.apache.org/~YOU].
 
 . Build the binary tarball.
 +
@@ -616,7 +611,8 @@ $ mvn install -DskipTests site assembly:single -Prelease
 ----
 
 +
-Otherwise, the build complains that hbase modules are not in the maven repository when you try to do it at once, especially on fresh repository.
+Otherwise, the build complains that hbase modules are not in the maven repository
+when you try to do it at once, especially on fresh repository.
 It seems that you need the install goal in both steps.
 +
 Extract the generated tarball and check it out.
@@ -771,24 +767,7 @@ See <<appendix_contributing_to_documentation,appendix contributing to documentat
 [[hbase.org.site.publishing]]
 === Publishing link:http://hbase.apache.org[hbase.apache.org]
 
-As of link:https://issues.apache.org/jira/browse/INFRA-5680[INFRA-5680 Migrate apache hbase website], to publish the website, build it using Maven, and then deploy it over a checkout of _https://svn.apache.org/repos/asf/hbase/hbase.apache.org/trunk_                and check in your changes.
-The script _dev-scripts/publish_hbase_website.sh_ is provided to automate this process and to be sure that stale files are removed from SVN.
-Review the script even if you decide to publish the website manually.
-Use the script as follows:
-
-----
-$ publish_hbase_website.sh -h
-Usage: publish_hbase_website.sh [-i | -a] [-g <dir>] [-s <dir>]
- -h          Show this message
- -i          Prompts the user for input
- -a          Does not prompt the user. Potentially dangerous.
- -g          The local location of the HBase git repository
- -s          The local location of the HBase svn checkout
- Either --interactive or --silent is required.
- Edit the script to set default Git and SVN directories.
-----
-
-NOTE: The SVN commit takes a long time.
+See <<website_publish>> for instructions on publishing the website and documentation.
 
 [[hbase.tests]]
 == Tests
@@ -1167,7 +1146,7 @@ However, maven will do this for us; just use: +mvn
 
 This is very similar to how you specify running a subset of unit tests (see above), but use the property `it.test` instead of `test`.
 To just run `IntegrationTestClassXYZ.java`, use: +mvn
-                            failsafe:integration-test -Dit.test=IntegrationTestClassXYZ+                        The next thing you might want to do is run groups of integration tests, say all integration tests that are named IntegrationTestClassX*.java: +mvn failsafe:integration-test -Dit.test=*ClassX*+ This runs everything that is an integration test that matches *ClassX*. This means anything matching: "**/IntegrationTest*ClassX*". You can also run multiple groups of integration tests using comma-delimited lists (similar to unit tests). Using a list of matches still supports full regex matching for each of the groups.This would look something like: +mvn
+                            failsafe:integration-test -Dit.test=IntegrationTestClassXYZ+                        The next thing you might want to do is run groups of integration tests, say all integration tests that are named IntegrationTestClassX*.java: +mvn failsafe:integration-test -Dit.test=*ClassX*+ This runs everything that is an integration test that matches *ClassX*. This means anything matching: "**/IntegrationTest*ClassX*". You can also run multiple groups of integration tests using comma-delimited lists (similar to unit tests). Using a list of matches still supports full regex matching for each of the groups. This would look something like: +mvn
                             failsafe:integration-test -Dit.test=*ClassX*, *ClassY+
 
 [[maven.build.commands.integration.tests.distributed]]
@@ -1202,16 +1181,20 @@ _/etc/init.d/_ scripts are not supported for now, but it can be easily added.
 For other deployment options, a ClusterManager can be implemented and plugged in.
 
 [[maven.build.commands.integration.tests.destructive]]
-==== Destructive integration / system tests
+==== Destructive integration / system tests (ChaosMonkey)
 
-In 0.96, a tool named `ChaosMonkey` has been introduced.
-It is modeled after the link:http://techblog.netflix.com/2012/07/chaos-monkey-released-into-wild.html[same-named tool by Netflix].
-Some of the tests use ChaosMonkey to simulate faults in the running cluster in the way of killing random servers, disconnecting servers, etc.
-ChaosMonkey can also be used as a stand-alone tool to run a (misbehaving) policy while you are running other tests.
+HBase 0.96 introduced a tool named `ChaosMonkey`, modeled after
+link:http://techblog.netflix.com/2012/07/chaos-monkey-released-into-wild.html[same-named tool by Netflix's Chaos Monkey tool].
+ChaosMonkey simulates real-world
+faults in a running cluster by killing or disconnecting random servers, or injecting
+other failures into the environment. You can use ChaosMonkey as a stand-alone tool
+to run a policy while other tests are running. In some environments, ChaosMonkey is
+always running, in order to constantly check that high availability and fault tolerance
+are working as expected.
 
-ChaosMonkey defines Action's and Policy's.
-Actions are sequences of events.
-We have at least the following actions:
+ChaosMonkey defines *Actions* and *Policies*.
+
+Actions:: Actions are predefined sequences of events, such as the following:
 
 * Restart active master (sleep 5 sec)
 * Restart random regionserver (sleep 5 sec)
@@ -1221,23 +1204,17 @@ We have at least the following actions:
 * Batch restart of 50% of regionservers (sleep 5 sec)
 * Rolling restart of 100% of regionservers (sleep 5 sec)
 
-Policies on the other hand are responsible for executing the actions based on a strategy.
-The default policy is to execute a random action every minute based on predefined action weights.
-ChaosMonkey executes predefined named policies until it is stopped.
-More than one policy can be active at any time.
+Policies:: A policy is a strategy for executing one or more actions. The default policy
+executes a random action every minute based on predefined action weights.
+A given policy will be executed until ChaosMonkey is interrupted.
 
-To run ChaosMonkey as a standalone tool deploy your HBase cluster as usual.
-ChaosMonkey uses the configuration from the bin/hbase script, thus no extra configuration needs to be done.
-You can invoke the ChaosMonkey by running:
+Most ChaosMonkey actions are configured to have reasonable defaults, so you can run
+ChaosMonkey against an existing cluster without any additional configuration. The
+following example runs ChaosMonkey with the default configuration:
 
-[source,bourne]
+[source,bash]
 ----
-bin/hbase org.apache.hadoop.hbase.util.ChaosMonkey
-----
-
-This will output something like:
-
-----
+$ bin/hbase org.apache.hadoop.hbase.util.ChaosMonkey
 
 12/11/19 23:21:57 INFO util.ChaosMonkey: Using ChaosMonkey Policy: class org.apache.hadoop.hbase.util.ChaosMonkey$PeriodicRandomActionPolicy, period:60000
 12/11/19 23:21:57 INFO util.ChaosMonkey: Sleeping for 26953 to add jitter
@@ -1276,37 +1253,73 @@ This will output something like:
 12/11/19 23:24:27 INFO util.ChaosMonkey: Started region server:rs3.example.com,60020,1353367027826. Reported num of rs:6
 ----
 
-As you can see from the log, ChaosMonkey started the default PeriodicRandomActionPolicy, which is configured with all the available actions, and ran RestartActiveMaster and RestartRandomRs actions.
-ChaosMonkey tool, if run from command line, will keep on running until the process is killed.
+The output indicates that ChaosMonkey started the default `PeriodicRandomActionPolicy`
+policy, which is configured with all the available actions. It chose to run `RestartActiveMaster` and `RestartRandomRs` actions.
+
+==== Available Policies
+HBase ships with several ChaosMonkey policies, available in the
+`hbase/hbase-it/src/test/java/org/apache/hadoop/hbase/chaos/policies/` directory.
 
 [[chaos.monkey.properties]]
-==== Passing individual Chaos Monkey per-test Settings/Properties
+==== Configuring Individual ChaosMonkey Actions
 
-Since HBase version 1.0.0 (link:https://issues.apache.org/jira/browse/HBASE-11348[HBASE-11348]), the chaos monkeys is used to run integration tests can be configured per test run.
-Users can create a java properties file and and pass this to the chaos monkey with timing configurations.
-The properties file needs to be in the HBase classpath.
-The various properties that can be configured and their default values can be found listed in the `org.apache.hadoop.hbase.chaos.factories.MonkeyConstants`                    class.
-If any chaos monkey configuration is missing from the property file, then the default values are assumed.
-For example:
+Since HBase version 1.0.0 (link:https://issues.apache.org/jira/browse/HBASE-11348[HBASE-11348]),
+ChaosMonkey integration tests can be configured per test run.
+Create a Java properties file in the HBase classpath and pass it to ChaosMonkey using
+the `-monkeyProps` configuration flag. Configurable properties, along with their default
+values if applicable, are listed in the `org.apache.hadoop.hbase.chaos.factories.MonkeyConstants`
+class. For properties that have defaults, you can override them by including them
+in your properties file.
+
+The following example uses a properties file called <<monkey.properties,monkey.properties>>.
 
 [source,bourne]
 ----
-
-$bin/hbase org.apache.hadoop.hbase.IntegrationTestIngest -m slowDeterministic -monkeyProps monkey.properties
+$ bin/hbase org.apache.hadoop.hbase.IntegrationTestIngest -m slowDeterministic -monkeyProps monkey.properties
 ----
 
 The above command will start the integration tests and chaos monkey passing the properties file _monkey.properties_.
 Here is an example chaos monkey file:
 
+[[monkey.properties]]
+.Example ChaosMonkey Properties File
 [source]
 ----
-
 sdm.action1.period=120000
 sdm.action2.period=40000
 move.regions.sleep.time=80000
 move.regions.max.time=1000000
 move.regions.sleep.time=80000
 batch.restart.rs.ratio=0.4f
+----
+
+HBase 1.0.2 and newer adds the ability to restart HBase's underlying ZooKeeper quorum or
+HDFS nodes. To use these actions, you need to configure some new properties, which
+have no reasonable defaults because they are deployment-specific, in your ChaosMonkey
+properties file, which may be `hbase-site.xml` or a different properties file.
+
+[source,xml]
+----
+<property>
+  <name>hbase.it.clustermanager.hadoop.home</name>
+  <value>$HADOOP_HOME</value>
+</property>
+<property>
+  <name>hbase.it.clustermanager.zookeeper.home</name>
+  <value>$ZOOKEEPER_HOME</value>
+</property>
+<property>
+  <name>hbase.it.clustermanager.hbase.user</name>
+  <value>hbase</value>
+</property>
+<property>
+  <name>hbase.it.clustermanager.hadoop.hdfs.user</name>
+  <value>hdfs</value>
+</property>
+<property>
+  <name>hbase.it.clustermanager.zookeeper.user</name>
+  <value>zookeeper</value>
+</property>
 ----
 
 [[developing]]
@@ -1332,6 +1345,10 @@ NOTE: End-of-life releases are not included in this list.
 |===
 | Release
 | Release Manager
+
+| 0.94
+| Lars Hofhansl
+
 | 0.98
 | Andrew Purtell
 
@@ -1592,7 +1609,7 @@ All are subject to challenge of course but until then, please hold to the rules 
 
 ZooKeeper state should transient (treat it like memory). If ZooKeeper state is deleted, hbase should be able to recover and essentially be in the same state.
 
-* .ExceptionsThere are currently a few exceptions that we need to fix around whether a table is enabled or disabled.
+* .Exceptions: There are currently a few exceptions that we need to fix around whether a table is enabled or disabled.
 * Replication data is currently stored only in ZooKeeper.
   Deleting ZooKeeper data related to replication may cause replication to be disabled.
   Do not delete the replication tree, _/hbase/replication/_.
@@ -1854,9 +1871,9 @@ If the push fails for any reason, fix the problem or ask for help.
 Do not do a +git push --force+.
 +
 Before you can commit a patch, you need to determine how the patch was created.
-The instructions and preferences around the way to create patches have changed, and there will be a transition periond.
+The instructions and preferences around the way to create patches have changed, and there will be a transition period.
 +
-* .Determine How a Patch Was CreatedIf the first few lines of the patch look like the headers of an email, with a From, Date, and Subject, it was created using +git format-patch+.
+* .Determine How a Patch Was Created: If the first few lines of the patch look like the headers of an email, with a From, Date, and Subject, it was created using +git format-patch+.
   This is the preference, because you can reuse the submitter's commit message.
   If the commit message is not appropriate, you can still use the commit, then run the command +git
   rebase -i origin/master+, and squash and reword as appropriate.
@@ -1959,7 +1976,7 @@ When the amending author is different from the original committer, add notice of
                                 from master to branch].
 
 [[committer.tests]]
-====== Committers are responsible for making sure commits do not break thebuild or tests
+====== Committers are responsible for making sure commits do not break the build or tests
 
 If a committer commits a patch, it is their responsibility to make sure it passes the test suite.
 It is helpful if contributors keep an eye out that their patch does not break the hbase build and/or tests, but ultimately, a contributor cannot be expected to be aware of all the particular vagaries and interconnections that occur in a project like HBase.

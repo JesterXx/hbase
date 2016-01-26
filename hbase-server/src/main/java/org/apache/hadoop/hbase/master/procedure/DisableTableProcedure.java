@@ -36,7 +36,6 @@ import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.constraint.ConstraintException;
-import org.apache.hadoop.hbase.executor.EventType;
 import org.apache.hadoop.hbase.master.AssignmentManager;
 import org.apache.hadoop.hbase.master.BulkAssigner;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
@@ -215,15 +214,13 @@ public class DisableTableProcedure
 
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
-    if (!env.isInitialized()) return false;
-    return env.getProcedureQueue().tryAcquireTableExclusiveLock(
-      tableName,
-      EventType.C_M_DISABLE_TABLE.toString());
+    if (env.waitInitialized(this)) return false;
+    return env.getProcedureQueue().tryAcquireTableExclusiveLock(this, tableName);
   }
 
   @Override
   protected void releaseLock(final MasterProcedureEnv env) {
-    env.getProcedureQueue().releaseTableExclusiveLock(tableName);
+    env.getProcedureQueue().releaseTableExclusiveLock(this, tableName);
   }
 
   @Override
