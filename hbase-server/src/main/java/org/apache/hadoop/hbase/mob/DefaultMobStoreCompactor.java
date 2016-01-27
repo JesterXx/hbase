@@ -257,11 +257,13 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
       } while (hasMore);
     } finally {
       if (mobFileWriter != null) {
-        mobFileWriter.appendMetadata(fd.maxSeqId, major, mobCells);
+        mobFileWriter.appendMetadata(fd.maxSeqId, major, mobCells, mobStore.getRegionInfo()
+          .getStartKey());
         mobFileWriter.close();
       }
       if (delFileWriter != null) {
-        delFileWriter.appendMetadata(fd.maxSeqId, major, deleteMarkersCount);
+        delFileWriter.appendMetadata(fd.maxSeqId, major, deleteMarkersCount, mobStore
+          .getRegionInfo().getStartKey());
         delFileWriter.close();
       }
     }

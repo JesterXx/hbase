@@ -201,7 +201,8 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
       } while (hasMore);
     } finally {
       status.setStatus("Flushing mob file " + store + ": appending metadata");
-      mobFileWriter.appendMetadata(cacheFlushId, false, mobCount);
+      mobFileWriter.appendMetadata(cacheFlushId, false, mobCount, mobStore.getRegionInfo()
+        .getStartKey());
       status.setStatus("Flushing mob file " + store + ": closing flushed file");
       mobFileWriter.close();
     }

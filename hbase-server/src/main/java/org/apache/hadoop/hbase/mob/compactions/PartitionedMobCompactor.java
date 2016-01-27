@@ -37,6 +37,7 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
@@ -70,7 +71,6 @@ import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
 
 /**
@@ -91,13 +91,15 @@ public class PartitionedMobCompactor extends MobCompactor {
   private CacheConfig compactionCacheConfig;
   private Tag tableNameTag;
   private Encryption.Context cryptoContext = Encryption.Context.NONE;
-  private String startKeyAsString;
   private PartitionedMobCompactionRequest request;
+  private Map<String, byte[]> prefixAndKeys;
+  private HRegionInfo regionInfo;
 
   public PartitionedMobCompactor(RegionServerServices rss, Region region, TableName tableName,
-    HColumnDescriptor column) throws IOException {
+    HColumnDescriptor column, Map<String, byte[]> prefixAndKeys) throws IOException {
     super(rss, region, tableName, column);
-    this.startKeyAsString = MD5Hash.getMD5AsHex(region.getRegionInfo().getStartKey());
+    this.prefixAndKeys = prefixAndKeys;
+    regionInfo = region.getRegionInfo();
     mergeableSize = conf.getLong(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD,
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
@@ -208,11 +210,12 @@ public class PartitionedMobCompactor extends MobCompactor {
 
   /**
    * Gets whether the start key is owned by the current region.
-   * @param startKey The current start key.
+   * @param prefix The prefix of the mob file name.
    * @return True if the start key is owned by the current region.
    */
-  private boolean isOwnByRegion(String startKey) {
-    return startKeyAsString.equals(startKey);
+  private boolean isOwnByRegion(String prefix) {
+    byte[] startKey = prefixAndKeys.get(prefix);
+    return regionInfo.containsRow(startKey);
   }
 
   /**
@@ -388,7 +391,7 @@ public class PartitionedMobCompactor extends MobCompactor {
     Path refFilePath = null;
     long mobCells = 0;
     try {
-      writer = MobUtils.createWriter(rss, region.getRegionInfo().getEncodedName(), conf, fs,
+      writer = MobUtils.createWriter(rss, regionInfo.getEncodedName(), conf, fs,
         column, partition.getPartitionId().getDate(), tempPath, Long.MAX_VALUE,
         column.getCompactionCompression(), partition.getPartitionId().getStartKey(),
         compactionCacheConfig, cryptoContext);
@@ -418,7 +421,7 @@ public class PartitionedMobCompactor extends MobCompactor {
       // close the scanner.
       scanner.close();
       // append metadata to the mob file, and close the mob file writer.
-      closeMobFileWriter(writer, fileInfo.getFirst(), mobCells);
+      closeMobFileWriter(writer, fileInfo.getFirst(), mobCells, regionInfo.getStartKey());
       // append metadata and bulkload info to the ref mob file, and close the writer.
       closeRefFileWriter(refFileWriter, fileInfo.getFirst(), request.selectionTime);
     }
@@ -493,12 +496,13 @@ public class PartitionedMobCompactor extends MobCompactor {
    * @param writer The mob file writer.
    * @param maxSeqId Maximum sequence id.
    * @param mobCellsCount The number of mob cells.
+   * @param startKey The start key of the region where the mob file comes from.
    * @throws IOException
    */
-  private void closeMobFileWriter(Writer writer, long maxSeqId, long mobCellsCount)
+  private void closeMobFileWriter(Writer writer, long maxSeqId, long mobCellsCount, byte[] startKey)
     throws IOException {
     if (writer != null) {
-      writer.appendMetadata(maxSeqId, false, mobCellsCount);
+      writer.appendMetadata(maxSeqId, false, mobCellsCount, startKey);
       try {
         writer.close();
       } catch (IOException e) {

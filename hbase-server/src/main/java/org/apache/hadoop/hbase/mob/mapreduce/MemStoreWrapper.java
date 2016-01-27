@@ -148,7 +148,8 @@ public class MemStoreWrapper {
     scanner.close();
     // Write out the log sequence number that corresponds to this output
     // hfile. The hfile is current up to and including logCacheFlushId.
-    mobFileWriter.appendMetadata(Long.MAX_VALUE, false, snapshot.getCellsCount());
+    mobFileWriter.appendMetadata(Long.MAX_VALUE, false, snapshot.getCellsCount(),
+      HConstants.EMPTY_START_ROW);
     mobFileWriter.close();
 
     MobUtils.commitFile(conf, fs, mobFileWriter.getPath(), mobFamilyDir, cacheConfig);
