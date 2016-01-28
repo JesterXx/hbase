@@ -26,6 +26,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
@@ -81,6 +82,8 @@ import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
+import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.util.SortedList;
 import org.apache.hadoop.hbase.util.Threads;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -156,9 +159,6 @@ public class TestMobCompactor {
   @Test(timeout = 300000)
   public void testMinorCompaction() throws Exception {
     resetConf();
-    int mergeSize = 5000;
-    // change the mob compaction merge size
-    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
     // create a table with namespace
     NamespaceDescriptor namespaceDescriptor = NamespaceDescriptor.create("ns").build();
     String tableNameAsString = "ns:testMinorCompaction";
@@ -176,7 +176,10 @@ public class TestMobCompactor {
     assertEquals("Before deleting: mob file count", regionNum * count,
       countFiles(tableName, true, family1));
 
-    int largeFilesCount = countLargeFiles(mergeSize, tableName, family1);
+    Pair<Integer, Long> largerFiles = countLargeFiles(tableName, family1);
+    int largeFilesCount = largerFiles.getFirst();
+    // change the mob compaction merge size
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, largerFiles.getSecond());
     createDelFile(table, tableName, Bytes.toBytes(family1), Bytes.toBytes(qf1));
 
     assertEquals("Before compaction: mob rows count", regionNum * (rowNumPerRegion - delRowNum),
@@ -443,9 +446,6 @@ public class TestMobCompactor {
   @Test
   public void testCompactionWithDelFilesAndNotMergeAllFiles() throws Exception {
     resetConf();
-    int mergeSize = 5000;
-    // change the mob compaction merge size
-    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, mergeSize);
     setUp("testCompactionWithDelFilesAndNotMergeAllFiles");
     int count = 4;
     // generate mob files
@@ -459,7 +459,10 @@ public class TestMobCompactor {
     assertEquals("Before deleting: mob file count", regionNum * count,
       countFiles(tableName, true, family1));
 
-    int largeFilesCount = countLargeFiles(mergeSize, tableName, family1);
+    Pair<Integer, Long> largerFiles = countLargeFiles(tableName, family1);
+    int largeFilesCount = largerFiles.getFirst();
+    // change the mob compaction merge size
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, largerFiles.getSecond());
     createDelFile(table, tableName, Bytes.toBytes(family1), Bytes.toBytes(qf1));
 
     assertEquals("Before compaction: mob rows count", regionNum*(rowNumPerRegion-delRowNum),
@@ -586,7 +589,6 @@ public class TestMobCompactor {
   @Test
   public void testCompactionFromAdmin() throws Exception {
     resetConf();
-    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, 5000);
     setUp("testCompactionFromAdmin");
     int count = 4;
     // generate mob files
@@ -617,7 +619,10 @@ public class TestMobCompactor {
     assertEquals("Before compaction: family2 del file count", regionNum,
         countFiles(tableName, false, family2));
 
-    int largeFilesCount = countLargeFiles(5000, tableName, family1);
+    Pair<Integer, Long> largerFiles = countLargeFiles(tableName, family1);
+    int largeFilesCount = largerFiles.getFirst();
+    // change the mob compaction merge size
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD, largerFiles.getSecond());
     // do the mob compaction
     admin.compact(tableName, hcd1.getName(), Admin.CompactType.MOB);
 
@@ -929,19 +934,34 @@ public class TestMobCompactor {
    * @param familyName the family name
    * @return the number of files large than the size
    */
-  private int countLargeFiles(int size, TableName tableName, String familyName) throws IOException {
+  private Pair<Integer, Long> countLargeFiles(TableName tableName, String familyName)
+    throws IOException {
     Path mobDirPath = MobUtils.getMobFamilyPath(conf, tableName, familyName);
-    int count = 0;
+    SortedList<Long> fileLength = new SortedList<Long>(new Comparator<Long>() {
+      @Override
+      public int compare(Long o1, Long o2) {
+        return o1 == o2 ? 0 : (o1 > o2 ? 1 : -1);
+      }
+    });
     if (fs.exists(mobDirPath)) {
       FileStatus[] files = fs.listStatus(mobDirPath);
       for (FileStatus file : files) {
         // ignore the del files in the mob path
-        if ((!StoreFileInfo.isDelFile(file.getPath())) && (file.getLen() > size)) {
-          count++;
+        if (!StoreFileInfo.isDelFile(file.getPath())) {
+          fileLength.add(file.getLen());
         }
       }
     }
-    return count;
+    int index = fileLength.size() / 2;
+    if (index > 0) {
+      while (index < fileLength.size()
+        && fileLength.get(index - 1).longValue() == fileLength.get(index).longValue()) {
+        index++;
+      }
+    }
+    return index == fileLength.size() ? new Pair<Integer, Long>(fileLength.size(),
+      fileLength.get(0))
+      : new Pair<Integer, Long>(fileLength.size() - index, fileLength.get(index));
   }
 
   /**
