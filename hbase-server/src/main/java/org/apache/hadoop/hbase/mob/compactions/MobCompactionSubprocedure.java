@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.mob.compactions;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,6 +31,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
@@ -120,7 +122,14 @@ public class MobCompactionSubprocedure extends Subprocedure {
     for (FileStatus file : files) {
       Path path = file.getPath();
       if (HFileLink.isHFileLink(path)) {
-        path = HFileLink.getHFileLinkPatternRelativePath(path);
+        HFileLink link;
+        try {
+          link = HFileLink.buildFromHFileLinkPattern(rss.getConfiguration(), path);
+          FileStatus linkedFile = getLinkedFileStatus(rss.getFileSystem(), link);
+          path = linkedFile.getPath();
+        } catch (IOException e) {
+          throw new ForeignException(getMemberName(), e);
+        }
       }
       String prefix = MobFileName.create(path.getName()).getStartKey();
       if (prefixAndKeys.get(prefix) == null) {
@@ -261,4 +270,26 @@ public class MobCompactionSubprocedure extends Subprocedure {
     }
   }
 
+  private FileStatus getLinkedFileStatus(FileSystem fs, HFileLink link) throws IOException {
+    Path[] locations = link.getLocations();
+    for (Path location : locations) {
+      FileStatus file = getFileStatus(fs, location);
+      if (file != null) {
+        return file;
+      }
+    }
+    return null;
+  }
+
+  private FileStatus getFileStatus(FileSystem fs, Path path) throws IOException {
+    try {
+      if (path != null) {
+        FileStatus file = fs.getFileStatus(path);
+        return file;
+      }
+    } catch (FileNotFoundException e) {
+      LOG.warn("The file " + path + " can not be found", e);
+    }
+    return null;
+  }
 }
