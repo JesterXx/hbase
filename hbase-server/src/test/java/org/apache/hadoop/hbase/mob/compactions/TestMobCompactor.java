@@ -226,11 +226,9 @@ public class TestMobCompactor {
     HColumnDescriptor hcd1 = new HColumnDescriptor(family1);
     hcd1.setMobEnabled(true);
     hcd1.setMobThreshold(0);
-    hcd1.setMaxVersions(4);
     HColumnDescriptor hcd2 = new HColumnDescriptor(family2);
     hcd2.setMobEnabled(true);
     hcd2.setMobThreshold(0);
-    hcd2.setMaxVersions(4);
     HTableDescriptor desc = new HTableDescriptor(tableName);
     desc.addFamily(hcd1);
     desc.addFamily(hcd2);
@@ -306,13 +304,11 @@ public class TestMobCompactor {
     HColumnDescriptor hcd = new HColumnDescriptor(family1);
     hcd.setMobEnabled(true);
     hcd.setMobThreshold(0);
-    hcd.setMaxVersions(4);
     hcd.setEncryptionType(algorithm);
     hcd.setEncryptionKey(encryptionKey);
     HColumnDescriptor hcd2 = new HColumnDescriptor(family2);
     hcd2.setMobEnabled(true);
     hcd2.setMobThreshold(0);
-    hcd2.setMaxVersions(4);
     desc.addFamily(hcd);
     desc.addFamily(hcd2);
     admin.createTable(desc, getSplitKeys());
