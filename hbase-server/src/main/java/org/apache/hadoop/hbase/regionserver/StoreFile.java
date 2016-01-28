@@ -118,8 +118,8 @@ public class StoreFile {
   /** Key for the number of mob cells in metadata*/
   public static final byte[] MOB_CELLS_COUNT = Bytes.toBytes("MOB_CELLS_COUNT");
 
-  /** Key for the the start key which region the mob file comes from in metadata*/
-  public static final byte[] MOB_ORIGIN_STARTKEY = Bytes.toBytes("MOB_ORIGIN_STARTKEY");
+  /** Key in metadata for the start key of the region where the mob file comes from*/
+  public static final byte[] MOB_REGION_STARTKEY = Bytes.toBytes("MOB_REGION_STARTKEY");
 
   private final StoreFileInfo fileInfo;
   private final FileSystem fs;
@@ -908,7 +908,7 @@ public class StoreFile {
       writer.appendFileInfo(MAX_SEQ_ID_KEY, Bytes.toBytes(maxSequenceId));
       writer.appendFileInfo(MAJOR_COMPACTION_KEY, Bytes.toBytes(majorCompaction));
       writer.appendFileInfo(MOB_CELLS_COUNT, Bytes.toBytes(mobCellsCount));
-      writer.appendFileInfo(MOB_ORIGIN_STARTKEY, startKey);
+      writer.appendFileInfo(MOB_REGION_STARTKEY, startKey);
       appendTrackedTimestampsToMetadata();
     }
 

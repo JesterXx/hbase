@@ -37,6 +37,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
 import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
+import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.procedure.ProcedureMember;
 import org.apache.hadoop.hbase.procedure.ProcedureMemberRpcs;
 import org.apache.hadoop.hbase.procedure.RegionServerProcedureManager;
@@ -127,11 +128,13 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
   /**
    * Creates a specified subprocedure to compact mob files.
    *
-   * @param table the current table name.
+   * @param procName the procedure name.
    * @param data the arguments passed in master side.
    * @return Subprocedure to submit to the ProcedureMemeber.
    */
-  public Subprocedure buildSubprocedure(TableName tableName, byte[] data) {
+  public Subprocedure buildSubprocedure(String procName, byte[] data) {
+    TableName tableName = TableName.valueOf(procName.substring(MobConstants.MOB_COMPACTION_PREFIX
+      .length()));
     // don't run the subprocedure if the parent is stop(ping)
     if (rss.isStopping() || rss.isStopped()) {
       throw new IllegalStateException("Can't start mob compaction subprocedure on RS: "
@@ -150,10 +153,9 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     String columnName = Bytes.toString(data, 1, data.length - 1);
 
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Launching subprocedure to compact mob files for " + tableName.getNameAsString());
+      LOG.debug("Launching subprocedure to compact mob files for " + procName);
     }
-    ForeignExceptionDispatcher exnDispatcher = new ForeignExceptionDispatcher(
-      tableName.getNameAsString());
+    ForeignExceptionDispatcher exnDispatcher = new ForeignExceptionDispatcher(procName);
     Configuration conf = rss.getConfiguration();
     long timeoutMillis = conf.getLong(MOB_COMPACTION_TIMEOUT_MILLIS_KEY,
       MOB_COMPACTION_TIMEOUT_MILLIS_DEFAULT);
@@ -163,15 +165,14 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     MobCompactionSubprocedurePool taskManager = new MobCompactionSubprocedurePool(rss
       .getServerName().toString(), conf);
 
-    return new MobCompactionSubprocedure(member, exnDispatcher, wakeMillis, timeoutMillis, rss,
-      involvedRegions, tableName, columnName, taskManager, allFiles);
+    return new MobCompactionSubprocedure(member, procName, exnDispatcher, wakeMillis,
+      timeoutMillis, rss, involvedRegions, tableName, columnName, taskManager, allFiles);
   }
 
   public class MobCompactionSubprocedureBuilder implements SubprocedureFactory {
     @Override
     public Subprocedure buildSubprocedure(String name, byte[] data) {
-      // The name of the procedure instance from the master is the table name.
-      return RegionServerMobCompactionProcedureManager.this.buildSubprocedure(TableName.valueOf(name), data);
+      return RegionServerMobCompactionProcedureManager.this.buildSubprocedure(name, data);
     }
   }
 

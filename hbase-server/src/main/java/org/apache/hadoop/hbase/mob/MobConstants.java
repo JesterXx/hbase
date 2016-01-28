@@ -116,6 +116,7 @@ public final class MobConstants {
   public static final String MOB_COMPACTION_THREADS_MAX =
     "hbase.mob.compaction.threads.max";
   public static final int DEFAULT_MOB_COMPACTION_THREADS_MAX = 1;
+  public static final String MOB_COMPACTION_PREFIX = "MOB_COMPACTION_";
   private MobConstants() {
 
   }

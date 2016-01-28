@@ -75,6 +75,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFile.Writer;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
+import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -263,7 +264,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       HColumnDescriptor column, boolean allFiles) {
       try {
         // merge del files
-        Encryption.Context cryptoContext = MobUtils.createEncryptionContext(conf, column);
+        Encryption.Context cryptoContext = EncryptionUtil.createEncryptionContext(conf, column);
         Path mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
         Path mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
         List<Path> delFilePaths = compactDelFiles(column, selectDelFiles(mobFamilyDir),
@@ -355,24 +356,24 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         }
       }
       // start the procedure
-      ForeignExceptionDispatcher monitor = new ForeignExceptionDispatcher(
-        tableName.getNameAsString());
+      String procedureName = MobConstants.MOB_COMPACTION_PREFIX + tableName.getNameAsString();
+      ForeignExceptionDispatcher monitor = new ForeignExceptionDispatcher(procedureName);
       // the format of data is allFile(one byte) + columnName
       byte[] data = new byte[1 + column.getNameAsString().length()];
       data[0] = (byte) (allFiles ? 1 : 0);
       Bytes.putBytes(data, 1, column.getName(), 0, column.getName().length);
-      Procedure proc = coordinator.startProcedure(monitor, tableName.getNameAsString(), data,
+      Procedure proc = coordinator.startProcedure(monitor, procedureName, data,
         Lists.newArrayList(regionServers.keySet()));
       if (proc == null) {
         String msg = "Failed to submit distributed procedure for mob compaction '"
-          + tableName.getNameAsString() + "'";
+          + procedureName + "'";
         LOG.error(msg);
         throw new IOException(msg);
       }
       try {
         // wait for the mob compaction to complete.
         proc.waitForCompleted();
-        LOG.info("Done waiting - mob compaction for " + tableName.getNameAsString());
+        LOG.info("Done waiting - mob compaction for " + procedureName);
         if (allRegionsOnline && !regionServers.isEmpty()) {
           // check if all the files are selected in compaction of all region servers.
           String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode,
@@ -566,7 +567,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       Scan scan = new Scan();
       scan.setMaxVersions(column.getMaxVersions());
       long ttl = HStore.determineTTLFromFamily(column);
-      ScanInfo scanInfo = new ScanInfo(column, ttl, 0, CellComparator.COMPARATOR);
+      ScanInfo scanInfo = new ScanInfo(conf, column, ttl, 0, CellComparator.COMPARATOR);
       StoreScanner scanner = new StoreScanner(scan, scanInfo, scanType, null, scanners, 0L,
         HConstants.LATEST_TIMESTAMP);
       return scanner;

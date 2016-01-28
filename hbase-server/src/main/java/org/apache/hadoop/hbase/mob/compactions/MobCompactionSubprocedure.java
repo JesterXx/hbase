@@ -62,6 +62,7 @@ import org.apache.zookeeper.KeeperException;
 public class MobCompactionSubprocedure extends Subprocedure {
   private static final Log LOG = LogFactory.getLog(MobCompactionSubprocedure.class);
 
+  private final String procName;
   private final TableName tableName;
   private final String columnName;
   private final RegionServerServices rss;
@@ -72,11 +73,12 @@ public class MobCompactionSubprocedure extends Subprocedure {
   private String compactionServerZNode;
   private CacheConfig cacheConfig;
 
-  public MobCompactionSubprocedure(ProcedureMember member,
+  public MobCompactionSubprocedure(ProcedureMember member, String procName,
     ForeignExceptionDispatcher errorListener, long wakeFrequency, long timeout,
     RegionServerServices rss, List<Region> regions, TableName tableName, String columnName,
     MobCompactionSubprocedurePool taskManager, boolean allFiles) {
-    super(member, tableName.getNameAsString(), errorListener, wakeFrequency, timeout);
+    super(member, procName, errorListener, wakeFrequency, timeout);
+    this.procName = procName;
     this.tableName = tableName;
     this.columnName = columnName;
     this.rss = rss;
@@ -123,7 +125,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
             cacheConfig, BloomType.NONE);
           Reader reader = sf.createReader().getHFileReader();
           Map<byte[], byte[]> fileInfo = reader.loadFileInfo();
-          byte[] startKey = fileInfo.get(StoreFile.MOB_ORIGIN_STARTKEY);
+          byte[] startKey = fileInfo.get(StoreFile.MOB_REGION_STARTKEY);
           if (startKey == null) {
             // use the key of the first cell as the start key of a region where the mob file
             // comes from.
@@ -245,7 +247,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
   @Override
   public void cleanup(Exception e) {
     LOG.info(
-      "Aborting all mob compaction subprocedure task threads for '" + tableName.getNameAsString()
+      "Aborting all mob compaction subprocedure task threads for '" + procName
         + "' due to error", e);
     try {
       taskManager.cancelTasks();
