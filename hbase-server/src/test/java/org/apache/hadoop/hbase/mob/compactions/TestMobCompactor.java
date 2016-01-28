@@ -204,7 +204,8 @@ public class TestMobCompactor {
       * (cellNumPerRow * rowNumPerRegion - delCellNum), countMobCells(table));
     // After the compaction, the files smaller than the mob compaction merge size
     // is merge to one file
-    assertEquals("After compaction: family1 mob file count", largeFilesCount + regionNum,
+    assertEquals("After compaction: family1 mob file count",
+      (largeFilesCount == regionNum * count) ? largeFilesCount : largeFilesCount + regionNum,
       countFiles(tableName, true, family1));
     assertEquals("After compaction: family2 mob file count", regionNum * count,
       countFiles(tableName, true, family2));
@@ -483,8 +484,9 @@ public class TestMobCompactor {
         regionNum*(cellNumPerRow*rowNumPerRegion-delCellNum), countMobCells(table));
     // After the compaction, the files smaller than the mob compaction merge size
     // is merge to one file
-    assertEquals("After compaction: family1 mob file count", largeFilesCount + regionNum,
-        countFiles(tableName, true, family1));
+    assertEquals("After compaction: family1 mob file count",
+      (largeFilesCount == regionNum * count) ? largeFilesCount : largeFilesCount + regionNum,
+      countFiles(tableName, true, family1));
     assertEquals("After compaction: family2 mob file count", regionNum*count,
         countFiles(tableName, true, family2));
     assertEquals("After compaction: family1 del file count", regionNum,
@@ -627,7 +629,8 @@ public class TestMobCompactor {
       countMobRows(table));
     assertEquals("After compaction: mob cells count", regionNum
       * (cellNumPerRow * rowNumPerRegion - delCellNum), countMobCells(table));
-    assertEquals("After compaction: family1 mob file count", regionNum + largeFilesCount,
+    assertEquals("After compaction: family1 mob file count",
+      (largeFilesCount == regionNum * count) ? largeFilesCount : largeFilesCount + regionNum,
       countFiles(tableName, true, family1));
     assertEquals("After compaction: family2 mob file count", regionNum * count,
       countFiles(tableName, true, family2));
@@ -849,9 +852,7 @@ public class TestMobCompactor {
     ResultScanner results = table.getScanner(scan);
     int count = 0;
     for (Result res : results) {
-      for (Cell cell : res.listCells()) {
-        count++;
-      }
+      count += res.size();
     }
     results.close();
     return count;
