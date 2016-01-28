@@ -36,6 +36,7 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
+import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile.Reader;
 import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
@@ -117,11 +118,15 @@ public class MobCompactionSubprocedure extends Subprocedure {
     Map<String, byte[]> prefixAndKeys = new HashMap<String, byte[]>();
     // find the mapping from file prefix to startKey
     for (FileStatus file : files) {
-      String prefix = MobFileName.create(file.getPath().getName()).getStartKey();
+      Path path = file.getPath();
+      if (HFileLink.isHFileLink(path)) {
+        path = HFileLink.getHFileLinkPatternRelativePath(path);
+      }
+      String prefix = MobFileName.create(path.getName()).getStartKey();
       if (prefixAndKeys.get(prefix) == null) {
         StoreFile sf = null;
         try {
-          sf = new StoreFile(rss.getFileSystem(), file.getPath(), rss.getConfiguration(),
+          sf = new StoreFile(rss.getFileSystem(), path, rss.getConfiguration(),
             cacheConfig, BloomType.NONE);
           Reader reader = sf.createReader().getHFileReader();
           Map<byte[], byte[]> fileInfo = reader.loadFileInfo();
@@ -142,7 +147,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
             try {
               sf.closeReader(false);
             } catch (IOException e) {
-              LOG.warn("Failed to close the store file " + file.getPath(), e);
+              LOG.warn("Failed to close the store file " + path, e);
             }
           }
         }

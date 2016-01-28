@@ -218,7 +218,7 @@ public class HFileLink extends FileLink {
    * @return Relative table path
    * @throws IOException on unexpected error.
    */
-  private static Path getHFileLinkPatternRelativePath(final Path path) {
+  public static Path getHFileLinkPatternRelativePath(final Path path) {
     // table=region-hfile
     Matcher m = REF_OR_HFILE_LINK_PATTERN.matcher(path.getName());
     if (!m.matches()) {
