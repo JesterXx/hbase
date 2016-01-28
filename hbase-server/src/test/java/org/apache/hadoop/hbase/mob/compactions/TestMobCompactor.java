@@ -1108,9 +1108,9 @@ public class TestMobCompactor {
    * Resets the configuration.
    */
   private void resetConf() {
-    conf.setLong(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD,
+    setLongConf(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD,
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD);
-    conf.setInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
+    setIntConf(MobConstants.MOB_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_COMPACTION_BATCH_SIZE);
   }
 
