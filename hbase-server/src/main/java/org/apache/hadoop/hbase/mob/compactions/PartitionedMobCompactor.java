@@ -72,6 +72,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
 
 /**
@@ -151,7 +152,8 @@ public class PartitionedMobCompactor extends MobCompactor {
    */
   protected PartitionedMobCompactionRequest select(List<FileStatus> candidates,
     boolean allFiles) throws IOException {
-    Date expiredDate = new Date(request.selectionTime - column.getTimeToLive() * 1000);
+    long selectionTime = EnvironmentEdgeManager.currentTime();
+    Date expiredDate = new Date(selectionTime - column.getTimeToLive() * 1000);
     expiredDate = new Date(expiredDate.getYear(), expiredDate.getMonth(), expiredDate.getDate());
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
     Map<CompactionPartitionId, CompactionPartition> filesToCompact =
@@ -205,7 +207,7 @@ public class PartitionedMobCompactor extends MobCompactor {
       }
     }
     PartitionedMobCompactionRequest request = new PartitionedMobCompactionRequest(
-      filesToCompact.values(), allDelFiles);
+      filesToCompact.values(), allDelFiles, selectionTime);
     if (candidates.size() == (allDelFiles.size() + selectedFileCount + irrelevantFileCount +
       expiredFileCount)) {
       // all the files are selected

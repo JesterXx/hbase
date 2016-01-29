@@ -25,7 +25,6 @@ import java.util.List;
 
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 
 /**
  * An implementation of {@link MobCompactionRequest} that is used in
@@ -40,10 +39,10 @@ public class PartitionedMobCompactionRequest extends MobCompactionRequest {
   protected Collection<CompactionPartition> compactionPartitions;
 
   public PartitionedMobCompactionRequest(Collection<CompactionPartition> compactionPartitions,
-    Collection<FileStatus> delFiles) {
-    this.selectionTime = EnvironmentEdgeManager.currentTime();
+    Collection<FileStatus> delFiles, long selectionTime) {
     this.compactionPartitions = compactionPartitions;
     this.delFiles = delFiles;
+    this.selectionTime = selectionTime;
   }
 
   /**
