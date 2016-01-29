@@ -21,8 +21,6 @@ package org.apache.hadoop.hbase.mob;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.security.Key;
-import java.security.KeyException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -45,7 +43,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
-import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
@@ -772,15 +769,38 @@ public final class MobUtils {
    */
   public static void archiveMobStoreFiles(Configuration conf, FileSystem fs,
       HRegionInfo mobRegionInfo, Path mobFamilyDir, byte[] family) throws IOException {
-    // disable the block cache.
-    Configuration copyOfConf = HBaseConfiguration.create(conf);
-    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
-    CacheConfig cacheConfig = new CacheConfig(copyOfConf);
+    CacheConfig cacheConfig = new CacheConfig(conf);
     FileStatus[] fileStatus = FSUtils.listStatus(fs, mobFamilyDir);
     List<StoreFile> storeFileList = new ArrayList<StoreFile>();
     for (FileStatus file : fileStatus) {
       storeFileList.add(new StoreFile(fs, file.getPath(), conf, cacheConfig, BloomType.NONE));
     }
     HFileArchiver.archiveStoreFiles(conf, fs, mobRegionInfo, mobFamilyDir, family, storeFileList);
+  }
+
+  /**
+   * Gets the referenced file status by the given hfile link.
+   * @param fs The file system.
+   * @param link The hfile link.
+   * @return The referenced file status.
+   * @throws IOException
+   */
+  public static FileStatus getReferencedFileStatus(FileSystem fs, HFileLink link)
+    throws IOException {
+    Path[] locations = link.getLocations();
+    for (Path location : locations) {
+      FileStatus file = null;
+      try {
+        if (location != null) {
+          file = fs.getFileStatus(location);
+        }
+      } catch (FileNotFoundException e) {
+        LOG.warn("The file " + location + " can not be found", e);
+      }
+      if (file != null) {
+        return file;
+      }
+    }
+    return null;
   }
 }

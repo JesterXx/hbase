@@ -18,11 +18,12 @@
  */
 package org.apache.hadoop.hbase.mob.compactions;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -150,11 +151,14 @@ public class PartitionedMobCompactor extends MobCompactor {
    */
   protected PartitionedMobCompactionRequest select(List<FileStatus> candidates,
     boolean allFiles) throws IOException {
+    Date expiredDate = new Date(request.selectionTime - column.getTimeToLive() * 1000);
+    expiredDate = new Date(expiredDate.getYear(), expiredDate.getMonth(), expiredDate.getDate());
     Collection<FileStatus> allDelFiles = new ArrayList<FileStatus>();
     Map<CompactionPartitionId, CompactionPartition> filesToCompact =
       new HashMap<CompactionPartitionId, CompactionPartition>();
     int selectedFileCount = 0;
     int irrelevantFileCount = 0;
+    int expiredFileCount = 0;
     for (FileStatus file : candidates) {
       if (!file.isFile()) {
         irrelevantFileCount++;
@@ -164,7 +168,7 @@ public class PartitionedMobCompactor extends MobCompactor {
       FileStatus linkedFile = file;
       if (HFileLink.isHFileLink(file.getPath())) {
         HFileLink link = HFileLink.buildFromHFileLinkPattern(conf, file.getPath());
-        linkedFile = getLinkedFileStatus(link);
+        linkedFile = MobUtils.getReferencedFileStatus(fs, link);
         if (linkedFile == null) {
           // If the linked file cannot be found, regard it as an irrelevantFileCount file
           irrelevantFileCount++;
@@ -177,6 +181,10 @@ public class PartitionedMobCompactor extends MobCompactor {
         MobFileName fileName = MobFileName.create(linkedFile.getPath().getName());
         if (!isOwnByRegion(fileName.getStartKey())) {
           irrelevantFileCount++;
+          continue;
+        }
+        if (isExpiredMobFile(fileName, expiredDate)) {
+          expiredFileCount++;
           continue;
         }
         if (allFiles || linkedFile.getLen() < mergeableSize) {
@@ -198,13 +206,14 @@ public class PartitionedMobCompactor extends MobCompactor {
     }
     PartitionedMobCompactionRequest request = new PartitionedMobCompactionRequest(
       filesToCompact.values(), allDelFiles);
-    if (candidates.size() == (allDelFiles.size() + selectedFileCount + irrelevantFileCount)) {
+    if (candidates.size() == (allDelFiles.size() + selectedFileCount + irrelevantFileCount +
+      expiredFileCount)) {
       // all the files are selected
       request.setCompactionType(CompactionType.ALL_FILES);
     }
     LOG.info("The compaction type is " + request.getCompactionType() + ", the request has "
-      + allDelFiles.size() + " del files, " + selectedFileCount + " selected files, and "
-      + irrelevantFileCount + " irrelevant files");
+      + allDelFiles.size() + " del files, " + selectedFileCount + " selected files, "
+      + irrelevantFileCount + " irrelevant files, and " + expiredFileCount + " expired files");
     return request;
   }
 
@@ -566,26 +575,21 @@ public class PartitionedMobCompactor extends MobCompactor {
     }
   }
 
-  private FileStatus getLinkedFileStatus(HFileLink link) throws IOException {
-    Path[] locations = link.getLocations();
-    for (Path location : locations) {
-      FileStatus file = getFileStatus(location);
-      if (file != null) {
-        return file;
-      }
-    }
-    return null;
-  }
-
-  private FileStatus getFileStatus(Path path) throws IOException {
+  /**
+   * Gets if the given mob file is expired.
+   * @param mobFileName The name of a mob file.
+   * @param expiredDate The expired date.
+   * @return True if the mob file is expired.
+   */
+  private boolean isExpiredMobFile(MobFileName mobFileName, Date expiredDate) {
     try {
-      if (path != null) {
-        FileStatus file = fs.getFileStatus(path);
-        return file;
+      Date fileDate = MobUtils.parseDate(mobFileName.getDate());
+      if (fileDate.getTime() < expiredDate.getTime()) {
+        return true;
       }
-    } catch (FileNotFoundException e) {
-      LOG.warn("The file " + path + " can not be found", e);
+    } catch (ParseException e) {
+      // do nothing
     }
-    return null;
+    return false;
   }
 }

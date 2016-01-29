@@ -17,7 +17,6 @@
  */
 package org.apache.hadoop.hbase.mob.compactions;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,7 +30,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
@@ -65,6 +63,7 @@ import org.apache.zookeeper.KeeperException;
 public class MobCompactionSubprocedure extends Subprocedure {
   private static final Log LOG = LogFactory.getLog(MobCompactionSubprocedure.class);
 
+  private final Configuration conf;
   private final String procName;
   private final TableName tableName;
   private final String columnName;
@@ -88,13 +87,14 @@ public class MobCompactionSubprocedure extends Subprocedure {
     this.regions = regions;
     this.taskManager = taskManager;
     this.allFiles = allFiles;
-    mobFamilyDir = MobUtils.getMobFamilyPath(rss.getConfiguration(), tableName, columnName);
+    this.conf = rss.getConfiguration();
+    mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, columnName);
     String compactionBaseZNode = ZKUtil.joinZNode(rss.getZooKeeper().getBaseZNode(),
       MasterMobCompactionManager.MOB_COMPACTION_ZNODE_NAME);
     String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
     compactionServerZNode = ZKUtil.joinZNode(compactionZNode, rss.getServerName().toString());
-    Configuration copyOfConf = new Configuration(rss.getConfiguration());
-    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
+    Configuration copyOfConf = new Configuration(conf);
+    copyOfConf.setBoolean(CacheConfig.PREFETCH_BLOCKS_ON_OPEN_KEY, false);
     this.cacheConfig = new CacheConfig(copyOfConf);
   }
 
@@ -124,8 +124,8 @@ public class MobCompactionSubprocedure extends Subprocedure {
       if (HFileLink.isHFileLink(path)) {
         HFileLink link;
         try {
-          link = HFileLink.buildFromHFileLinkPattern(rss.getConfiguration(), path);
-          FileStatus linkedFile = getLinkedFileStatus(rss.getFileSystem(), link);
+          link = HFileLink.buildFromHFileLinkPattern(conf, path);
+          FileStatus linkedFile = MobUtils.getReferencedFileStatus(rss.getFileSystem(), link);
           path = linkedFile.getPath();
         } catch (IOException e) {
           throw new ForeignException(getMemberName(), e);
@@ -135,8 +135,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
       if (prefixAndKeys.get(prefix) == null) {
         StoreFile sf = null;
         try {
-          sf = new StoreFile(rss.getFileSystem(), path, rss.getConfiguration(),
-            cacheConfig, BloomType.NONE);
+          sf = new StoreFile(rss.getFileSystem(), path, conf, cacheConfig, BloomType.NONE);
           Reader reader = sf.createReader().getHFileReader();
           Map<byte[], byte[]> fileInfo = reader.loadFileInfo();
           byte[] startKey = fileInfo.get(StoreFile.MOB_REGION_STARTKEY);
@@ -268,28 +267,5 @@ public class MobCompactionSubprocedure extends Subprocedure {
     } catch (InterruptedException e1) {
       Thread.currentThread().interrupt();
     }
-  }
-
-  private FileStatus getLinkedFileStatus(FileSystem fs, HFileLink link) throws IOException {
-    Path[] locations = link.getLocations();
-    for (Path location : locations) {
-      FileStatus file = getFileStatus(fs, location);
-      if (file != null) {
-        return file;
-      }
-    }
-    return null;
-  }
-
-  private FileStatus getFileStatus(FileSystem fs, Path path) throws IOException {
-    try {
-      if (path != null) {
-        FileStatus file = fs.getFileStatus(path);
-        return file;
-      }
-    } catch (FileNotFoundException e) {
-      LOG.warn("The file " + path + " can not be found", e);
-    }
-    return null;
   }
 }
