@@ -71,6 +71,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
   private final List<Region> regions;
   private final MobCompactionSubprocedurePool taskManager;
   private boolean allFiles;
+  private boolean allRegionsOnline;
   private Path mobFamilyDir;
   private String compactionServerZNode;
   private CacheConfig cacheConfig;
@@ -78,7 +79,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
   public MobCompactionSubprocedure(ProcedureMember member, String procName,
     ForeignExceptionDispatcher errorListener, long wakeFrequency, long timeout,
     RegionServerServices rss, List<Region> regions, TableName tableName, String columnName,
-    MobCompactionSubprocedurePool taskManager, boolean allFiles) {
+    MobCompactionSubprocedurePool taskManager, boolean allFiles, boolean allRegionsOnline) {
     super(member, procName, errorListener, wakeFrequency, timeout);
     this.procName = procName;
     this.tableName = tableName;
@@ -87,6 +88,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
     this.regions = regions;
     this.taskManager = taskManager;
     this.allFiles = allFiles;
+    this.allRegionsOnline = allRegionsOnline;
     this.conf = rss.getConfiguration();
     mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, columnName);
     String compactionBaseZNode = ZKUtil.joinZNode(rss.getZooKeeper().getBaseZNode(),
@@ -179,7 +181,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
       throw new ForeignException(getMemberName(), e);
     }
     // add nodes to zookeeper if all the tasks are finished successfully
-    if (success && !regions.isEmpty()) {
+    if (allRegionsOnline && success && !regions.isEmpty()) {
       // compare the regions passed from master and existing regions in the current region server.
       // if they are the same, it means all regions are online, all mob files owned by this region
       // server can be compacted. We call tell master this thing by setting data in zookeeper.

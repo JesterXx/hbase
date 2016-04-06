@@ -150,7 +150,8 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     }
     // parse the column names and if it is a major compaction
     boolean allFiles = (data[0] != (byte) 0);
-    String columnName = Bytes.toString(data, 1, data.length - 1);
+    boolean allRegionsOnline = (data[1] != (byte) 0);
+    String columnName = Bytes.toString(data, 2, data.length - 1);
 
     if (LOG.isDebugEnabled()) {
       LOG.debug("Launching subprocedure to compact mob files for " + procName);
@@ -166,7 +167,8 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       .getServerName().toString(), conf);
 
     return new MobCompactionSubprocedure(member, procName, exnDispatcher, wakeMillis,
-      timeoutMillis, rss, involvedRegions, tableName, columnName, taskManager, allFiles);
+      timeoutMillis, rss, involvedRegions, tableName, columnName, taskManager, allFiles,
+      allRegionsOnline);
   }
 
   public class MobCompactionSubprocedureBuilder implements SubprocedureFactory {

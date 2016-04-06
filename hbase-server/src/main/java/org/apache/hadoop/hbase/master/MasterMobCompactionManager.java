@@ -359,9 +359,10 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       String procedureName = MobConstants.MOB_COMPACTION_PREFIX + tableName.getNameAsString();
       ForeignExceptionDispatcher monitor = new ForeignExceptionDispatcher(procedureName);
       // the format of data is allFile(one byte) + columnName
-      byte[] data = new byte[1 + column.getNameAsString().length()];
+      byte[] data = new byte[2 + column.getNameAsString().length()];
       data[0] = (byte) (allFiles ? 1 : 0);
-      Bytes.putBytes(data, 1, column.getName(), 0, column.getName().length);
+      data[1] = (byte) (allRegionsOnline ? 1 : 0);
+      Bytes.putBytes(data, 2, column.getName(), 0, column.getName().length);
       Procedure proc = coordinator.startProcedure(monitor, procedureName, data,
         Lists.newArrayList(regionServers.keySet()));
       if (proc == null) {
