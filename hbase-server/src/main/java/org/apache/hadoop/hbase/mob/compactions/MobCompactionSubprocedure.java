@@ -39,21 +39,25 @@ import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
 import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile.Reader;
-import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
 import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.mob.compactions.MobCompactionRequest.CompactionType;
 import org.apache.hadoop.hbase.mob.compactions.RegionServerMobCompactionProcedureManager.MobCompactionSubprocedurePool;
 import org.apache.hadoop.hbase.procedure.ProcedureMember;
 import org.apache.hadoop.hbase.procedure.Subprocedure;
+import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
+import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
+import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.CoprocessorServiceResponse;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.util.ByteStringer;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.MD5Hash;
-import org.apache.hadoop.hbase.zookeeper.ZKUtil;
-import org.apache.zookeeper.KeeperException;
+
+import com.google.protobuf.ServiceException;
 
 /**
  * The subprocedure implementation for mob compaction.
@@ -73,7 +77,6 @@ public class MobCompactionSubprocedure extends Subprocedure {
   private boolean allFiles;
   private boolean allRegionsOnline;
   private Path mobFamilyDir;
-  private String compactionServerZNode;
   private CacheConfig cacheConfig;
 
   public MobCompactionSubprocedure(ProcedureMember member, String procName,
@@ -91,10 +94,6 @@ public class MobCompactionSubprocedure extends Subprocedure {
     this.allRegionsOnline = allRegionsOnline;
     this.conf = rss.getConfiguration();
     mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, columnName);
-    String compactionBaseZNode = ZKUtil.joinZNode(rss.getZooKeeper().getBaseZNode(),
-      MasterMobCompactionManager.MOB_COMPACTION_ZNODE_NAME);
-    String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
-    compactionServerZNode = ZKUtil.joinZNode(compactionZNode, rss.getServerName().toString());
     Configuration copyOfConf = new Configuration(conf);
     copyOfConf.setBoolean(CacheConfig.PREFETCH_BLOCKS_ON_OPEN_KEY, false);
     this.cacheConfig = new CacheConfig(copyOfConf);
@@ -186,8 +185,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
       // if they are the same, it means all regions are online, all mob files owned by this region
       // server can be compacted. We call tell master this thing by setting data in zookeeper.
       try {
-        List<String> foundRegionStartKeys = ZKUtil.listChildrenNoWatch(rss.getZooKeeper(),
-          compactionServerZNode);
+        List<String> foundRegionStartKeys = getCompactRegions();
         if (foundRegionStartKeys.size() == regions.size()) {
           List<String> onlineRegionStartKeys = new ArrayList<String>();
           for (Region region : regions) {
@@ -203,13 +201,61 @@ public class MobCompactionSubprocedure extends Subprocedure {
             }
           }
           if (equals) {
-            ZKUtil.setData(rss.getZooKeeper(), compactionServerZNode, new byte[] { 1 });
+            updateCompactionAsMajor();
           }
         }
-      } catch (KeeperException e) {
+      } catch (ServiceException e) {
+        throw new ForeignException(getMemberName(), e);
+      } catch (IOException e) {
         throw new ForeignException(getMemberName(), e);
       }
     }
+  }
+
+  /**
+   * Gets the regions that run the mob compaction.
+   * @return The start keys of regions that run the mob compaction.
+   */
+  private List<String> getCompactRegions() throws ServiceException, IOException {
+    MasterMobCompactionTrackerProtos.GetMobCompactRegionsRequest request =
+      MasterMobCompactionTrackerProtos.GetMobCompactRegionsRequest
+      .newBuilder().setServerName(rss.getServerName().getServerName())
+      .setTableName(tableName.getNameAsString()).build();
+    ClientProtos.CoprocessorServiceCall call = ClientProtos.CoprocessorServiceCall
+      .newBuilder()
+      .setRow(ByteStringer.wrap(HConstants.EMPTY_BYTE_ARRAY))
+      .setServiceName(
+        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+          .getFullName())
+      .setMethodName(
+        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+          .getMethods().get(0).getName()).setRequest(request.toByteString()).build();
+    CoprocessorServiceResponse servieResponse = ProtobufUtil.execService(rss.getClusterConnection()
+      .getMaster(), call);
+    MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse response =
+      MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse
+      .parseFrom(servieResponse.getValue().getValue());
+    return response.getRegionNamesList();
+  }
+
+  /**
+   * Updates the mob compaction as major in the current server.
+   */
+  private void updateCompactionAsMajor() throws ServiceException, IOException {
+    MasterMobCompactionTrackerProtos.UpdateMobCompactionAsMajorRequest request =
+      MasterMobCompactionTrackerProtos.UpdateMobCompactionAsMajorRequest
+      .newBuilder().setServerName(rss.getServerName().getServerName())
+      .setTableName(tableName.getNameAsString()).build();
+    ClientProtos.CoprocessorServiceCall call = ClientProtos.CoprocessorServiceCall
+      .newBuilder()
+      .setRow(ByteStringer.wrap(HConstants.EMPTY_BYTE_ARRAY))
+      .setServiceName(
+        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+          .getFullName())
+      .setMethodName(
+        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+          .getMethods().get(1).getName()).setRequest(request.toByteString()).build();
+    ProtobufUtil.execService(rss.getClusterConnection().getMaster(), call);
   }
 
   // Callable for mob compaction.

@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.master;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -81,8 +82,6 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
-import org.apache.hadoop.hbase.zookeeper.ZKUtil;
-import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 
 import com.google.common.collect.Lists;
@@ -101,10 +100,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
   protected int compactionKVMax;
   private Path tempPath;
   private CacheConfig compactionCacheConfig;
-  private String compactionBaseZNode;
   private boolean stopped;
   private FileSystem fs;
-  public static final String MOB_COMPACTION_ZNODE_NAME = "mobCompaction";
   public static final String MOB_COMPACTION_PROCEDURE_COLUMN_KEY = "mobCompaction-column";
   public static final String MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY = "mobCompaction-allFiles";
 
@@ -124,6 +121,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
   private ProcedureCoordinator coordinator;
   private Map<TableName, Future<Void>> compactions = new HashMap<TableName, Future<Void>>();
+  private Map<TableName, Map<String, Pair<Boolean, List<String>>>> compactingRegions =
+    new HashMap<TableName, Map<String, Pair<Boolean, List<String>>>>();
 
   public MasterMobCompactionManager(HMaster master) {
     this(master, null);
@@ -143,8 +142,6 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
     Configuration copyOfConf = new Configuration(conf);
     copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
     compactionCacheConfig = new CacheConfig(copyOfConf);
-    compactionBaseZNode = ZKUtil.joinZNode(master.getZooKeeper().getBaseZNode(),
-      MOB_COMPACTION_ZNODE_NAME);
     // this pool is used to run the mob compaction
     if (mobCompactionPool != null) {
       this.mobCompactionPool = mobCompactionPool;
@@ -188,6 +185,43 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       }
       return future;
     }
+  }
+
+  /**
+   * Gets the regions that run the mob compaction.
+   * @param tableName The table to run the mob compaction.
+   * @param serverName The server to run the mob compaction.
+   * @return The start keys of regions that run the mob compaction.
+   */
+  public List<String> getCompactingRegions(TableName tableName, String serverName) {
+    Map<String, Pair<Boolean, List<String>>> serverRegionMapping = compactingRegions
+      .get(tableName);
+    if (serverRegionMapping == null) {
+      return Collections.emptyList();
+    }
+    Pair<Boolean, List<String>> regions = serverRegionMapping.get(serverName);
+    if (regions == null) {
+      return Collections.emptyList();
+    }
+    return regions.getSecond();
+  }
+
+  /**
+   * Updates the mob compaction in the given server as major.
+   * @param tableName The table to run the mob compaction.
+   * @param serverName The server to run the mob compaction.
+   */
+  public void updateAsMajorCompaction(TableName tableName, String serverName) {
+    Map<String, Pair<Boolean, List<String>>> serverRegionMapping = compactingRegions
+      .get(tableName);
+    if (serverRegionMapping == null) {
+      return;
+    }
+    Pair<Boolean, List<String>> regions = serverRegionMapping.get(serverName);
+    if (regions == null) {
+      return;
+    }
+    regions.setFirst(Boolean.TRUE);
   }
 
   /**
@@ -329,30 +363,20 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           }
         }
       }
-      boolean success = false;
+      boolean archiveDelFiles = false;
+      Map<String, Pair<Boolean, List<String>>> serverRegionMapping = Collections.emptyMap();
       if (allRegionsOnline && !regionServers.isEmpty()) {
-        // add the map to zookeeper to record the online regions in region servers
-        String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode, tableName.getNameAsString());
-        try {
-          // clean the node if it exists
-          ZKUtil.deleteNodeRecursively(master.getZooKeeper(), compactionZNode);
-          ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionZNode, null,
-            CreateMode.PERSISTENT);
-          for (Entry<String, List<String>> entry : regionServers.entrySet()) {
-            String serverName = entry.getKey();
-            List<String> startKeysOfOnlineRegions = entry.getValue();
-            String compactionServerZNode = ZKUtil.joinZNode(compactionZNode, serverName);
-            ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionServerZNode,
-              Bytes.toBytes(false), CreateMode.PERSISTENT);
-            for (String startKeyOfOnlineRegion : startKeysOfOnlineRegions) {
-              String compactionStartKeyZNode = ZKUtil.joinZNode(compactionServerZNode,
-                startKeyOfOnlineRegion);
-              ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionStartKeyZNode,
-                null, CreateMode.PERSISTENT);
-            }
-          }
-        } catch (KeeperException e) {
-          throw new IOException(e);
+        // record the online regions of each region server
+        serverRegionMapping =
+          new HashMap<String, Pair<Boolean, List<String>>>();
+        compactingRegions.put(tableName, serverRegionMapping);
+        for (Entry<String, List<String>> entry : regionServers.entrySet()) {
+          String serverName = entry.getKey();
+          List<String> startKeysOfOnlineRegions = entry.getValue();
+          Pair<Boolean, List<String>> pair = new Pair<Boolean, List<String>>();
+          serverRegionMapping.put(serverName, pair);
+          pair.setFirst(Boolean.FALSE);
+          pair.setSecond(startKeysOfOnlineRegions);
         }
       }
       // start the procedure
@@ -375,21 +399,18 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         // wait for the mob compaction to complete.
         proc.waitForCompleted();
         LOG.info("Done waiting - mob compaction for " + procedureName);
-        if (allRegionsOnline && !regionServers.isEmpty()) {
+        if (allRegionsOnline && !serverRegionMapping.isEmpty()) {
           // check if all the files are selected in compaction of all region servers.
-          String compactionZNode = ZKUtil.joinZNode(compactionBaseZNode,
-            tableName.getNameAsString());
-          try {
-            for (Entry<String, List<String>> entry : regionServers.entrySet()) {
-              String serverName = entry.getKey();
-              String compactionServerZNode = ZKUtil.joinZNode(compactionZNode, serverName);
-              // if the result is 1, it means all files are selected in that region server.
-              byte[] result = ZKUtil.getData(master.getZooKeeper(), compactionServerZNode);
-              success = result != null && result.length == 1 && result[0] == 1;
+          for (Entry<String, Pair<Boolean, List<String>>> entry : serverRegionMapping.entrySet()) {
+            boolean isAllFiles = entry.getValue().getFirst();
+            LOG.info("Mob compaction " + procedureName + " in server " + entry.getKey() + " is "
+              + (isAllFiles ? "major" : "minor"));
+            if (isAllFiles) {
+              archiveDelFiles = true;
+            } else {
+              archiveDelFiles = false;
+              break;
             }
-          } catch (KeeperException e) {
-            LOG.warn("Exceptions happen after mob compaction", e);
-            success = false;
           }
         }
       } catch (InterruptedException e) {
@@ -399,10 +420,13 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         Thread.currentThread().interrupt();
       } catch (ForeignException e) {
         monitor.receive(e);
+      } finally {
+        // clean up
+        compactingRegions.remove(tableName);
       }
       // return true if all the compactions are finished successfully and all files are selected
       // in all region servers.
-      return allRegionsOnline && success;
+      return allRegionsOnline && archiveDelFiles;
     }
 
     /**
@@ -607,8 +631,6 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
   @Override
   public void initialize(MasterServices master, MetricsMaster metricsMaster)
     throws KeeperException, IOException, UnsupportedOperationException {
-    ZKUtil.createNodeIfNotExistsNoWatch(master.getZooKeeper(), compactionBaseZNode, null,
-      CreateMode.PERSISTENT);
     // get the configuration for the coordinator
     Configuration conf = master.getConfiguration();
     long wakeFrequency = conf.getInt(MOB_COMPACTION_WAKE_MILLIS_KEY,

@@ -168,8 +168,20 @@ public class PartitionedMobCompactor extends MobCompactor {
       }
       // group the del files and small files.
       FileStatus linkedFile = file;
+      HFileLink link = null;
+      String fn = file.getPath().getName();
       if (HFileLink.isHFileLink(file.getPath())) {
-        HFileLink link = HFileLink.buildFromHFileLinkPattern(conf, file.getPath());
+        link = HFileLink.buildFromHFileLinkPattern(conf, file.getPath());
+        fn = link.getOriginPath().getName(); 
+      }
+      if (!StoreFileInfo.isDelFile((fn))) {
+        MobFileName fileName = MobFileName.create(fn);
+        if (!isOwnByRegion(fileName.getStartKey())) {
+          irrelevantFileCount++;
+          continue;
+        }
+      }
+      if (link != null) {
         linkedFile = MobUtils.getReferencedFileStatus(fs, link);
         if (linkedFile == null) {
           // If the linked file cannot be found, regard it as an irrelevantFileCount file
@@ -181,10 +193,6 @@ public class PartitionedMobCompactor extends MobCompactor {
         allDelFiles.add(file);
       } else {
         MobFileName fileName = MobFileName.create(linkedFile.getPath().getName());
-        if (!isOwnByRegion(fileName.getStartKey())) {
-          irrelevantFileCount++;
-          continue;
-        }
         if (isExpiredMobFile(fileName, expiredDate)) {
           expiredFileCount++;
           continue;
