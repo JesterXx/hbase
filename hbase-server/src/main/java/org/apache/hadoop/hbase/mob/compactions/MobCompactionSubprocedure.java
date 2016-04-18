@@ -191,7 +191,6 @@ public class MobCompactionSubprocedure extends Subprocedure {
           for (Region region : regions) {
             onlineRegionStartKeys.add(MD5Hash.getMD5AsHex(region.getRegionInfo().getStartKey()));
           }
-          Collections.sort(foundRegionStartKeys);
           Collections.sort(onlineRegionStartKeys);
           boolean equals = true;
           for (int i = 0; i < foundRegionStartKeys.size(); i++) {
