@@ -701,25 +701,25 @@ public final class MasterMobCompactionTrackerProtos {
   public interface GetMobCompactRegionsResponseOrBuilder
       extends com.google.protobuf.MessageOrBuilder {
 
-    // repeated string region_names = 2;
+    // repeated string region_startKeys = 2;
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
     java.util.List<java.lang.String>
-    getRegionNamesList();
+    getRegionStartKeysList();
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
-    int getRegionNamesCount();
+    int getRegionStartKeysCount();
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
-    java.lang.String getRegionNames(int index);
+    java.lang.String getRegionStartKeys(int index);
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
     com.google.protobuf.ByteString
-        getRegionNamesBytes(int index);
+        getRegionStartKeysBytes(int index);
   }
   /**
    * Protobuf type {@code hbase.pb.GetMobCompactRegionsResponse}
@@ -774,10 +774,10 @@ public final class MasterMobCompactionTrackerProtos {
             }
             case 18: {
               if (!((mutable_bitField0_ & 0x00000001) == 0x00000001)) {
-                regionNames_ = new com.google.protobuf.LazyStringArrayList();
+                regionStartKeys_ = new com.google.protobuf.LazyStringArrayList();
                 mutable_bitField0_ |= 0x00000001;
               }
-              regionNames_.add(input.readBytes());
+              regionStartKeys_.add(input.readBytes());
               break;
             }
           }
@@ -789,7 +789,7 @@ public final class MasterMobCompactionTrackerProtos {
             e.getMessage()).setUnfinishedMessage(this);
       } finally {
         if (((mutable_bitField0_ & 0x00000001) == 0x00000001)) {
-          regionNames_ = new com.google.protobuf.UnmodifiableLazyStringList(regionNames_);
+          regionStartKeys_ = new com.google.protobuf.UnmodifiableLazyStringList(regionStartKeys_);
         }
         this.unknownFields = unknownFields.build();
         makeExtensionsImmutable();
@@ -822,38 +822,38 @@ public final class MasterMobCompactionTrackerProtos {
       return PARSER;
     }
 
-    // repeated string region_names = 2;
-    public static final int REGION_NAMES_FIELD_NUMBER = 2;
-    private com.google.protobuf.LazyStringList regionNames_;
+    // repeated string region_startKeys = 2;
+    public static final int REGION_STARTKEYS_FIELD_NUMBER = 2;
+    private com.google.protobuf.LazyStringList regionStartKeys_;
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
     public java.util.List<java.lang.String>
-        getRegionNamesList() {
-      return regionNames_;
+        getRegionStartKeysList() {
+      return regionStartKeys_;
     }
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
-    public int getRegionNamesCount() {
-      return regionNames_.size();
+    public int getRegionStartKeysCount() {
+      return regionStartKeys_.size();
     }
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
-    public java.lang.String getRegionNames(int index) {
-      return regionNames_.get(index);
+    public java.lang.String getRegionStartKeys(int index) {
+      return regionStartKeys_.get(index);
     }
     /**
-     * <code>repeated string region_names = 2;</code>
+     * <code>repeated string region_startKeys = 2;</code>
      */
     public com.google.protobuf.ByteString
-        getRegionNamesBytes(int index) {
-      return regionNames_.getByteString(index);
+        getRegionStartKeysBytes(int index) {
+      return regionStartKeys_.getByteString(index);
     }
 
     private void initFields() {
-      regionNames_ = com.google.protobuf.LazyStringArrayList.EMPTY;
+      regionStartKeys_ = com.google.protobuf.LazyStringArrayList.EMPTY;
     }
     private byte memoizedIsInitialized = -1;
     public final boolean isInitialized() {
@@ -867,8 +867,8 @@ public final class MasterMobCompactionTrackerProtos {
     public void writeTo(com.google.protobuf.CodedOutputStream output)
                         throws java.io.IOException {
       getSerializedSize();
-      for (int i = 0; i < regionNames_.size(); i++) {
-        output.writeBytes(2, regionNames_.getByteString(i));
+      for (int i = 0; i < regionStartKeys_.size(); i++) {
+        output.writeBytes(2, regionStartKeys_.getByteString(i));
       }
       getUnknownFields().writeTo(output);
     }
@@ -881,12 +881,12 @@ public final class MasterMobCompactionTrackerProtos {
       size = 0;
       {
         int dataSize = 0;
-        for (int i = 0; i < regionNames_.size(); i++) {
+        for (int i = 0; i < regionStartKeys_.size(); i++) {
           dataSize += com.google.protobuf.CodedOutputStream
-            .computeBytesSizeNoTag(regionNames_.getByteString(i));
+            .computeBytesSizeNoTag(regionStartKeys_.getByteString(i));
         }
         size += dataSize;
-        size += 1 * getRegionNamesList().size();
+        size += 1 * getRegionStartKeysList().size();
       }
       size += getUnknownFields().getSerializedSize();
       memoizedSerializedSize = size;
@@ -911,8 +911,8 @@ public final class MasterMobCompactionTrackerProtos {
       org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse other = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse) obj;
 
       boolean result = true;
-      result = result && getRegionNamesList()
-          .equals(other.getRegionNamesList());
+      result = result && getRegionStartKeysList()
+          .equals(other.getRegionStartKeysList());
       result = result &&
           getUnknownFields().equals(other.getUnknownFields());
       return result;
@@ -926,9 +926,9 @@ public final class MasterMobCompactionTrackerProtos {
       }
       int hash = 41;
       hash = (19 * hash) + getDescriptorForType().hashCode();
-      if (getRegionNamesCount() > 0) {
-        hash = (37 * hash) + REGION_NAMES_FIELD_NUMBER;
-        hash = (53 * hash) + getRegionNamesList().hashCode();
+      if (getRegionStartKeysCount() > 0) {
+        hash = (37 * hash) + REGION_STARTKEYS_FIELD_NUMBER;
+        hash = (53 * hash) + getRegionStartKeysList().hashCode();
       }
       hash = (29 * hash) + getUnknownFields().hashCode();
       memoizedHashCode = hash;
@@ -1039,7 +1039,7 @@ public final class MasterMobCompactionTrackerProtos {
 
       public Builder clear() {
         super.clear();
-        regionNames_ = com.google.protobuf.LazyStringArrayList.EMPTY;
+        regionStartKeys_ = com.google.protobuf.LazyStringArrayList.EMPTY;
         bitField0_ = (bitField0_ & ~0x00000001);
         return this;
       }
@@ -1069,11 +1069,11 @@ public final class MasterMobCompactionTrackerProtos {
         org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse result = new org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse(this);
         int from_bitField0_ = bitField0_;
         if (((bitField0_ & 0x00000001) == 0x00000001)) {
-          regionNames_ = new com.google.protobuf.UnmodifiableLazyStringList(
-              regionNames_);
+          regionStartKeys_ = new com.google.protobuf.UnmodifiableLazyStringList(
+              regionStartKeys_);
           bitField0_ = (bitField0_ & ~0x00000001);
         }
-        result.regionNames_ = regionNames_;
+        result.regionStartKeys_ = regionStartKeys_;
         onBuilt();
         return result;
       }
@@ -1089,13 +1089,13 @@ public final class MasterMobCompactionTrackerProtos {
 
       public Builder mergeFrom(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse other) {
         if (other == org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse.getDefaultInstance()) return this;
-        if (!other.regionNames_.isEmpty()) {
-          if (regionNames_.isEmpty()) {
-            regionNames_ = other.regionNames_;
+        if (!other.regionStartKeys_.isEmpty()) {
+          if (regionStartKeys_.isEmpty()) {
+            regionStartKeys_ = other.regionStartKeys_;
             bitField0_ = (bitField0_ & ~0x00000001);
           } else {
-            ensureRegionNamesIsMutable();
-            regionNames_.addAll(other.regionNames_);
+            ensureRegionStartKeysIsMutable();
+            regionStartKeys_.addAll(other.regionStartKeys_);
           }
           onChanged();
         }
@@ -1126,95 +1126,95 @@ public final class MasterMobCompactionTrackerProtos {
       }
       private int bitField0_;
 
-      // repeated string region_names = 2;
-      private com.google.protobuf.LazyStringList regionNames_ = com.google.protobuf.LazyStringArrayList.EMPTY;
-      private void ensureRegionNamesIsMutable() {
+      // repeated string region_startKeys = 2;
+      private com.google.protobuf.LazyStringList regionStartKeys_ = com.google.protobuf.LazyStringArrayList.EMPTY;
+      private void ensureRegionStartKeysIsMutable() {
         if (!((bitField0_ & 0x00000001) == 0x00000001)) {
-          regionNames_ = new com.google.protobuf.LazyStringArrayList(regionNames_);
+          regionStartKeys_ = new com.google.protobuf.LazyStringArrayList(regionStartKeys_);
           bitField0_ |= 0x00000001;
          }
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
       public java.util.List<java.lang.String>
-          getRegionNamesList() {
-        return java.util.Collections.unmodifiableList(regionNames_);
+          getRegionStartKeysList() {
+        return java.util.Collections.unmodifiableList(regionStartKeys_);
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
-      public int getRegionNamesCount() {
-        return regionNames_.size();
+      public int getRegionStartKeysCount() {
+        return regionStartKeys_.size();
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
-      public java.lang.String getRegionNames(int index) {
-        return regionNames_.get(index);
+      public java.lang.String getRegionStartKeys(int index) {
+        return regionStartKeys_.get(index);
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
       public com.google.protobuf.ByteString
-          getRegionNamesBytes(int index) {
-        return regionNames_.getByteString(index);
+          getRegionStartKeysBytes(int index) {
+        return regionStartKeys_.getByteString(index);
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
-      public Builder setRegionNames(
+      public Builder setRegionStartKeys(
           int index, java.lang.String value) {
         if (value == null) {
     throw new NullPointerException();
   }
-  ensureRegionNamesIsMutable();
-        regionNames_.set(index, value);
+  ensureRegionStartKeysIsMutable();
+        regionStartKeys_.set(index, value);
         onChanged();
         return this;
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
-      public Builder addRegionNames(
+      public Builder addRegionStartKeys(
           java.lang.String value) {
         if (value == null) {
     throw new NullPointerException();
   }
-  ensureRegionNamesIsMutable();
-        regionNames_.add(value);
+  ensureRegionStartKeysIsMutable();
+        regionStartKeys_.add(value);
         onChanged();
         return this;
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
-      public Builder addAllRegionNames(
+      public Builder addAllRegionStartKeys(
           java.lang.Iterable<java.lang.String> values) {
-        ensureRegionNamesIsMutable();
-        super.addAll(values, regionNames_);
+        ensureRegionStartKeysIsMutable();
+        super.addAll(values, regionStartKeys_);
         onChanged();
         return this;
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
-      public Builder clearRegionNames() {
-        regionNames_ = com.google.protobuf.LazyStringArrayList.EMPTY;
+      public Builder clearRegionStartKeys() {
+        regionStartKeys_ = com.google.protobuf.LazyStringArrayList.EMPTY;
         bitField0_ = (bitField0_ & ~0x00000001);
         onChanged();
         return this;
       }
       /**
-       * <code>repeated string region_names = 2;</code>
+       * <code>repeated string region_startKeys = 2;</code>
        */
-      public Builder addRegionNamesBytes(
+      public Builder addRegionStartKeysBytes(
           com.google.protobuf.ByteString value) {
         if (value == null) {
     throw new NullPointerException();
   }
-  ensureRegionNamesIsMutable();
-        regionNames_.add(value);
+  ensureRegionStartKeysIsMutable();
+        regionStartKeys_.add(value);
         onChanged();
         return this;
       }
@@ -2592,20 +2592,20 @@ public final class MasterMobCompactionTrackerProtos {
     java.lang.String[] descriptorData = {
       "\n MasterMobCompactionTracker.proto\022\010hbas" +
       "e.pb\"F\n\033GetMobCompactRegionsRequest\022\022\n\nt" +
-      "able_name\030\001 \002(\t\022\023\n\013server_name\030\002 \002(\t\"4\n\034" +
-      "GetMobCompactRegionsResponse\022\024\n\014region_n" +
-      "ames\030\002 \003(\t\"L\n!UpdateMobCompactionAsMajor" +
-      "Request\022\022\n\ntable_name\030\001 \002(\t\022\023\n\013server_na" +
-      "me\030\002 \002(\t\"$\n\"UpdateMobCompactionAsMajorRe" +
-      "sponse2\203\002\n!MasterMobCompactionTrackerSer" +
-      "vice\022e\n\024GetMobCompactRegions\022%.hbase.pb." +
-      "GetMobCompactRegionsRequest\032&.hbase.pb.G",
-      "etMobCompactRegionsResponse\022w\n\032UpdateMob" +
-      "CompactionAsMajor\022+.hbase.pb.UpdateMobCo" +
-      "mpactionAsMajorRequest\032,.hbase.pb.Update" +
-      "MobCompactionAsMajorResponseBV\n*org.apac" +
-      "he.hadoop.hbase.protobuf.generatedB Mast" +
-      "erMobCompactionTrackerProtosH\001\210\001\001\240\001\001"
+      "able_name\030\001 \002(\t\022\023\n\013server_name\030\002 \002(\t\"8\n\034" +
+      "GetMobCompactRegionsResponse\022\030\n\020region_s" +
+      "tartKeys\030\002 \003(\t\"L\n!UpdateMobCompactionAsM" +
+      "ajorRequest\022\022\n\ntable_name\030\001 \002(\t\022\023\n\013serve" +
+      "r_name\030\002 \002(\t\"$\n\"UpdateMobCompactionAsMaj" +
+      "orResponse2\203\002\n!MasterMobCompactionTracke" +
+      "rService\022e\n\024GetMobCompactRegions\022%.hbase" +
+      ".pb.GetMobCompactRegionsRequest\032&.hbase.",
+      "pb.GetMobCompactRegionsResponse\022w\n\032Updat" +
+      "eMobCompactionAsMajor\022+.hbase.pb.UpdateM" +
+      "obCompactionAsMajorRequest\032,.hbase.pb.Up" +
+      "dateMobCompactionAsMajorResponseBV\n*org." +
+      "apache.hadoop.hbase.protobuf.generatedB " +
+      "MasterMobCompactionTrackerProtosH\001\210\001\001\240\001\001"
     };
     com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner =
       new com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner() {
@@ -2623,7 +2623,7 @@ public final class MasterMobCompactionTrackerProtos {
           internal_static_hbase_pb_GetMobCompactRegionsResponse_fieldAccessorTable = new
             com.google.protobuf.GeneratedMessage.FieldAccessorTable(
               internal_static_hbase_pb_GetMobCompactRegionsResponse_descriptor,
-              new java.lang.String[] { "RegionNames", });
+              new java.lang.String[] { "RegionStartKeys", });
           internal_static_hbase_pb_UpdateMobCompactionAsMajorRequest_descriptor =
             getDescriptor().getMessageTypes().get(2);
           internal_static_hbase_pb_UpdateMobCompactionAsMajorRequest_fieldAccessorTable = new

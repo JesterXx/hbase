@@ -44,11 +44,11 @@ public class HMasterMobCompactionTracker extends MasterMobCompactionTrackerServi
     String tableNameAsString = request.getTableName();
     String serverName = request.getServerName();
     TableName tableName = TableName.valueOf(tableNameAsString);
-    List<String> regionNames = master.mobCompactionManager.getCompactingRegions(tableName,
+    List<String> regionStartKeys = master.mobCompactionManager.getCompactingRegions(tableName,
       serverName);
     GetMobCompactRegionsResponse.Builder builder = GetMobCompactRegionsResponse.newBuilder();
-    if (!regionNames.isEmpty()) {
-      builder.addAllRegionNames(regionNames);
+    if (!regionStartKeys.isEmpty()) {
+      builder.addAllRegionStartKeys(regionStartKeys);
     }
     done.run(builder.build());
   }

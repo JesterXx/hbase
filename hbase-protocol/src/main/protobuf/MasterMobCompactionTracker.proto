@@ -29,7 +29,7 @@ message GetMobCompactRegionsRequest {
 }
 
 message GetMobCompactRegionsResponse {
-  repeated string region_names = 2;
+  repeated string region_startKeys = 2;
 }
 
 message UpdateMobCompactionAsMajorRequest {

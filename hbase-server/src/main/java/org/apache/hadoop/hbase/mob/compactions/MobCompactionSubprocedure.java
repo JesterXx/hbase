@@ -191,6 +191,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
           for (Region region : regions) {
             onlineRegionStartKeys.add(MD5Hash.getMD5AsHex(region.getRegionInfo().getStartKey()));
           }
+          Collections.sort(foundRegionStartKeys);
           Collections.sort(onlineRegionStartKeys);
           boolean equals = true;
           for (int i = 0; i < foundRegionStartKeys.size(); i++) {
@@ -213,7 +214,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
 
   /**
    * Gets the regions that run the mob compaction.
-   * @return The start keys of regions that run the mob compaction.
+   * @return The MD5 of start keys of regions that run the mob compaction.
    */
   private List<String> getCompactRegions() throws ServiceException, IOException {
     MasterMobCompactionTrackerProtos.GetMobCompactRegionsRequest request =
@@ -234,7 +235,12 @@ public class MobCompactionSubprocedure extends Subprocedure {
     MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse response =
       MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse
       .parseFrom(servieResponse.getValue().getValue());
-    return response.getRegionNamesList();
+    List<String> results = response.getRegionStartKeysList();
+    List<String> regionStartKeys = new ArrayList<String>(results.size());
+    for (String result : results) {
+      regionStartKeys.add(result);
+    }
+    return regionStartKeys;
   }
 
   /**
