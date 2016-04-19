@@ -18,7 +18,7 @@
  package hbase.pb;
 
 option java_package = "org.apache.hadoop.hbase.protobuf.generated";
-option java_outer_classname = "MasterMobCompactionTrackerProtos";
+option java_outer_classname = "MasterMobCompactionStatusProtos";
 option java_generic_services = true;
 option java_generate_equals_and_hash = true;
 option optimize_for = SPEED;
@@ -29,7 +29,7 @@ message GetMobCompactRegionsRequest {
 }
 
 message GetMobCompactRegionsResponse {
-  repeated string region_startKeys = 2;
+  repeated string region_start_key = 1;
 }
 
 message UpdateMobCompactionAsMajorRequest {
@@ -40,7 +40,7 @@ message UpdateMobCompactionAsMajorRequest {
 message UpdateMobCompactionAsMajorResponse {
 }
 
-service MasterMobCompactionTrackerService {
+service MasterMobCompactionStatusService {
   rpc GetMobCompactRegions(GetMobCompactRegionsRequest)
   	  returns(GetMobCompactRegionsResponse);
 

@@ -47,8 +47,8 @@ import org.apache.hadoop.hbase.procedure.ProcedureMember;
 import org.apache.hadoop.hbase.procedure.Subprocedure;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.CoprocessorServiceResponse;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
@@ -163,9 +163,11 @@ public class MobCompactionSubprocedure extends Subprocedure {
       }
     }
 
+    List<byte[]> sortedStartKeys = new ArrayList<byte[]>(regions.size());
     for (Region region : regions) {
       // submit one task per region for parallelize by region.
       taskManager.submitTask(new RegionMobCompactionTask(region, files, prefixAndKeys));
+      sortedStartKeys.add(region.getRegionInfo().getStartKey());
       monitor.rethrowException();
     }
 
@@ -186,13 +188,12 @@ public class MobCompactionSubprocedure extends Subprocedure {
       // server can be compacted. We call tell master this thing by setting data in zookeeper.
       try {
         List<String> foundRegionStartKeys = getCompactRegions();
-        if (foundRegionStartKeys.size() == regions.size()) {
-          List<String> onlineRegionStartKeys = new ArrayList<String>();
-          for (Region region : regions) {
-            onlineRegionStartKeys.add(MD5Hash.getMD5AsHex(region.getRegionInfo().getStartKey()));
+        if (foundRegionStartKeys.size() == sortedStartKeys.size()) {
+          Collections.sort(sortedStartKeys, Bytes.BYTES_COMPARATOR);
+          List<String> onlineRegionStartKeys = new ArrayList<String>(sortedStartKeys.size());
+          for (byte[] startKey : sortedStartKeys) {
+            onlineRegionStartKeys.add(MD5Hash.getMD5AsHex(startKey));
           }
-          Collections.sort(foundRegionStartKeys);
-          Collections.sort(onlineRegionStartKeys);
           boolean equals = true;
           for (int i = 0; i < foundRegionStartKeys.size(); i++) {
             if (!foundRegionStartKeys.get(i).equals(onlineRegionStartKeys.get(i))) {
@@ -217,48 +218,43 @@ public class MobCompactionSubprocedure extends Subprocedure {
    * @return The MD5 of start keys of regions that run the mob compaction.
    */
   private List<String> getCompactRegions() throws ServiceException, IOException {
-    MasterMobCompactionTrackerProtos.GetMobCompactRegionsRequest request =
-      MasterMobCompactionTrackerProtos.GetMobCompactRegionsRequest
+    MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request =
+      MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest
       .newBuilder().setServerName(rss.getServerName().getServerName())
       .setTableName(tableName.getNameAsString()).build();
     ClientProtos.CoprocessorServiceCall call = ClientProtos.CoprocessorServiceCall
       .newBuilder()
       .setRow(ByteStringer.wrap(HConstants.EMPTY_BYTE_ARRAY))
       .setServiceName(
-        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+        MasterMobCompactionStatusProtos.MasterMobCompactionStatusService.getDescriptor()
           .getFullName())
       .setMethodName(
-        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+        MasterMobCompactionStatusProtos.MasterMobCompactionStatusService.getDescriptor()
           .getMethods().get(0).getName()).setRequest(request.toByteString()).build();
     CoprocessorServiceResponse servieResponse = ProtobufUtil.execService(rss.getClusterConnection()
       .getMaster(), call);
-    MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse response =
-      MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse
+    MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse response =
+      MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse
       .parseFrom(servieResponse.getValue().getValue());
-    List<String> results = response.getRegionStartKeysList();
-    List<String> regionStartKeys = new ArrayList<String>(results.size());
-    for (String result : results) {
-      regionStartKeys.add(result);
-    }
-    return regionStartKeys;
+    return response.getRegionStartKeyList();
   }
 
   /**
    * Updates the mob compaction as major in the current server.
    */
   private void updateCompactionAsMajor() throws ServiceException, IOException {
-    MasterMobCompactionTrackerProtos.UpdateMobCompactionAsMajorRequest request =
-      MasterMobCompactionTrackerProtos.UpdateMobCompactionAsMajorRequest
+    MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest request =
+      MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest
       .newBuilder().setServerName(rss.getServerName().getServerName())
       .setTableName(tableName.getNameAsString()).build();
     ClientProtos.CoprocessorServiceCall call = ClientProtos.CoprocessorServiceCall
       .newBuilder()
       .setRow(ByteStringer.wrap(HConstants.EMPTY_BYTE_ARRAY))
       .setServiceName(
-        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+        MasterMobCompactionStatusProtos.MasterMobCompactionStatusService.getDescriptor()
           .getFullName())
       .setMethodName(
-        MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService.getDescriptor()
+        MasterMobCompactionStatusProtos.MasterMobCompactionStatusService.getDescriptor()
           .getMethods().get(1).getName()).setRequest(request.toByteString()).build();
     ProtobufUtil.execService(rss.getClusterConnection().getMaster(), call);
   }

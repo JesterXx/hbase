@@ -21,20 +21,20 @@ package org.apache.hadoop.hbase.master;
 import java.util.List;
 
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsRequest;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.GetMobCompactRegionsResponse;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.MasterMobCompactionTrackerService;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.UpdateMobCompactionAsMajorRequest;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionTrackerProtos.UpdateMobCompactionAsMajorResponse;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.MasterMobCompactionStatusService;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorResponse;
 
 import com.google.protobuf.RpcCallback;
 import com.google.protobuf.RpcController;
 
-public class HMasterMobCompactionTracker extends MasterMobCompactionTrackerService {
+public class HMasterMobCompactionStatusService extends MasterMobCompactionStatusService {
 
   private HMaster master;
 
-  public HMasterMobCompactionTracker(HMaster master) {
+  public HMasterMobCompactionStatusService(HMaster master) {
     this.master = master;
   }
 
@@ -48,14 +48,15 @@ public class HMasterMobCompactionTracker extends MasterMobCompactionTrackerServi
       serverName);
     GetMobCompactRegionsResponse.Builder builder = GetMobCompactRegionsResponse.newBuilder();
     if (!regionStartKeys.isEmpty()) {
-      builder.addAllRegionStartKeys(regionStartKeys);
+      builder.addAllRegionStartKey(regionStartKeys);
     }
     done.run(builder.build());
   }
 
   @Override
   public void updateMobCompactionAsMajor(RpcController controller,
-    UpdateMobCompactionAsMajorRequest request, RpcCallback<UpdateMobCompactionAsMajorResponse> done) {
+    UpdateMobCompactionAsMajorRequest request,
+    RpcCallback<UpdateMobCompactionAsMajorResponse> done) {
     String tableNameAsString = request.getTableName();
     String serverName = request.getServerName();
     TableName tableName = TableName.valueOf(tableNameAsString);

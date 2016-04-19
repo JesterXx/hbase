@@ -607,7 +607,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     this.mpmHost.register(new MasterFlushTableProcedureManager());
     this.mobCompactionManager = new MasterMobCompactionManager(this);
     this.mpmHost.register(this.mobCompactionManager);
-    this.registerService(new HMasterMobCompactionTracker(this));
+    this.registerService(new HMasterMobCompactionStatusService(this));
     this.mpmHost.loadProcedures(conf);
     this.mpmHost.initialize(this, this.metricsMaster);
 
