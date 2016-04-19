@@ -21,6 +21,7 @@ package org.apache.hadoop.hbase.master;
 import java.util.List;
 
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.MasterMobCompactionStatusService;
@@ -30,6 +31,10 @@ import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProto
 import com.google.protobuf.RpcCallback;
 import com.google.protobuf.RpcController;
 
+/**
+ * A HMaster service that provides the MOB compaction information.
+ */
+@InterfaceAudience.Private
 public class HMasterMobCompactionStatusService extends MasterMobCompactionStatusService {
 
   private HMaster master;
@@ -38,6 +43,9 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
     this.master = master;
   }
 
+  /**
+   * Gets the MD5 of the start keys of the compacted regions.
+   */
   @Override
   public void getMobCompactRegions(RpcController controller, GetMobCompactRegionsRequest request,
     RpcCallback<GetMobCompactRegionsResponse> done) {
@@ -53,6 +61,9 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
     done.run(builder.build());
   }
 
+  /**
+   * Updates the MOB compaction as major in the given server.
+   */
   @Override
   public void updateMobCompactionAsMajor(RpcController controller,
     UpdateMobCompactionAsMajorRequest request,
