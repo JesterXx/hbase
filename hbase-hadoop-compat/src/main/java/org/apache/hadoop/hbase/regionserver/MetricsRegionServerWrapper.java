@@ -98,6 +98,26 @@ public interface MetricsRegionServerWrapper {
   long getStoreFileSize();
 
   /**
+   * @return Max age of store files hosted on this region server
+   */
+  long getMaxStoreFileAge();
+
+  /**
+   * @return Min age of store files hosted on this region server
+   */
+  long getMinStoreFileAge();
+
+  /**
+   *  @return Average age of store files hosted on this region server
+   */
+  long getAvgStoreFileAge();
+
+  /**
+   *  @return Number of reference files on this region server
+   */
+  long getNumReferenceFiles();
+
+  /**
    * Get the number of requests per second.
    */
   double getRequestsPerSecond();
@@ -111,6 +131,11 @@ public interface MetricsRegionServerWrapper {
    * Get the number of read requests to regions hosted on this region server.
    */
   long getReadRequestsCount();
+
+  /**
+   * Get the number of filtered read requests to regions hosted on this region server.
+   */
+  long getFilteredReadRequestsCount();
 
   /**
    * Get the number of write requests to regions hosted on this region server.
@@ -367,4 +392,69 @@ public interface MetricsRegionServerWrapper {
    * @return Count of requests blocked because the memstore size is larger than blockingMemStoreSize
    */
   long getBlockedRequestsCount();
+
+  /**
+   * Get the number of rpc get requests to this region server.
+   */
+  long getRpcGetRequestsCount();
+
+  /**
+   * Get the number of rpc scan requests to this region server.
+   */
+  long getRpcScanRequestsCount();
+
+  /**
+   * Get the number of rpc multi requests to this region server.
+   */
+  long getRpcMultiRequestsCount();
+
+  /**
+   * Get the number of rpc mutate requests to this region server.
+   */
+  long getRpcMutateRequestsCount();
+
+  /**
+   * Get the average region size to this region server.
+   */
+  long getAverageRegionSize();
+
+  long getDataMissCount();
+
+  long getLeafIndexMissCount();
+
+  long getBloomChunkMissCount();
+
+  long getMetaMissCount();
+
+  long getRootIndexMissCount();
+
+  long getIntermediateIndexMissCount();
+
+  long getFileInfoMissCount();
+
+  long getGeneralBloomMetaMissCount();
+
+  long getDeleteFamilyBloomMissCount();
+
+  long getTrailerMissCount();
+
+  long getDataHitCount();
+
+  long getLeafIndexHitCount();
+
+  long getBloomChunkHitCount();
+
+  long getMetaHitCount();
+
+  long getRootIndexHitCount();
+
+  long getIntermediateIndexHitCount();
+
+  long getFileInfoHitCount();
+
+  long getGeneralBloomMetaHitCount();
+
+  long getDeleteFamilyBloomHitCount();
+
+  long getTrailerHitCount();
 }

@@ -17,6 +17,10 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.Message;
+import com.google.protobuf.RpcController;
+import com.google.protobuf.Service;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
@@ -48,11 +52,6 @@ import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoRespo
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.CoprocessorServiceCall;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.wal.WALSplitter.MutationReplay;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.protobuf.Message;
-import com.google.protobuf.RpcController;
-import com.google.protobuf.Service;
 
 /**
  * Regions store data for a certain region of a table.  It stores all columns
@@ -156,7 +155,14 @@ public interface Region extends ConfigurationObserver {
   /** @return true if loading column families on demand by default */
   boolean isLoadingCfsOnDemandDefault();
 
-  /** @return readpoint considering given IsolationLevel */
+  /** @return readpoint considering given IsolationLevel; pass null for default*/
+  long getReadPoint(IsolationLevel isolationLevel);
+
+  /**
+   * @return readpoint considering given IsolationLevel
+   * @deprecated Since 1.2.0. Use {@link #getReadPoint(IsolationLevel)} instead.
+   */
+  @Deprecated
   long getReadpoint(IsolationLevel isolationLevel);
 
   /**
@@ -178,6 +184,9 @@ public interface Region extends ConfigurationObserver {
    */
   void updateReadRequestsCount(long i);
 
+  /** @return filtered read requests count for this region */
+  long getFilteredReadRequestsCount();
+
   /** @return write request count for this region */
   long getWriteRequestsCount();
 
@@ -189,6 +198,9 @@ public interface Region extends ConfigurationObserver {
 
   /** @return memstore size for this region, in bytes */
   long getMemstoreSize();
+
+  /** @return store services for this region, to access services required by store level needs */
+  RegionServicesForStores getRegionServicesForStores();
 
   /** @return the number of mutations processed bypassing the WAL */
   long getNumMutationsWithoutWAL();
@@ -217,8 +229,8 @@ public interface Region extends ConfigurationObserver {
   // Region read locks
 
   /**
-   * Operation enum is used in {@link Region#startRegionOperation} to provide context for
-   * various checks before any region operation begins.
+   * Operation enum is used in {@link Region#startRegionOperation} and elsewhere to provide
+   * context for various checks.
    */
   enum Operation {
     ANY, GET, PUT, DELETE, SCAN, APPEND, INCREMENT, SPLIT_REGION, MERGE_REGION, BATCH_MUTATE,
@@ -323,9 +335,10 @@ public interface Region extends ConfigurationObserver {
    OperationStatus[] batchReplay(MutationReplay[] mutations, long replaySeqId) throws IOException;
 
   /**
-   * Atomically checks if a row/family/qualifier value matches the expected val
-   * If it does, it performs the row mutations.  If the passed value is null, t
-   * is for the lack of column (ie: non-existence)
+   * Atomically checks if a row/family/qualifier value matches the expected value and if it does,
+   * it performs the mutation. If the passed value is null, the lack of column value
+   * (ie: non-existence) is used. See checkAndRowMutate to do many checkAndPuts at a time on a
+   * single row.
    * @param row to check
    * @param family column family to check
    * @param qualifier column qualifier to check
@@ -340,9 +353,10 @@ public interface Region extends ConfigurationObserver {
       ByteArrayComparable comparator, Mutation mutation, boolean writeToWAL) throws IOException;
 
   /**
-   * Atomically checks if a row/family/qualifier value matches the expected val
-   * If it does, it performs the row mutations.  If the passed value is null, t
-   * is for the lack of column (ie: non-existence)
+   * Atomically checks if a row/family/qualifier value matches the expected values and if it does,
+   * it performs the row mutations. If the passed value is null, the lack of column value
+   * (ie: non-existence) is used. Use to do many mutations on a single row. Use checkAndMutate
+   * to do one checkAndMutate at a time.
    * @param row to check
    * @param family column family to check
    * @param qualifier column qualifier to check
@@ -350,7 +364,7 @@ public interface Region extends ConfigurationObserver {
    * @param comparator
    * @param mutations
    * @param writeToWAL
-   * @return true if mutation was applied, false otherwise
+   * @return true if mutations were applied, false otherwise
    * @throws IOException
    */
   boolean checkAndRowMutate(byte [] row, byte [] family, byte [] qualifier, CompareOp compareOp,

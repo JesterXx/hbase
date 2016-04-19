@@ -378,7 +378,7 @@ public class CellComparator implements Comparator<Cell>, Serializable {
         roffset, rlength);
   }
 
-  private static int compareWithoutRow(final Cell left, final Cell right) {
+  public static int compareWithoutRow(final Cell left, final Cell right) {
     // If the column is not specified, the "minimum" key type appears the
     // latest in the sorted order, regardless of the timestamp. This is used
     // for specifying the last key/value in a given row, because there is no
@@ -433,7 +433,7 @@ public class CellComparator implements Comparator<Cell>, Serializable {
   /**
    * Used to compare two cells based on the column hint provided. This is specifically
    * used when we need to optimize the seeks based on the next indexed key. This is an
-   * advance usage API specifically needed for some optimizations.
+   * advanced usage API specifically needed for some optimizations.
    * @param nextIndexedCell the next indexed cell 
    * @param currentCell the cell to be compared
    * @param foff the family offset of the currentCell

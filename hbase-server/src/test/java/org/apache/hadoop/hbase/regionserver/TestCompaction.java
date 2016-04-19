@@ -59,9 +59,9 @@ import org.apache.hadoop.hbase.io.hfile.HFileScanner;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionRequest;
 import org.apache.hadoop.hbase.regionserver.compactions.DefaultCompactor;
-import org.apache.hadoop.hbase.regionserver.compactions.NoLimitCompactionThroughputController;
-import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputController;
-import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputControllerFactory;
+import org.apache.hadoop.hbase.regionserver.throttle.CompactionThroughputControllerFactory;
+import org.apache.hadoop.hbase.regionserver.throttle.NoLimitThroughputController;
+import org.apache.hadoop.hbase.regionserver.throttle.ThroughputController;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
@@ -86,7 +86,7 @@ public class TestCompaction {
   @Rule public TestName name = new TestName();
   private static final HBaseTestingUtility UTIL = HBaseTestingUtility.createLocalHTU();
   protected Configuration conf = UTIL.getConfiguration();
-  
+
   private HRegion r = null;
   private HTableDescriptor htd = null;
   private static final byte [] COLUMN_FAMILY = fam1;
@@ -104,7 +104,7 @@ public class TestCompaction {
     conf.setInt(HConstants.HREGION_MEMSTORE_FLUSH_SIZE, 1024 * 1024);
     conf.setInt(HConstants.HREGION_MEMSTORE_BLOCK_MULTIPLIER, 100);
     conf.set(CompactionThroughputControllerFactory.HBASE_THROUGHPUT_CONTROLLER_KEY,
-      NoLimitCompactionThroughputController.class.getName());
+      NoLimitThroughputController.class.getName());
     compactionThreshold = conf.getInt("hbase.hstore.compactionThreshold", 3);
 
     secondRowBytes = START_KEY_BYTES.clone();
@@ -158,6 +158,7 @@ public class TestCompaction {
 
       HRegion spyR = spy(r);
       doAnswer(new Answer() {
+        @Override
         public Object answer(InvocationOnMock invocation) throws Throwable {
           r.writestate.writesEnabled = false;
           return invocation.callRealMethod();
@@ -363,13 +364,7 @@ public class TestCompaction {
       }
 
       @Override
-      public List<Path> compact(CompactionThroughputController throughputController)
-          throws IOException {
-        return compact(throughputController, null);
-      }
-
-      @Override
-      public List<Path> compact(CompactionThroughputController throughputController, User user)
+      public List<Path> compact(ThroughputController throughputController, User user)
           throws IOException {
         finishCompaction(this.selectedFiles);
         return new ArrayList<Path>();
@@ -421,13 +416,7 @@ public class TestCompaction {
       }
 
       @Override
-      public List<Path> compact(CompactionThroughputController throughputController)
-          throws IOException {
-        return compact(throughputController, null);
-      }
-
-      @Override
-      public List<Path> compact(CompactionThroughputController throughputController, User user)
+      public List<Path> compact(ThroughputController throughputController, User user)
           throws IOException {
         try {
           isInCompact = true;
@@ -467,6 +456,7 @@ public class TestCompaction {
     @Override
     public void cancelCompaction(Object object) {}
 
+    @Override
     public int getPriority() {
       return Integer.MIN_VALUE; // some invalid value, see createStoreMock
     }
@@ -510,10 +500,11 @@ public class TestCompaction {
     HRegion r = mock(HRegion.class);
     when(
       r.compact(any(CompactionContext.class), any(Store.class),
-        any(CompactionThroughputController.class), any(User.class))).then(new Answer<Boolean>() {
+        any(ThroughputController.class), any(User.class))).then(new Answer<Boolean>() {
+      @Override
       public Boolean answer(InvocationOnMock invocation) throws Throwable {
         invocation.getArgumentAt(0, CompactionContext.class).compact(
-          invocation.getArgumentAt(2, CompactionThroughputController.class));
+          invocation.getArgumentAt(2, ThroughputController.class), null);
         return true;
       }
     });
@@ -571,7 +562,7 @@ public class TestCompaction {
   private static StoreFile createFile() throws Exception {
     StoreFile sf = mock(StoreFile.class);
     when(sf.getPath()).thenReturn(new Path("file"));
-    StoreFile.Reader r = mock(StoreFile.Reader.class);
+    StoreFileReader r = mock(StoreFileReader.class);
     when(r.length()).thenReturn(10L);
     when(sf.getReader()).thenReturn(r);
     return sf;

@@ -34,8 +34,11 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.executor.ExecutorService;
 import org.apache.hadoop.hbase.master.normalizer.RegionNormalizer;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
+import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
+import org.apache.hadoop.hbase.procedure.MasterProcedureManagerHost;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.quotas.MasterQuotaManager;
+import org.apache.hadoop.hbase.security.User;
 
 import com.google.protobuf.Service;
 
@@ -44,6 +47,16 @@ import com.google.protobuf.Service;
  */
 @InterfaceAudience.Private
 public interface MasterServices extends Server {
+  /**
+   * @return the underlying snapshot manager
+   */
+  SnapshotManager getSnapshotManager();
+
+  /**
+   * @return the underlying MasterProcedureManagerHost
+   */
+  MasterProcedureManagerHost getMasterProcedureManagerHost();
+
   /**
    * @return Master's instance of {@link ClusterSchema}
    */
@@ -267,10 +280,11 @@ public interface MasterServices extends Server {
    * @param region_b region to merge
    * @param forcible true if do a compulsory merge, otherwise we will only merge
    *          two adjacent regions
+   * @param user effective user
    * @throws IOException
    */
   void dispatchMergingRegions(
-    final HRegionInfo region_a, final HRegionInfo region_b, final boolean forcible
+    final HRegionInfo region_a, final HRegionInfo region_b, final boolean forcible, final User user
   ) throws IOException;
 
   /**
@@ -312,7 +326,7 @@ public interface MasterServices extends Server {
   public List<TableName> listTableNamesByNamespace(String name) throws IOException;
 
   /**
-   * @param table
+   * @param table the table for which last successful major compaction time is queried
    * @return the timestamp of the last successful major compaction for the passed table,
    * or 0 if no HFile resulting from a major compaction exists
    * @throws IOException
@@ -326,4 +340,9 @@ public interface MasterServices extends Server {
    * @throws IOException
    */
   public long getLastMajorCompactionTimestampForRegion(byte[] regionName) throws IOException;
+
+  /**
+   * @return load balancer
+   */
+  public LoadBalancer getLoadBalancer();
 }

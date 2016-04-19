@@ -55,8 +55,6 @@ import org.apache.hadoop.hbase.ProcedureInfo;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
-import org.apache.hadoop.hbase.Tag;
-import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Connection;
@@ -707,6 +705,22 @@ public class TestAccessController extends SecureTestUtil {
   }
 
   @Test (timeout=180000)
+  public void testSetSplitOrMergeEnabled() throws Exception {
+    AccessTestAction action = new AccessTestAction() {
+      @Override
+      public Object run() throws Exception {
+        ACCESS_CONTROLLER.preSetSplitOrMergeEnabled(ObserverContext.createAndPrepare(CP_ENV, null),
+          true, Admin.MasterSwitchType.MERGE);
+        return null;
+      }
+    };
+
+    verifyAllowed(action, SUPERUSER, USER_ADMIN, USER_GROUP_ADMIN);
+    verifyDenied(action, USER_CREATE, USER_OWNER, USER_RW, USER_RO, USER_NONE, USER_GROUP_READ,
+      USER_GROUP_WRITE, USER_GROUP_CREATE);
+  }
+
+  @Test (timeout=180000)
   public void testBalance() throws Exception {
     AccessTestAction action = new AccessTestAction() {
       @Override
@@ -1151,7 +1165,7 @@ public class TestAccessController extends SecureTestUtil {
           BlockingRpcChannel service = acl.coprocessorService(TEST_TABLE.getName());
           AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-          ProtobufUtil.grant(protocol, USER_RO.getShortName(), TEST_TABLE, TEST_FAMILY, null,
+          ProtobufUtil.grant(null, protocol, USER_RO.getShortName(), TEST_TABLE, TEST_FAMILY, null,
             Action.READ);
         }
         return null;
@@ -1166,7 +1180,7 @@ public class TestAccessController extends SecureTestUtil {
           BlockingRpcChannel service = acl.coprocessorService(TEST_TABLE.getName());
           AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-          ProtobufUtil.revoke(protocol, USER_RO.getShortName(), TEST_TABLE, TEST_FAMILY, null,
+          ProtobufUtil.revoke(null, protocol, USER_RO.getShortName(), TEST_TABLE, TEST_FAMILY, null,
             Action.READ);
         }
         return null;
@@ -1181,7 +1195,7 @@ public class TestAccessController extends SecureTestUtil {
           BlockingRpcChannel service = acl.coprocessorService(TEST_TABLE.getName());
           AccessControlService.BlockingInterface protocol =
               AccessControlService.newBlockingStub(service);
-          ProtobufUtil.getUserPermissions(protocol, TEST_TABLE);
+          ProtobufUtil.getUserPermissions(null, protocol, TEST_TABLE);
         }
         return null;
       }
@@ -1195,7 +1209,7 @@ public class TestAccessController extends SecureTestUtil {
           BlockingRpcChannel service = acl.coprocessorService(HConstants.EMPTY_START_ROW);
           AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-          ProtobufUtil.getUserPermissions(protocol);
+          ProtobufUtil.getUserPermissions(null, protocol);
         }
         return null;
       }
@@ -1606,7 +1620,7 @@ public class TestAccessController extends SecureTestUtil {
         BlockingRpcChannel service = acl.coprocessorService(tableName.getName());
         AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-        perms = ProtobufUtil.getUserPermissions(protocol, tableName);
+        perms = ProtobufUtil.getUserPermissions(null, protocol, tableName);
       } finally {
         acl.close();
       }
@@ -1633,7 +1647,7 @@ public class TestAccessController extends SecureTestUtil {
         BlockingRpcChannel service = acl.coprocessorService(tableName.getName());
         AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-        perms = ProtobufUtil.getUserPermissions(protocol, tableName);
+        perms = ProtobufUtil.getUserPermissions(null, protocol, tableName);
       } finally {
         acl.close();
       }
@@ -1657,7 +1671,7 @@ public class TestAccessController extends SecureTestUtil {
         BlockingRpcChannel service = acl.coprocessorService(tableName.getName());
         AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-        perms = ProtobufUtil.getUserPermissions(protocol, tableName);
+        perms = ProtobufUtil.getUserPermissions(null, protocol, tableName);
       } finally {
         acl.close();
       }
@@ -1677,7 +1691,7 @@ public class TestAccessController extends SecureTestUtil {
         BlockingRpcChannel service = acl.coprocessorService(tableName.getName());
         AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-        perms = ProtobufUtil.getUserPermissions(protocol, tableName);
+        perms = ProtobufUtil.getUserPermissions(null, protocol, tableName);
       } finally {
         acl.close();
       }
@@ -1697,7 +1711,7 @@ public class TestAccessController extends SecureTestUtil {
         BlockingRpcChannel service = acl.coprocessorService(tableName.getName());
         AccessControlService.BlockingInterface protocol =
             AccessControlService.newBlockingStub(service);
-        perms = ProtobufUtil.getUserPermissions(protocol, tableName);
+        perms = ProtobufUtil.getUserPermissions(null, protocol, tableName);
       } finally {
         acl.close();
       }
@@ -1720,7 +1734,7 @@ public class TestAccessController extends SecureTestUtil {
       BlockingRpcChannel service = acl.coprocessorService(HConstants.EMPTY_START_ROW);
       AccessControlService.BlockingInterface protocol =
         AccessControlService.newBlockingStub(service);
-      perms = ProtobufUtil.getUserPermissions(protocol);
+      perms = ProtobufUtil.getUserPermissions(null, protocol);
     } finally {
       acl.close();
     }
@@ -2509,30 +2523,6 @@ public class TestAccessController extends SecureTestUtil {
   }
 
   @Test (timeout=180000)
-  public void testReservedCellTags() throws Exception {
-    AccessTestAction putWithReservedTag = new AccessTestAction() {
-      @Override
-      public Object run() throws Exception {
-        try(Connection conn = ConnectionFactory.createConnection(conf);
-            Table t = conn.getTable(TEST_TABLE);) {
-          KeyValue kv = new KeyValue(TEST_ROW, TEST_FAMILY, TEST_QUALIFIER,
-            HConstants.LATEST_TIMESTAMP, HConstants.EMPTY_BYTE_ARRAY,
-            new Tag[] { new ArrayBackedTag(AccessControlLists.ACL_TAG_TYPE,
-              ProtobufUtil.toUsersAndPermissions(USER_OWNER.getShortName(),
-                new Permission(Permission.Action.READ)).toByteArray()) });
-          t.put(new Put(TEST_ROW).add(kv));
-        }
-        return null;
-      }
-    };
-
-    // Current user is superuser
-    verifyAllowed(putWithReservedTag, User.getCurrent());
-    // No other user should be allowed
-    verifyDenied(putWithReservedTag, USER_OWNER, USER_ADMIN, USER_CREATE, USER_RW, USER_RO);
-  }
-
-  @Test (timeout=180000)
   public void testSetQuota() throws Exception {
     AccessTestAction setUserQuotaAction = new AccessTestAction() {
       @Override
@@ -2763,5 +2753,80 @@ public class TestAccessController extends SecureTestUtil {
     verifyAllowed(replicateLogEntriesAction, SUPERUSER, USER_ADMIN, USER_GROUP_WRITE);
     verifyDenied(replicateLogEntriesAction, USER_CREATE, USER_RW, USER_RO, USER_NONE, USER_OWNER,
       USER_GROUP_READ, USER_GROUP_ADMIN, USER_GROUP_CREATE);
+  }
+
+  @Test
+  public void testMoveServers() throws Exception {
+    AccessTestAction action1 = new AccessTestAction() {
+      @Override
+      public Object run() throws Exception {
+        ACCESS_CONTROLLER.preMoveServers(ObserverContext.createAndPrepare(CP_ENV, null),
+            null, null);
+        return null;
+      }
+    };
+
+    verifyAllowed(action1, SUPERUSER, USER_ADMIN);
+    verifyDenied(action1, USER_CREATE, USER_RW, USER_RO, USER_NONE, USER_OWNER);
+  }
+
+  @Test
+  public void testMoveTables() throws Exception {
+    AccessTestAction action1 = new AccessTestAction() {
+      @Override
+      public Object run() throws Exception {
+        ACCESS_CONTROLLER.preMoveTables(ObserverContext.createAndPrepare(CP_ENV, null),
+            null, null);
+        return null;
+      }
+    };
+
+    verifyAllowed(action1, SUPERUSER, USER_ADMIN);
+    verifyDenied(action1, USER_CREATE, USER_RW, USER_RO, USER_NONE, USER_OWNER);
+  }
+
+  @Test
+  public void testAddGroup() throws Exception {
+    AccessTestAction action1 = new AccessTestAction() {
+      @Override
+      public Object run() throws Exception {
+        ACCESS_CONTROLLER.preAddRSGroup(ObserverContext.createAndPrepare(CP_ENV, null),
+            null);
+        return null;
+      }
+    };
+
+    verifyAllowed(action1, SUPERUSER, USER_ADMIN);
+    verifyDenied(action1, USER_CREATE, USER_RW, USER_RO, USER_NONE, USER_OWNER);
+  }
+
+  @Test
+  public void testRemoveGroup() throws Exception {
+    AccessTestAction action1 = new AccessTestAction() {
+      @Override
+      public Object run() throws Exception {
+        ACCESS_CONTROLLER.preRemoveRSGroup(ObserverContext.createAndPrepare(CP_ENV, null),
+            null);
+        return null;
+      }
+    };
+
+    verifyAllowed(action1, SUPERUSER, USER_ADMIN);
+    verifyDenied(action1, USER_CREATE, USER_RW, USER_RO, USER_NONE, USER_OWNER);
+  }
+
+  @Test
+  public void testBalanceGroup() throws Exception {
+    AccessTestAction action1 = new AccessTestAction() {
+      @Override
+      public Object run() throws Exception {
+        ACCESS_CONTROLLER.preBalanceRSGroup(ObserverContext.createAndPrepare(CP_ENV, null),
+            null);
+        return null;
+      }
+    };
+
+    verifyAllowed(action1, SUPERUSER, USER_ADMIN);
+    verifyDenied(action1, USER_CREATE, USER_RW, USER_RO, USER_NONE, USER_OWNER);
   }
 }

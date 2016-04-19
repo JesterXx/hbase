@@ -41,12 +41,15 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.UnknownRegionException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
+import org.apache.hadoop.hbase.exceptions.DeserializationException;
 import org.apache.hadoop.hbase.exceptions.MergeRegionException;
 import org.apache.hadoop.hbase.exceptions.UnknownProtocolException;
 import org.apache.hadoop.hbase.ipc.PriorityFunction;
 import org.apache.hadoop.hbase.ipc.QosPriority;
+import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.ipc.RpcServer.BlockingServiceAndInterface;
 import org.apache.hadoop.hbase.ipc.ServerRpcController;
 import org.apache.hadoop.hbase.mob.MobUtils;
@@ -296,7 +299,7 @@ public class MasterRpcServices extends RSRpcServices
     try {
       long procId = master.addColumn(
           ProtobufUtil.toTableName(req.getTableName()),
-          HColumnDescriptor.convert(req.getColumnFamilies()),
+          ProtobufUtil.convertToHColumnDesc(req.getColumnFamilies()),
           req.getNonceGroup(),
           req.getNonce());
       if (procId == -1) {
@@ -371,7 +374,7 @@ public class MasterRpcServices extends RSRpcServices
   @Override
   public CreateTableResponse createTable(RpcController controller, CreateTableRequest req)
   throws ServiceException {
-    HTableDescriptor hTableDescriptor = HTableDescriptor.convert(req.getTableSchema());
+    HTableDescriptor hTableDescriptor = ProtobufUtil.convertToHTableDesc(req.getTableSchema());
     byte [][] splitKeys = ProtobufUtil.getSplitKeysArray(req);
     try {
       long procId =
@@ -539,7 +542,7 @@ public class MasterRpcServices extends RSRpcServices
     }
 
     try {
-      master.dispatchMergingRegions(regionInfoA, regionInfoB, forcible);
+      master.dispatchMergingRegions(regionInfoA, regionInfoB, forcible, RpcServer.getRequestUser());
       master.cpHost.postDispatchMerge(regionInfoA, regionInfoB);
     } catch (IOException ioe) {
       throw new ServiceException(ioe);
@@ -639,7 +642,7 @@ public class MasterRpcServices extends RSRpcServices
     try {
       master.checkInitialized();
       ProcedureDescription desc = request.getProcedure();
-      MasterProcedureManager mpm = master.mpmHost.getProcedureManager(
+      MasterProcedureManager mpm = master.getMasterProcedureManagerHost().getProcedureManager(
         desc.getSignature());
       if (mpm == null) {
         throw new ServiceException("The procedure is not registered: "
@@ -674,7 +677,7 @@ public class MasterRpcServices extends RSRpcServices
     try {
       master.checkInitialized();
       ProcedureDescription desc = request.getProcedure();
-      MasterProcedureManager mpm = master.mpmHost.getProcedureManager(
+      MasterProcedureManager mpm = master.getMasterProcedureManagerHost().getProcedureManager(
         desc.getSignature());
       if (mpm == null) {
         throw new ServiceException("The procedure is not registered: "
@@ -805,7 +808,7 @@ public class MasterRpcServices extends RSRpcServices
       if (descriptors != null && descriptors.size() > 0) {
         // Add the table descriptors to the response
         for (HTableDescriptor htd: descriptors) {
-          builder.addTableSchema(htd.convert());
+          builder.addTableSchema(ProtobufUtil.convertToTableSchema(htd));
         }
       }
       return builder.build();
@@ -892,7 +895,7 @@ public class MasterRpcServices extends RSRpcServices
     try {
       master.checkInitialized();
       ProcedureDescription desc = request.getProcedure();
-      MasterProcedureManager mpm = master.mpmHost.getProcedureManager(
+      MasterProcedureManager mpm = master.getMasterProcedureManagerHost().getProcedureManager(
         desc.getSignature());
       if (mpm == null) {
         throw new ServiceException("The procedure is not registered: "
@@ -904,33 +907,6 @@ public class MasterRpcServices extends RSRpcServices
       IsProcedureDoneResponse.Builder builder =
         IsProcedureDoneResponse.newBuilder();
       boolean done = mpm.isProcedureDone(desc);
-      builder.setDone(done);
-      return builder.build();
-    } catch (ForeignException e) {
-      throw new ServiceException(e.getCause());
-    } catch (IOException e) {
-      throw new ServiceException(e);
-    }
-  }
-
-  /**
-   * Returns the status of the requested snapshot restore/clone operation.
-   * This method is not exposed to the user, it is just used internally by HBaseAdmin
-   * to verify if the restore is completed.
-   *
-   * No exceptions are thrown if the restore is not running, the result will be "done".
-   *
-   * @return done <tt>true</tt> if the restore/clone operation is completed.
-   * @throws ServiceException if the operation failed.
-   */
-  @Override
-  public IsRestoreSnapshotDoneResponse isRestoreSnapshotDone(RpcController controller,
-      IsRestoreSnapshotDoneRequest request) throws ServiceException {
-    try {
-      master.checkInitialized();
-      SnapshotDescription snapshot = request.getSnapshot();
-      IsRestoreSnapshotDoneResponse.Builder builder = IsRestoreSnapshotDoneResponse.newBuilder();
-      boolean done = master.snapshotManager.isRestoreDone(snapshot);
       builder.setDone(done);
       return builder.build();
     } catch (ForeignException e) {
@@ -1057,7 +1033,7 @@ public class MasterRpcServices extends RSRpcServices
           ListTableDescriptorsByNamespaceResponse.newBuilder();
       for (HTableDescriptor htd : master
           .listTableDescriptorsByNamespace(request.getNamespaceName())) {
-        b.addTableSchema(htd.convert());
+        b.addTableSchema(ProtobufUtil.convertToTableSchema(htd));
       }
       return b.build();
     } catch (IOException e) {
@@ -1086,7 +1062,7 @@ public class MasterRpcServices extends RSRpcServices
     try {
       long procId = master.modifyColumn(
         ProtobufUtil.toTableName(req.getTableName()),
-        HColumnDescriptor.convert(req.getColumnFamilies()),
+        ProtobufUtil.convertToHColumnDesc(req.getColumnFamilies()),
         req.getNonceGroup(),
         req.getNonce());
       if (procId == -1) {
@@ -1120,7 +1096,7 @@ public class MasterRpcServices extends RSRpcServices
     try {
       long procId = master.modifyTable(
         ProtobufUtil.toTableName(req.getTableName()),
-        HTableDescriptor.convert(req.getTableSchema()),
+        ProtobufUtil.convertToHTableDesc(req.getTableSchema()),
         req.getNonceGroup(),
         req.getNonce());
       return ModifyTableResponse.newBuilder().setProcId(procId).build();
@@ -1213,8 +1189,9 @@ public class MasterRpcServices extends RSRpcServices
       TableName dstTable = TableName.valueOf(request.getSnapshot().getTable());
       master.getNamespace(dstTable.getNamespaceAsString());
       SnapshotDescription reqSnapshot = request.getSnapshot();
-      master.snapshotManager.restoreSnapshot(reqSnapshot);
-      return RestoreSnapshotResponse.newBuilder().build();
+      long procId = master.snapshotManager.restoreOrCloneSnapshot(
+        reqSnapshot, request.getNonceGroup(), request.getNonce());
+      return RestoreSnapshotResponse.newBuilder().setProcId(procId).build();
     } catch (ForeignException e) {
       throw new ServiceException(e.getCause());
     } catch (IOException e) {
@@ -1307,6 +1284,14 @@ public class MasterRpcServices extends RSRpcServices
       }
       Pair<HRegionInfo, ServerName> pair =
         MetaTableAccessor.getRegion(master.getConnection(), regionName);
+      if (Bytes.equals(HRegionInfo.FIRST_META_REGIONINFO.getRegionName(),regionName)) {
+        pair = new Pair<HRegionInfo, ServerName>(HRegionInfo.FIRST_META_REGIONINFO,
+            master.getMetaTableLocator().getMetaRegionLocation(master.getZooKeeper()));
+      }
+      if (pair == null) {
+        throw new UnknownRegionException(Bytes.toString(regionName));
+      }
+
       if (pair == null) throw new UnknownRegionException(Bytes.toString(regionName));
       HRegionInfo hri = pair.getFirst();
       if (master.cpHost != null) {
@@ -1505,6 +1490,66 @@ public class MasterRpcServices extends RSRpcServices
   }
 
   @Override
+  public SetSplitOrMergeEnabledResponse setSplitOrMergeEnabled(RpcController controller,
+    SetSplitOrMergeEnabledRequest request) throws ServiceException {
+    SetSplitOrMergeEnabledResponse.Builder response = SetSplitOrMergeEnabledResponse.newBuilder();
+    try {
+      master.checkInitialized();
+      boolean newValue = request.getEnabled();
+      boolean skipLock = request.getSkipLock();
+      if (!master.getSplitOrMergeTracker().lock(skipLock)) {
+        throw new DoNotRetryIOException("can't set splitOrMerge switch due to lock");
+      }
+      for (MasterSwitchType masterSwitchType : request.getSwitchTypesList()) {
+        Admin.MasterSwitchType switchType = convert(masterSwitchType);
+        boolean oldValue = master.isSplitOrMergeEnabled(switchType);
+        response.addPrevValue(oldValue);
+        boolean bypass = false;
+        if (master.cpHost != null) {
+          bypass = master.cpHost.preSetSplitOrMergeEnabled(newValue, switchType);
+        }
+        if (!bypass) {
+          master.getSplitOrMergeTracker().setSplitOrMergeEnabled(newValue, switchType);
+        }
+        if (master.cpHost != null) {
+          master.cpHost.postSetSplitOrMergeEnabled(newValue, switchType);
+        }
+      }
+    } catch (IOException e) {
+      throw new ServiceException(e);
+    } catch (KeeperException e) {
+      throw new ServiceException(e);
+    }
+    return response.build();
+  }
+
+  @Override
+  public IsSplitOrMergeEnabledResponse isSplitOrMergeEnabled(RpcController controller,
+    IsSplitOrMergeEnabledRequest request) throws ServiceException {
+    IsSplitOrMergeEnabledResponse.Builder response = IsSplitOrMergeEnabledResponse.newBuilder();
+    response.setEnabled(master.isSplitOrMergeEnabled(convert(request.getSwitchType())));
+    return response.build();
+  }
+
+  @Override
+  public ReleaseSplitOrMergeLockAndRollbackResponse
+  releaseSplitOrMergeLockAndRollback(RpcController controller,
+    ReleaseSplitOrMergeLockAndRollbackRequest request) throws ServiceException {
+    try {
+      master.getSplitOrMergeTracker().releaseLockAndRollback();
+    } catch (KeeperException e) {
+      throw new ServiceException(e);
+    } catch (DeserializationException e) {
+      throw new ServiceException(e);
+    } catch (InterruptedException e) {
+      throw new ServiceException(e);
+    }
+    ReleaseSplitOrMergeLockAndRollbackResponse.Builder builder =
+      ReleaseSplitOrMergeLockAndRollbackResponse.newBuilder();
+    return builder.build();
+  }
+
+  @Override
   public NormalizeResponse normalize(RpcController controller,
       NormalizeRequest request) throws ServiceException {
     try {
@@ -1572,5 +1617,17 @@ public class MasterRpcServices extends RSRpcServices
       throw new ServiceException(e);
     }
     return response.build();
+  }
+
+  private Admin.MasterSwitchType convert(MasterSwitchType switchType) {
+    switch (switchType) {
+      case SPLIT:
+        return Admin.MasterSwitchType.SPLIT;
+      case MERGE:
+        return Admin.MasterSwitchType.MERGE;
+      default:
+        break;
+    }
+    return null;
   }
 }

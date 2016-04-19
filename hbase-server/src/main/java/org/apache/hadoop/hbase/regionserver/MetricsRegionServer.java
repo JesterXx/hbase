@@ -97,8 +97,12 @@ public class MetricsRegionServer {
     serverSource.updateReplay(t);
   }
 
-  public void updateScannerNext(long scanSize){
-    serverSource.updateScannerNext(scanSize);
+  public void updateScanSize(long scanSize){
+    serverSource.updateScanSize(scanSize);
+  }
+
+  public void updateScanTime(long t) {
+    serverSource.updateScanTime(t);
   }
 
   public void updateSplitTime(long t) {
@@ -113,7 +117,18 @@ public class MetricsRegionServer {
     serverSource.incrSplitSuccess();
   }
 
-  public void updateFlushTime(long t) {
+  public void updateFlush(long t, long memstoreSize, long fileSize) {
     serverSource.updateFlushTime(t);
+    serverSource.updateFlushMemstoreSize(memstoreSize);
+    serverSource.updateFlushOutputSize(fileSize);
+  }
+
+  public void updateCompaction(boolean isMajor, long t, int inputFileCount, int outputFileCount,
+      long inputBytes, long outputBytes) {
+    serverSource.updateCompactionTime(isMajor, t);
+    serverSource.updateCompactionInputFileCount(isMajor, inputFileCount);
+    serverSource.updateCompactionOutputFileCount(isMajor, outputFileCount);
+    serverSource.updateCompactionInputSize(isMajor, inputBytes);
+    serverSource.updateCompactionOutputSize(isMajor, outputBytes);
   }
 }

@@ -63,8 +63,8 @@ public class CombinedBlockCache implements ResizableBlockCache, HeapSize {
   @Override
   public void cacheBlock(BlockCacheKey cacheKey, Cacheable buf, boolean inMemory,
       final boolean cacheDataInL1) {
-    boolean isMetaBlock = buf.getBlockType().getCategory() != BlockCategory.DATA;
-    if (isMetaBlock || cacheDataInL1) {
+    boolean metaBlock = buf.getBlockType().getCategory() != BlockCategory.DATA;
+    if (metaBlock || cacheDataInL1) {
       lruCache.cacheBlock(cacheKey, buf, inMemory, cacheDataInL1);
     } else {
       l2Cache.cacheBlock(cacheKey, buf, inMemory, false);
@@ -81,12 +81,9 @@ public class CombinedBlockCache implements ResizableBlockCache, HeapSize {
       boolean repeat, boolean updateCacheMetrics) {
     // TODO: is there a hole here, or just awkwardness since in the lruCache getBlock
     // we end up calling l2Cache.getBlock.
-    if (lruCache.containsBlock(cacheKey)) {
-      return lruCache.getBlock(cacheKey, caching, repeat, updateCacheMetrics);
-    }
-    Cacheable result = l2Cache.getBlock(cacheKey, caching, repeat, updateCacheMetrics);
-
-    return result;
+    return lruCache.containsBlock(cacheKey)?
+        lruCache.getBlock(cacheKey, caching, repeat, updateCacheMetrics):
+        l2Cache.getBlock(cacheKey, caching, repeat, updateCacheMetrics);
   }
 
   @Override
@@ -139,6 +136,112 @@ public class CombinedBlockCache implements ResizableBlockCache, HeapSize {
       super("CombinedBlockCache");
       this.lruCacheStats = lbcStats;
       this.bucketCacheStats = fcStats;
+    }
+
+    @Override
+    public long getDataMissCount() {
+      return lruCacheStats.getDataMissCount() + bucketCacheStats.getDataMissCount();
+    }
+
+    @Override
+    public long getLeafIndexMissCount() {
+      return lruCacheStats.getLeafIndexMissCount() + bucketCacheStats.getLeafIndexMissCount();
+    }
+
+    @Override
+    public long getBloomChunkMissCount() {
+      return lruCacheStats.getBloomChunkMissCount() + bucketCacheStats.getBloomChunkMissCount();
+    }
+
+    @Override
+    public long getMetaMissCount() {
+      return lruCacheStats.getMetaMissCount() + bucketCacheStats.getMetaMissCount();
+    }
+
+    @Override
+    public long getRootIndexMissCount() {
+      return lruCacheStats.getRootIndexMissCount() + bucketCacheStats.getRootIndexMissCount();
+    }
+
+    @Override
+    public long getIntermediateIndexMissCount() {
+      return lruCacheStats.getIntermediateIndexMissCount() +
+          bucketCacheStats.getIntermediateIndexMissCount();
+    }
+
+    @Override
+    public long getFileInfoMissCount() {
+      return lruCacheStats.getFileInfoMissCount() + bucketCacheStats.getFileInfoMissCount();
+    }
+
+    @Override
+    public long getGeneralBloomMetaMissCount() {
+      return lruCacheStats.getGeneralBloomMetaMissCount() +
+          bucketCacheStats.getGeneralBloomMetaMissCount();
+    }
+
+    @Override
+    public long getDeleteFamilyBloomMissCount() {
+      return lruCacheStats.getDeleteFamilyBloomMissCount() +
+          bucketCacheStats.getDeleteFamilyBloomMissCount();
+    }
+
+    @Override
+    public long getTrailerMissCount() {
+      return lruCacheStats.getTrailerMissCount() + bucketCacheStats.getTrailerMissCount();
+    }
+
+    @Override
+    public long getDataHitCount() {
+      return lruCacheStats.getDataHitCount() + bucketCacheStats.getDataHitCount();
+    }
+
+    @Override
+    public long getLeafIndexHitCount() {
+      return lruCacheStats.getLeafIndexHitCount() + bucketCacheStats.getLeafIndexHitCount();
+    }
+
+    @Override
+    public long getBloomChunkHitCount() {
+      return lruCacheStats.getBloomChunkHitCount() + bucketCacheStats.getBloomChunkHitCount();
+    }
+
+    @Override
+    public long getMetaHitCount() {
+      return lruCacheStats.getMetaHitCount() + bucketCacheStats.getMetaHitCount();
+    }
+
+    @Override
+    public long getRootIndexHitCount() {
+      return lruCacheStats.getRootIndexHitCount() + bucketCacheStats.getRootIndexHitCount();
+    }
+
+    @Override
+    public long getIntermediateIndexHitCount() {
+      return lruCacheStats.getIntermediateIndexHitCount() +
+          bucketCacheStats.getIntermediateIndexHitCount();
+    }
+
+    @Override
+    public long getFileInfoHitCount() {
+      return lruCacheStats.getFileInfoHitCount() + bucketCacheStats.getFileInfoHitCount();
+    }
+
+    @Override
+    public long getGeneralBloomMetaHitCount() {
+      return lruCacheStats.getGeneralBloomMetaHitCount() +
+          bucketCacheStats.getGeneralBloomMetaHitCount();
+    }
+
+    @Override
+    public long getDeleteFamilyBloomHitCount() {
+      return lruCacheStats.getDeleteFamilyBloomHitCount() +
+          bucketCacheStats.getDeleteFamilyBloomHitCount();
+    }
+
+    @Override
+    public long getTrailerHitCount() {
+      return lruCacheStats.getTrailerHitCount() + bucketCacheStats.getTrailerHitCount();
     }
 
     @Override

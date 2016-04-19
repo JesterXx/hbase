@@ -22,7 +22,6 @@ package org.apache.hadoop.hbase.client;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
@@ -271,20 +270,20 @@ public class TestFromClientSide3 {
       // create an empty Put
       Put put1 = new Put(ROW);
       actions.add(put1);
-      
+
       Put put2 = new Put(ANOTHERROW);
       put2.addColumn(FAMILY, QUALIFIER, VALUE);
       actions.add(put2);
-      
+
       table.batch(actions, results);
       fail("Empty Put should have failed the batch call");
     } catch (IllegalArgumentException iae) {
-      
+
     } finally {
       table.close();
     }
   }
-  
+
   @Test
   public void testHTableExistsMethodSingleRegionSingleGet() throws Exception {
       // Test with a single region table.
@@ -402,7 +401,7 @@ public class TestFromClientSide3 {
   @Test
   public void testHTableExistsMethodMultipleRegionsMultipleGets() throws Exception {
     Table table = TEST_UTIL.createTable(
-      TableName.valueOf("testHTableExistsMethodMultipleRegionsMultipleGets"), 
+      TableName.valueOf("testHTableExistsMethodMultipleRegionsMultipleGets"),
       new byte[][] { FAMILY }, 1, new byte[] { 0x00 }, new byte[] { (byte) 0xff }, 255);
     Put put = new Put(ROW);
     put.addColumn(FAMILY, QUALIFIER, VALUE);
@@ -475,5 +474,11 @@ public class TestFromClientSide3 {
     res = table.get(new Get(ROW_BYTES));
     assertTrue(Arrays.equals(res.getValue(FAMILY, COL_QUAL), VAL_BYTES));
     table.close();
+  }
+
+  @Test
+  public void testConnectionDefaultUsesCodec() throws Exception {
+    ClusterConnection con = (ClusterConnection) TEST_UTIL.getConnection();
+    assertTrue(con.hasCellBlockSupport());
   }
 }

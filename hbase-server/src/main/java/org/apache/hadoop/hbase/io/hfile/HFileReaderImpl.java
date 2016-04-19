@@ -51,6 +51,7 @@ import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.io.encoding.HFileBlockDecodingContext;
 import org.apache.hadoop.hbase.io.hfile.HFile.FileInfo;
 import org.apache.hadoop.hbase.nio.ByteBuff;
+import org.apache.hadoop.hbase.regionserver.KeyValueScanner;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.ByteBufferUtils;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -247,18 +248,24 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     if (cacheConf.shouldPrefetchOnOpen()) {
       PrefetchExecutor.request(path, new Runnable() {
         public void run() {
+          long offset = 0;
+          long end = 0;
           try {
-            long offset = 0;
-            long end = fileSize - getTrailer().getTrailerSize();
+            end = getTrailer().getLoadOnOpenDataOffset();
+            if (LOG.isTraceEnabled()) {
+              LOG.trace("File=" + path.toString() + ", offset=" + offset + ", end=" + end);
+            }
+            // TODO: Could we use block iterator in here? Would that get stuff into the cache?
             HFileBlock prevBlock = null;
             while (offset < end) {
               if (Thread.interrupted()) {
                 break;
               }
-              long onDiskSize = -1;
-              if (prevBlock != null) {
-                onDiskSize = prevBlock.getNextBlockOnDiskSizeWithHeader();
-              }
+              // Perhaps we got our block from cache? Unlikely as this may be, if it happens, then
+              // the internal-to-hfileblock thread local which holds the overread that gets the
+              // next header, will not have happened...so, pass in the onDiskSize gotten from the
+              // cached block. This 'optimization' triggers extremely rarely I'd say.
+              long onDiskSize = prevBlock != null? prevBlock.getNextBlockOnDiskSize(): -1;
               HFileBlock block = readBlock(offset, onDiskSize, true, false, false, false,
                 null, null);
               // Need not update the current block. Ideally here the readBlock won't find the
@@ -272,11 +279,11 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
           } catch (IOException e) {
             // IOExceptions are probably due to region closes (relocation, etc.)
             if (LOG.isTraceEnabled()) {
-              LOG.trace("Exception encountered while prefetching " + path + ":", e);
+              LOG.trace("File=" + path.toString() + ", offset=" + offset + ", end=" + end, e);
             }
           } catch (Exception e) {
             // Other exceptions are interesting
-            LOG.warn("Exception encountered while prefetching " + path + ":", e);
+            LOG.warn("File=" + path.toString() + ", offset=" + offset + ", end=" + end, e);
           } finally {
             PrefetchExecutor.complete(path);
           }
@@ -352,7 +359,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     BlockCache blockCache = this.cacheConf.getBlockCache();
     if (blockCache != null && block != null) {
       BlockCacheKey cacheKey = new BlockCacheKey(this.getFileContext().getHFileName(),
-          block.getOffset(), this.isPrimaryReplicaReader());
+          block.getOffset(), this.isPrimaryReplicaReader(), block.getBlockType());
       blockCache.returnBlock(cacheKey, block);
     }
   }
@@ -788,7 +795,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         } else {
           // The comparison with no_next_index_key has to be checked
           if (this.nextIndexedKey != null &&
-              (this.nextIndexedKey == HConstants.NO_NEXT_INDEXED_KEY || reader
+              (this.nextIndexedKey == KeyValueScanner.NO_NEXT_INDEXED_KEY || reader
               .getComparator().compareKeyIgnoresMvcc(key, nextIndexedKey) < 0)) {
             // The reader shall continue to scan the current data block instead
             // of querying the
@@ -898,9 +905,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
 
         // We are reading the next block without block type validation, because
         // it might turn out to be a non-data block.
-        block = reader.readBlock(block.getOffset()
-            + block.getOnDiskSizeWithHeader(),
-            block.getNextBlockOnDiskSizeWithHeader(), cacheBlocks, pread,
+        block = reader.readBlock(block.getOffset() + block.getOnDiskSizeWithHeader(),
+            block.getNextBlockOnDiskSize(), cacheBlocks, pread,
             isCompaction, true, null, getEffectiveDataBlockEncoding());
         if (block != null && !block.getBlockType().isData()) { // Findbugs: NP_NULL_ON_SOME_PATH
           // Whatever block we read we will be returning it unless
@@ -1419,9 +1425,9 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
       // Check cache for block. If found return.
       long metaBlockOffset = metaBlockIndexReader.getRootBlockOffset(block);
       BlockCacheKey cacheKey = new BlockCacheKey(name, metaBlockOffset,
-        this.isPrimaryReplicaReader());
+        this.isPrimaryReplicaReader(), BlockType.META);
 
-      cacheBlock &= cacheConf.shouldCacheDataOnRead();
+      cacheBlock &= cacheConf.shouldCacheBlockOnRead(BlockType.META.getCategory());
       if (cacheConf.isBlockCacheEnabled()) {
         HFileBlock cachedBlock = getCachedBlock(cacheKey, cacheBlock, false, true, true,
           BlockType.META, null);
@@ -1434,8 +1440,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         // Cache Miss, please load.
       }
 
-      HFileBlock metaBlock = fsBlockReader.readBlockData(metaBlockOffset,
-          blockSize, -1, true).unpack(hfileContext, fsBlockReader);
+      HFileBlock metaBlock = fsBlockReader.readBlockData(metaBlockOffset, blockSize, true).
+          unpack(hfileContext, fsBlockReader);
 
       // Cache the block
       if (cacheBlock) {
@@ -1456,9 +1462,11 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     if (dataBlockIndexReader == null) {
       throw new IOException("Block index not loaded");
     }
-    if (dataBlockOffset < 0 || dataBlockOffset >= trailer.getLoadOnOpenDataOffset()) {
+    long trailerOffset = trailer.getLoadOnOpenDataOffset();
+    if (dataBlockOffset < 0 || dataBlockOffset >= trailerOffset) {
       throw new IOException("Requested block is out of range: " + dataBlockOffset +
-        ", lastDataBlockOffset: " + trailer.getLastDataBlockOffset());
+        ", lastDataBlockOffset: " + trailer.getLastDataBlockOffset() +
+        ", trailer.getLoadOnOpenDataOffset: " + trailerOffset);
     }
     // For any given block from any given file, synchronize reads for said
     // block.
@@ -1467,7 +1475,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
     // from doing).
 
     BlockCacheKey cacheKey = new BlockCacheKey(name, dataBlockOffset,
-      this.isPrimaryReplicaReader());
+      this.isPrimaryReplicaReader(), expectedBlockType);
 
     boolean useLock = false;
     IdLock.Entry lockEntry = null;
@@ -1484,13 +1492,16 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
           HFileBlock cachedBlock = getCachedBlock(cacheKey, cacheBlock, useLock, isCompaction,
             updateCacheMetrics, expectedBlockType, expectedDataBlockEncoding);
           if (cachedBlock != null) {
+            if (LOG.isTraceEnabled()) {
+              LOG.trace("From Cache " + cachedBlock);
+            }
             if (Trace.isTracing()) {
               traceScope.getSpan().addTimelineAnnotation("blockCacheHit");
             }
             assert cachedBlock.isUnpacked() : "Packed block leak.";
             if (cachedBlock.getBlockType().isData()) {
               if (updateCacheMetrics) {
-                HFile.dataBlockReadCnt.incrementAndGet();
+                HFile.DATABLOCK_READ_COUNT.increment();
               }
               // Validate encoding type for data blocks. We include encoding
               // type in the cache key, and we expect it to match on a cache hit.
@@ -1516,8 +1527,8 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
           traceScope.getSpan().addTimelineAnnotation("blockCacheMiss");
         }
         // Load block from filesystem.
-        HFileBlock hfileBlock = fsBlockReader.readBlockData(dataBlockOffset, onDiskBlockSize, -1,
-            pread);
+        HFileBlock hfileBlock =
+            fsBlockReader.readBlockData(dataBlockOffset, onDiskBlockSize, pread);
         validateBlockType(hfileBlock, expectedBlockType);
         HFileBlock unpacked = hfileBlock.unpack(hfileContext, fsBlockReader);
         BlockType.BlockCategory category = hfileBlock.getBlockType().getCategory();
@@ -1530,7 +1541,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
         }
 
         if (updateCacheMetrics && hfileBlock.getBlockType().isData()) {
-          HFile.dataBlockReadCnt.incrementAndGet();
+          HFile.DATABLOCK_READ_COUNT.increment();
         }
 
         return unpacked;
@@ -1861,6 +1872,7 @@ public class HFileReaderImpl implements HFile.Reader, Configurable {
    * @return Scanner on this file.
    */
   @Override
+  @VisibleForTesting
   public HFileScanner getScanner(boolean cacheBlocks, final boolean pread) {
     return getScanner(cacheBlocks, pread, false);
   }

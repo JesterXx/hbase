@@ -22,20 +22,15 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 
-import com.codahale.metrics.Histogram;
-import com.codahale.metrics.MetricRegistry;
+import org.apache.hadoop.hbase.util.Counter;
+import org.apache.hadoop.hbase.util.FastLongHistogram;
 
-import static com.codahale.metrics.MetricRegistry.name;
 
 /**
  * Class that implements cache metrics.
  */
 @InterfaceAudience.Private
 public class CacheStats {
-  /**
-   * Needed making histograms.
-   */
-  private static final MetricRegistry METRICS = new MetricRegistry();
 
   /** Sliding window statistics. The number of metric periods to include in
    * sliding window hit ratio calculations.
@@ -43,10 +38,10 @@ public class CacheStats {
   static final int DEFAULT_WINDOW_PERIODS = 5;
 
   /** The number of getBlock requests that were cache hits */
-  private final AtomicLong hitCount = new AtomicLong(0);
+  private final Counter hitCount = new Counter();
 
   /** The number of getBlock requests that were cache hits from primary replica */
-  private final AtomicLong primaryHitCount = new AtomicLong(0);
+  private final Counter primaryHitCount = new Counter();
   
   /**
    * The number of getBlock requests that were cache hits, but only from
@@ -54,30 +49,53 @@ public class CacheStats {
    * attempt to read from the block cache even if they will not put new blocks
    * into the block cache.  See HBASE-2253 for more information.
    */
-  private final AtomicLong hitCachingCount = new AtomicLong(0);
+  private final Counter hitCachingCount = new Counter();
 
   /** The number of getBlock requests that were cache misses */
-  private final AtomicLong missCount = new AtomicLong(0);
+  private final Counter missCount = new Counter();
 
   /** The number of getBlock requests for primary replica that were cache misses */
-  private final AtomicLong primaryMissCount = new AtomicLong(0);
+  private final Counter primaryMissCount = new Counter();
   /**
    * The number of getBlock requests that were cache misses, but only from
    * requests that were set to use the block cache.
    */
-  private final AtomicLong missCachingCount = new AtomicLong(0);
+  private final Counter missCachingCount = new Counter();
 
   /** The number of times an eviction has occurred */
-  private final AtomicLong evictionCount = new AtomicLong(0);
+  private final Counter evictionCount = new Counter();
 
   /** The total number of blocks that have been evicted */
-  private final AtomicLong evictedBlockCount = new AtomicLong(0);
+  private final Counter evictedBlockCount = new Counter();
 
   /** The total number of blocks for primary replica that have been evicted */
-  private final AtomicLong primaryEvictedBlockCount = new AtomicLong(0);
+  private final Counter primaryEvictedBlockCount = new Counter();
 
   /** The total number of blocks that were not inserted. */
   private final AtomicLong failedInserts = new AtomicLong(0);
+
+  /** Per Block Type Counts */
+  private final Counter dataMissCount = new Counter(0);
+  private final Counter leafIndexMissCount = new Counter(0);
+  private final Counter bloomChunkMissCount = new Counter(0);
+  private final Counter metaMissCount = new Counter(0);
+  private final Counter rootIndexMissCount = new Counter(0);
+  private final Counter intermediateIndexMissCount = new Counter(0);
+  private final Counter fileInfoMissCount = new Counter(0);
+  private final Counter generalBloomMetaMissCount = new Counter(0);
+  private final Counter deleteFamilyBloomMissCount = new Counter(0);
+  private final Counter trailerMissCount = new Counter(0);
+
+  private final Counter dataHitCount = new Counter(0);
+  private final Counter leafIndexHitCount = new Counter(0);
+  private final Counter bloomChunkHitCount = new Counter(0);
+  private final Counter metaHitCount = new Counter(0);
+  private final Counter rootIndexHitCount = new Counter(0);
+  private final Counter intermediateIndexHitCount = new Counter(0);
+  private final Counter fileInfoHitCount = new Counter(0);
+  private final Counter generalBloomMetaHitCount = new Counter(0);
+  private final Counter deleteFamilyBloomHitCount = new Counter(0);
+  private final Counter trailerHitCount = new Counter(0);
 
   /** The number of metrics periods to include in window */
   private final int numPeriodsInWindow;
@@ -102,7 +120,7 @@ public class CacheStats {
   /**
    * Keep running age at eviction time
    */
-  private Histogram ageAtEviction;
+  private FastLongHistogram ageAtEviction;
   private long startTime = System.nanoTime();
 
   public CacheStats(final String name) {
@@ -115,7 +133,7 @@ public class CacheStats {
     this.hitCachingCounts = initializeZeros(numPeriodsInWindow);
     this.requestCounts = initializeZeros(numPeriodsInWindow);
     this.requestCachingCounts = initializeZeros(numPeriodsInWindow);
-    this.ageAtEviction = METRICS.histogram(name(CacheStats.class, name + ".ageAtEviction"));
+    this.ageAtEviction = new FastLongHistogram();
   }
 
   @Override
@@ -127,40 +145,200 @@ public class CacheStats {
       ", evictedBlockCount=" + getEvictedCount() +
       ", primaryMissCount=" + getPrimaryMissCount() +
       ", primaryHitCount=" + getPrimaryHitCount() +
-      ", evictedAgeMean=" + snapshot.getMean() +
-      ", evictedAgeStdDev=" + snapshot.getStdDev();
+      ", evictedAgeMean=" + snapshot.getMean();
   }
 
-  public void miss(boolean caching, boolean primary) {
-    missCount.incrementAndGet();
-    if (primary) primaryMissCount.incrementAndGet();
-    if (caching) missCachingCount.incrementAndGet();
+
+  public void miss(boolean caching, boolean primary, BlockType type) {
+    missCount.increment();
+    if (primary) primaryMissCount.increment();
+    if (caching) missCachingCount.increment();
+    if (type == null) {
+      return;
+    }
+    switch (type) {
+      case DATA:
+      case ENCODED_DATA:
+        dataMissCount.increment();
+        break;
+      case LEAF_INDEX:
+        leafIndexMissCount.increment();
+        break;
+      case BLOOM_CHUNK:
+        bloomChunkMissCount.increment();
+        break;
+      case META:
+        metaMissCount.increment();
+        break;
+      case INTERMEDIATE_INDEX:
+        intermediateIndexMissCount.increment();
+        break;
+      case ROOT_INDEX:
+        rootIndexMissCount.increment();
+        break;
+      case FILE_INFO:
+        fileInfoMissCount.increment();
+        break;
+      case GENERAL_BLOOM_META:
+        generalBloomMetaMissCount.increment();
+        break;
+      case DELETE_FAMILY_BLOOM_META:
+        deleteFamilyBloomMissCount.increment();
+        break;
+      case TRAILER:
+        trailerMissCount.increment();
+        break;
+      default:
+        // If there's a new type that's fine
+        // Ignore it for now. This is metrics don't exception.
+        break;
+    }
   }
 
-  public void hit(boolean caching) {
-    hit(caching, true);
-  }
+  public void hit(boolean caching, boolean primary, BlockType type) {
+    hitCount.increment();
+    if (primary) primaryHitCount.increment();
+    if (caching) hitCachingCount.increment();
 
-  public void hit(boolean caching, boolean primary) {
-    hitCount.incrementAndGet();
-    if (primary) primaryHitCount.incrementAndGet();
-    if (caching) hitCachingCount.incrementAndGet();
+
+    if (type == null) {
+      return;
+    }
+    switch (type) {
+      case DATA:
+      case ENCODED_DATA:
+        dataHitCount.increment();
+        break;
+      case LEAF_INDEX:
+        leafIndexHitCount.increment();
+        break;
+      case BLOOM_CHUNK:
+        bloomChunkHitCount.increment();
+        break;
+      case META:
+        metaHitCount.increment();
+        break;
+      case INTERMEDIATE_INDEX:
+        intermediateIndexHitCount.increment();
+        break;
+      case ROOT_INDEX:
+        rootIndexHitCount.increment();
+        break;
+      case FILE_INFO:
+        fileInfoHitCount.increment();
+        break;
+      case GENERAL_BLOOM_META:
+        generalBloomMetaHitCount.increment();
+        break;
+      case DELETE_FAMILY_BLOOM_META:
+        deleteFamilyBloomHitCount.increment();
+        break;
+      case TRAILER:
+        trailerHitCount.increment();
+        break;
+      default:
+        // If there's a new type that's fine
+        // Ignore it for now. This is metrics don't exception.
+        break;
+    }
   }
 
   public void evict() {
-    evictionCount.incrementAndGet();
+    evictionCount.increment();
   }
 
   public void evicted(final long t, boolean primary) {
-    if (t > this.startTime) this.ageAtEviction.update(t - this.startTime);
-    this.evictedBlockCount.incrementAndGet();
+    if (t > this.startTime) this.ageAtEviction.add(t - this.startTime,1);
+    this.evictedBlockCount.increment();
     if (primary) {
-      primaryEvictedBlockCount.incrementAndGet();
+      primaryEvictedBlockCount.increment();
     }
   }
 
   public long failInsert() {
     return failedInserts.incrementAndGet();
+  }
+
+
+  // All of the counts of misses and hits.
+  public long getDataMissCount() {
+    return dataMissCount.get();
+  }
+
+  public long getLeafIndexMissCount() {
+    return leafIndexMissCount.get();
+  }
+
+  public long getBloomChunkMissCount() {
+    return bloomChunkMissCount.get();
+  }
+
+  public long getMetaMissCount() {
+    return metaMissCount.get();
+  }
+
+  public long getRootIndexMissCount() {
+    return rootIndexMissCount.get();
+  }
+
+  public long getIntermediateIndexMissCount() {
+    return intermediateIndexMissCount.get();
+  }
+
+  public long getFileInfoMissCount() {
+    return fileInfoMissCount.get();
+  }
+
+  public long getGeneralBloomMetaMissCount() {
+    return generalBloomMetaMissCount.get();
+  }
+
+  public long getDeleteFamilyBloomMissCount() {
+    return deleteFamilyBloomMissCount.get();
+  }
+
+  public long getTrailerMissCount() {
+    return trailerMissCount.get();
+  }
+
+  public long getDataHitCount() {
+    return dataHitCount.get();
+  }
+
+  public long getLeafIndexHitCount() {
+    return leafIndexHitCount.get();
+  }
+
+  public long getBloomChunkHitCount() {
+    return bloomChunkHitCount.get();
+  }
+
+  public long getMetaHitCount() {
+    return metaHitCount.get();
+  }
+
+  public long getRootIndexHitCount() {
+    return rootIndexHitCount.get();
+  }
+
+  public long getIntermediateIndexHitCount() {
+    return intermediateIndexHitCount.get();
+  }
+
+  public long getFileInfoHitCount() {
+    return fileInfoHitCount.get();
+  }
+
+  public long getGeneralBloomMetaHitCount() {
+    return generalBloomMetaHitCount.get();
+  }
+
+  public long getDeleteFamilyBloomHitCount() {
+    return deleteFamilyBloomHitCount.get();
+  }
+
+  public long getTrailerHitCount() {
+    return trailerHitCount.get();
   }
 
   public long getRequestCount() {

@@ -22,8 +22,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.NavigableSet;
 
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
@@ -32,6 +30,8 @@ import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.conf.PropagatingConfigurationObserver;
 import org.apache.hadoop.hbase.io.HeapSize;
@@ -42,7 +42,7 @@ import org.apache.hadoop.hbase.protobuf.generated.WALProtos.CompactionDescriptor
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionProgress;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionRequest;
-import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputController;
+import org.apache.hadoop.hbase.regionserver.throttle.ThroughputController;
 import org.apache.hadoop.hbase.security.User;
 
 /**
@@ -124,7 +124,7 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    List<KeyValueScanner> getScanners(List<StoreFile> files, boolean cacheBlocks, boolean isGet,
           boolean usePread, boolean isCompaction, ScanQueryMatcher matcher, byte[] startRow,
           byte[] stopRow, long readPt, boolean includeMemstoreScanner) throws IOException;
-  
+
   ScanInfo getScanInfo();
 
   /**
@@ -154,14 +154,6 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    */
   long timeOfOldestEdit();
 
-  /**
-   * Removes a Cell from the memstore. The Cell is removed only if its key
-   * &amp; memstoreTS match the key &amp; memstoreTS value of the cell
-   * parameter.
-   * @param cell
-   */
-  void rollback(final Cell cell);
-
   FileSystem getFileSystem();
 
 
@@ -172,7 +164,7 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    * @param includeMVCCReadpoint whether we should out the MVCC readpoint
    * @return Writer for a new StoreFile in the tmp dir.
    */
-  StoreFile.Writer createWriterInTmp(
+  StoreFileWriter createWriterInTmp(
       long maxKeyCount,
       Compression.Algorithm compression,
       boolean isCompaction,
@@ -188,7 +180,7 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    * @param shouldDropBehind should the writer drop caches behind writes
    * @return Writer for a new StoreFile in the tmp dir.
    */
-  StoreFile.Writer createWriterInTmp(
+  StoreFileWriter createWriterInTmp(
     long maxKeyCount,
     Compression.Algorithm compression,
     boolean isCompaction,
@@ -225,14 +217,14 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
   void cancelRequestedCompaction(CompactionContext compaction);
 
   /**
-   * @deprecated see compact(CompactionContext, CompactionThroughputController, User)
+   * @deprecated see compact(CompactionContext, ThroughputController, User)
    */
   @Deprecated
   List<StoreFile> compact(CompactionContext compaction,
-      CompactionThroughputController throughputController) throws IOException;
+      ThroughputController throughputController) throws IOException;
 
   List<StoreFile> compact(CompactionContext compaction,
-    CompactionThroughputController throughputController, User user) throws IOException;
+    ThroughputController throughputController, User user) throws IOException;
 
   /**
    * @return true if we should run a major compaction.
@@ -346,6 +338,31 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
   int getStorefilesCount();
 
   /**
+   * @return Max age of store files in this store
+   */
+  long getMaxStoreFileAge();
+
+  /**
+   * @return Min age of store files in this store
+   */
+  long getMinStoreFileAge();
+
+  /**
+   *  @return Average age of store files in this store, 0 if no store files
+   */
+  long getAvgStoreFileAge();
+
+  /**
+   *  @return Number of reference files in this store
+   */
+  long getNumReferenceFiles();
+
+  /**
+   *  @return Number of HFiles in this store
+   */
+  long getNumHFiles();
+
+  /**
    * @return The size of the store files, in bytes, uncompressed.
    */
   long getStoreSizeUncompressed();
@@ -412,6 +429,11 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    * @return The total size of data flushed to disk, in bytes
    */
   long getFlushedCellsSize();
+
+  /**
+   * @return The total size of out output files on disk, in bytes
+   */
+  long getFlushedOutputFileSize();
 
   /**
    * @return The number of cells processed during minor compactions
@@ -490,4 +512,12 @@ public interface Store extends HeapSize, StoreConfigInformation, PropagatingConf
    * Closes and archives the compacted files under this store
    */
   void closeAndArchiveCompactedFiles() throws IOException;
+
+  /**
+   * This method is called when it is clear that the flush to disk is completed.
+   * The store may do any post-flush actions at this point.
+   * One example is to update the wal with sequence number that is known only at the store level.
+   */
+  void finalizeFlush();
+
 }

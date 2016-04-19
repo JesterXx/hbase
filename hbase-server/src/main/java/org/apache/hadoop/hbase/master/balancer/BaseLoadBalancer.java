@@ -81,16 +81,16 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
       return UNKNOWN_RACK;
     }
   }
-  
+
   /**
    * The constructor that uses the basic MetricsBalancer
    */
   protected BaseLoadBalancer() {
     metricsBalancer = new MetricsBalancer();
   }
-  
+
   /**
-   * This Constructor accepts an instance of MetricsBalancer, 
+   * This Constructor accepts an instance of MetricsBalancer,
    * which will be used instead of creating a new one
    */
   protected BaseLoadBalancer(MetricsBalancer metricsBalancer) {
@@ -816,9 +816,11 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
           i++;
           lowestLocalityServerIndex = serverIndicesSortedByLocality[i];
         }
-        LOG.debug("Lowest locality region server with non zero regions is "
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Lowest locality region server with non zero regions is "
             + servers[lowestLocalityServerIndex].getHostname() + " with locality "
             + localityPerServer[lowestLocalityServerIndex]);
+        }
         return lowestLocalityServerIndex;
       }
     }
@@ -826,7 +828,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     int getLowestLocalityRegionOnServer(int serverIndex) {
       if (regionFinder != null) {
         float lowestLocality = 1.0f;
-        int lowestLocalityRegionIndex = 0;
+        int lowestLocalityRegionIndex = -1;
         if (regionsPerServer[serverIndex].length == 0) {
           // No regions on that region server
           return -1;
@@ -836,14 +838,25 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
           HDFSBlocksDistribution distribution = regionFinder
               .getBlockDistribution(regions[regionIndex]);
           float locality = distribution.getBlockLocalityIndex(servers[serverIndex].getHostname());
+          // skip empty region
+          if (distribution.getUniqueBlocksTotalWeight() == 0) {
+            continue;
+          }
           if (locality < lowestLocality) {
             lowestLocality = locality;
             lowestLocalityRegionIndex = j;
           }
         }
-        LOG.debug(" Lowest locality region index is " + lowestLocalityRegionIndex
-            + " and its region server contains " + regionsPerServer[serverIndex].length
-            + " regions");
+        if (lowestLocalityRegionIndex == -1) {
+          return -1;
+        }
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Lowest locality region is "
+              + regions[regionsPerServer[serverIndex][lowestLocalityRegionIndex]]
+                  .getRegionNameAsString() + " with locality " + lowestLocality
+              + " and its region server contains " + regionsPerServer[serverIndex].length
+              + " regions");
+        }
         return regionsPerServer[serverIndex][lowestLocalityRegionIndex];
       } else {
         return -1;
@@ -859,9 +872,14 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
       }
     }
 
-    int getLeastLoadedTopServerForRegion(int region) {
+    /**
+     * Returns a least loaded server which has better locality for this region
+     * than the current server.
+     */
+    int getLeastLoadedTopServerForRegion(int region, int currentServer) {
       if (regionFinder != null) {
-        List<ServerName> topLocalServers = regionFinder.getTopBlockLocations(regions[region]);
+        List<ServerName> topLocalServers = regionFinder.getTopBlockLocations(regions[region],
+          servers[currentServer].getHostname());
         int leastLoadedServerIndex = -1;
         int load = Integer.MAX_VALUE;
         for (ServerName sn : topLocalServers) {
@@ -877,6 +895,10 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
             leastLoadedServerIndex = index;
             load = tempLoad;
           }
+        }
+        if (leastLoadedServerIndex != -1) {
+          LOG.debug("Pick the least loaded server " + servers[leastLoadedServerIndex].getHostname()
+            + " with better locality for region " + regions[region]);
         }
         return leastLoadedServerIndex;
       } else {
@@ -1272,39 +1294,6 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     }
     return new Cluster(regions, clusterState, null, this.regionFinder,
       rackManager);
-  }
-
-  /**
-   * Generates an immediate assignment plan to be used by a new master for
-   * regions in transition that do not have an already known destination.
-   *
-   * Takes a list of regions that need immediate assignment and a list of all
-   * available servers. Returns a map of regions to the server they should be
-   * assigned to.
-   *
-   * This method will return quickly and does not do any intelligent balancing.
-   * The goal is to make a fast decision not the best decision possible.
-   *
-   * Currently this is random.
-   *
-   * @param regions
-   * @param servers
-   * @return map of regions to the server it should be assigned to
-   */
-  @Override
-  public Map<HRegionInfo, ServerName> immediateAssignment(List<HRegionInfo> regions,
-      List<ServerName> servers) {
-    metricsBalancer.incrMiscInvocations();
-    if (servers == null || servers.isEmpty()) {
-      LOG.warn("Wanted to do random assignment but no servers to assign to");
-      return null;
-    }
-
-    Map<HRegionInfo, ServerName> assignments = new TreeMap<HRegionInfo, ServerName>();
-    for (HRegionInfo region : regions) {
-      assignments.put(region, randomAssignment(region, servers));
-    }
-    return assignments;
   }
 
   /**

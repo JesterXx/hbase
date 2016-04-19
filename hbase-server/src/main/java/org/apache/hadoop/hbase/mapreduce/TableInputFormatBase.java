@@ -27,8 +27,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
-import javax.naming.NamingException;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -39,7 +37,6 @@ import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
@@ -266,7 +263,7 @@ extends InputFormat<ImmutableBytesWritable, Result> {
         }
         List<InputSplit> splits = new ArrayList<InputSplit>(1);
         long regionSize = sizeCalculator.getRegionSize(regLoc.getRegionInfo().getRegionName());
-        TableSplit split = new TableSplit(tableName,
+        TableSplit split = new TableSplit(tableName, scan,
             HConstants.EMPTY_BYTE_ARRAY, HConstants.EMPTY_BYTE_ARRAY, regLoc
                 .getHostnamePort().split(Addressing.HOSTNAME_PORT_SEPARATOR)[0], regionSize);
         splits.add(split);
@@ -285,12 +282,7 @@ extends InputFormat<ImmutableBytesWritable, Result> {
         }
         InetAddress regionAddress = isa.getAddress();
         String regionLocation;
-        try {
-          regionLocation = reverseDNS(regionAddress);
-        } catch (NamingException e) {
-          LOG.warn("Cannot resolve the host name for " + regionAddress + " because of " + e);
-          regionLocation = location.getHostname();
-        }
+        regionLocation = reverseDNS(regionAddress);
   
         byte[] startRow = scan.getStartRow();
         byte[] stopRow = scan.getStopRow();
@@ -308,9 +300,10 @@ extends InputFormat<ImmutableBytesWritable, Result> {
               keys.getSecond()[i] : stopRow;
   
           byte[] regionName = location.getRegionInfo().getRegionName();
+          String encodedRegionName = location.getRegionInfo().getEncodedName();
           long regionSize = sizeCalculator.getRegionSize(regionName);
-          TableSplit split = new TableSplit(tableName,
-            splitStart, splitStop, regionLocation, regionSize);
+          TableSplit split = new TableSplit(tableName, scan,
+            splitStart, splitStop, regionLocation, encodedRegionName, regionSize);
           splits.add(split);
           if (LOG.isDebugEnabled()) {
             LOG.debug("getSplits: split -> " + i + " -> " + split);
@@ -344,7 +337,7 @@ extends InputFormat<ImmutableBytesWritable, Result> {
     }
   }
 
-  String reverseDNS(InetAddress ipAddress) throws NamingException, UnknownHostException {
+  String reverseDNS(InetAddress ipAddress) throws UnknownHostException {
     String hostName = this.reverseDNSCacheMap.get(ipAddress);
     if (hostName == null) {
       String ipAddressString = null;
@@ -390,6 +383,7 @@ extends InputFormat<ImmutableBytesWritable, Result> {
       TableSplit ts = (TableSplit)list.get(count);
       TableName tableName = ts.getTable();
       String regionLocation = ts.getRegionLocation();
+      String encodedRegionName = ts.getEncodedRegionName();
       long regionSize = ts.getLength();
       if (regionSize >= dataSkewThreshold) {
         // if the current region size is large than the data skew threshold,
@@ -397,10 +391,10 @@ extends InputFormat<ImmutableBytesWritable, Result> {
         byte[] splitKey = getSplitKey(ts.getStartRow(), ts.getEndRow(), isTextKey);
          //Set the size of child TableSplit as 1/2 of the region size. The exact size of the
          // MapReduce input splits is not far off.
-        TableSplit t1 = new TableSplit(tableName, ts.getStartRow(), splitKey, regionLocation,
-                regionSize / 2);
-        TableSplit t2 = new TableSplit(tableName, splitKey, ts.getEndRow(), regionLocation,
-                regionSize - regionSize / 2);
+        TableSplit t1 = new TableSplit(tableName, scan, ts.getStartRow(), splitKey, regionLocation,
+                encodedRegionName, regionSize / 2);
+        TableSplit t2 = new TableSplit(tableName, scan, splitKey, ts.getEndRow(), regionLocation,
+                encodedRegionName, regionSize - regionSize / 2);
         resultList.add(t1);
         resultList.add(t2);
         count++;
@@ -426,8 +420,8 @@ extends InputFormat<ImmutableBytesWritable, Result> {
             break;
           }
         }
-        TableSplit t = new TableSplit(tableName, splitStartKey, splitEndKey,
-                regionLocation, totalSize);
+        TableSplit t = new TableSplit(tableName, scan, splitStartKey, splitEndKey,
+                regionLocation, encodedRegionName, totalSize);
         resultList.add(t);
       }
     }

@@ -26,7 +26,6 @@ import java.util.Set;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.regionserver.MultiVersionConcurrencyControl;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -49,19 +48,20 @@ import org.apache.hadoop.hbase.wal.WALKey;
 class FSWALEntry extends Entry {
   // The below data members are denoted 'transient' just to highlight these are not persisted;
   // they are only in memory and held here while passing over the ring buffer.
-  private final transient long sequence;
+  private final transient long txid;
   private final transient boolean inMemstore;
-  private final transient HTableDescriptor htd;
   private final transient HRegionInfo hri;
-  private final Set<byte[]> familyNames;
+  private final transient Set<byte[]> familyNames;
+  // In the new WAL logic, we will rewrite failed WAL entries to new WAL file, so we need to avoid
+  // calling stampRegionSequenceId again.
+  private transient boolean stamped = false;
 
-  FSWALEntry(final long sequence, final WALKey key, final WALEdit edit,
-      final HTableDescriptor htd, final HRegionInfo hri, final boolean inMemstore) {
+  FSWALEntry(final long txid, final WALKey key, final WALEdit edit,
+      final HRegionInfo hri, final boolean inMemstore) {
     super(key, edit);
     this.inMemstore = inMemstore;
-    this.htd = htd;
     this.hri = hri;
-    this.sequence = sequence;
+    this.txid = txid;
     if (inMemstore) {
       // construct familyNames here to reduce the work of log sinker.
       ArrayList<Cell> cells = this.getEdit().getCells();
@@ -71,6 +71,7 @@ class FSWALEntry extends Entry {
         Set<byte[]> familySet = Sets.newTreeSet(Bytes.BYTES_COMPARATOR);
         for (Cell cell : cells) {
           if (!CellUtil.matchingFamily(cell, WALEdit.METAFAMILY)) {
+            // TODO: Avoid this clone?
             familySet.add(CellUtil.cloneFamily(cell));
           }
         }
@@ -82,15 +83,11 @@ class FSWALEntry extends Entry {
   }
 
   public String toString() {
-    return "sequence=" + this.sequence + ", " + super.toString();
+    return "sequence=" + this.txid + ", " + super.toString();
   };
 
   boolean isInMemstore() {
     return this.inMemstore;
-  }
-
-  HTableDescriptor getHTableDescriptor() {
-    return this.htd;
   }
 
   HRegionInfo getHRegionInfo() {
@@ -98,18 +95,23 @@ class FSWALEntry extends Entry {
   }
 
   /**
-   * @return The sequence on the ring buffer when this edit was added.
+   * @return The transaction id of this edit.
    */
-  long getSequence() {
-    return this.sequence;
+  long getTxid() {
+    return this.txid;
   }
 
   /**
    * Here is where a WAL edit gets its sequenceid.
+   * SIDE-EFFECT is our stamping the sequenceid into every Cell AND setting the sequenceid into the
+   * MVCC WriteEntry!!!!
    * @return The sequenceid we stamped on this edit.
-   * @throws IOException
    */
   long stampRegionSequenceId() throws IOException {
+    if (stamped) {
+      return getKey().getSequenceId();
+    }
+    stamped = true;
     long regionSequenceId = WALKey.NO_SEQUENCE_ID;
     MultiVersionConcurrencyControl mvcc = getKey().getMvcc();
     MultiVersionConcurrencyControl.WriteEntry we = null;
@@ -125,10 +127,7 @@ class FSWALEntry extends Entry {
       }
     }
 
-    // This has to stay in this order
-    WALKey key = getKey();
-    key.setLogSeqNum(regionSequenceId);
-    key.setWriteEntry(we);
+    getKey().setWriteEntry(we);
     return regionSequenceId;
   }
 

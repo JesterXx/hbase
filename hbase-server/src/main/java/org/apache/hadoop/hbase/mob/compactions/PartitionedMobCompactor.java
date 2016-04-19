@@ -66,9 +66,9 @@ import org.apache.hadoop.hbase.regionserver.ScanInfo;
 import org.apache.hadoop.hbase.regionserver.ScanType;
 import org.apache.hadoop.hbase.regionserver.ScannerContext;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
-import org.apache.hadoop.hbase.regionserver.StoreFile.Writer;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
+import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -404,8 +404,8 @@ public class PartitionedMobCompactor extends MobCompactor {
     // Pair(maxSeqId, cellsCount)
     Pair<Long, Long> fileInfo = getFileInfo(mobFilesToCompact);
     // open writers for the mob files and new ref store files.
-    Writer writer = null;
-    Writer refFileWriter = null;
+    StoreFileWriter writer = null;
+    StoreFileWriter refFileWriter = null;
     Path filePath = null;
     Path refFilePath = null;
     long mobCells = 0;
@@ -537,7 +537,7 @@ public class PartitionedMobCompactor extends MobCompactor {
    * @param bulkloadTime The timestamp at which the bulk load file is created.
    * @throws IOException
    */
-  private void closeRefFileWriter(Writer writer, long maxSeqId, long bulkloadTime)
+  private void closeRefFileWriter(StoreFileWriter writer, long maxSeqId, long bulkloadTime)
     throws IOException {
     if (writer != null) {
       writer.appendMetadata(maxSeqId, false);

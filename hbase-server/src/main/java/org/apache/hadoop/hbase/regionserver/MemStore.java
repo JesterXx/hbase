@@ -17,10 +17,11 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import java.io.IOException;
 import java.util.List;
 
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.io.HeapSize;
 
 /**
@@ -41,10 +42,19 @@ public interface MemStore extends HeapSize {
   MemStoreSnapshot snapshot();
 
   /**
+   * Creates a snapshot of the current memstore. Snapshot must be cleared by call to
+   * {@link #clearSnapshot(long)}.
+   * @param flushOpSeqId the current sequence number of the wal; to be attached to the flushed
+   *                     segment
+   * @return {@link MemStoreSnapshot}
+   */
+  MemStoreSnapshot snapshot(long flushOpSeqId);
+
+  /**
    * Clears the current snapshot of the Memstore.
    * @param id
    * @throws UnexpectedStateException
-   * @see #snapshot()
+   * @see #snapshot(long)
    */
   void clearSnapshot(long id) throws UnexpectedStateException;
 
@@ -75,13 +85,6 @@ public interface MemStore extends HeapSize {
    * @return Oldest timestamp of all the Cells in the MemStore
    */
   long timeOfOldestEdit();
-
-  /**
-   * Remove n key from the memstore. Only kvs that have the same key and the same memstoreTS are
-   * removed. It is ok to not update timeRangeTracker in this call.
-   * @param cell
-   */
-  void rollback(final Cell cell);
 
   /**
    * Write a delete
@@ -128,10 +131,17 @@ public interface MemStore extends HeapSize {
    * @return scanner over the memstore. This might include scanner over the snapshot when one is
    * present.
    */
-  List<KeyValueScanner> getScanners(long readPt);
+  List<KeyValueScanner> getScanners(long readPt) throws IOException;
 
   /**
    * @return Total memory occupied by this MemStore.
    */
   long size();
+
+  /**
+   * This method is called when it is clear that the flush to disk is completed.
+   * The store may do any post-flush actions at this point.
+   * One example is to update the wal with sequence number that is known only at the store level.
+   */
+  void finalizeFlush();
 }

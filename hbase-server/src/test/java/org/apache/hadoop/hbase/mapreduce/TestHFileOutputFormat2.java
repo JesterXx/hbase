@@ -97,8 +97,6 @@ import org.junit.experimental.categories.Category;
 import org.junit.rules.TestRule;
 import org.mockito.Mockito;
 
-import com.google.common.collect.Lists;
-
 /**
  * Simple test for {@link CellSortReducer} and {@link HFileOutputFormat2}.
  * Sets up and runs a mapreduce job that writes hfile output.
@@ -294,10 +292,10 @@ public class TestHFileOutputFormat2  {
       // unmarshall and check values.
       TimeRangeTracker timeRangeTracker = new TimeRangeTracker();
       Writables.copyWritable(range, timeRangeTracker);
-      LOG.info(timeRangeTracker.getMinimumTimestamp() +
-          "...." + timeRangeTracker.getMaximumTimestamp());
-      assertEquals(1000, timeRangeTracker.getMinimumTimestamp());
-      assertEquals(2000, timeRangeTracker.getMaximumTimestamp());
+      LOG.info(timeRangeTracker.getMin() +
+          "...." + timeRangeTracker.getMax());
+      assertEquals(1000, timeRangeTracker.getMin());
+      assertEquals(2000, timeRangeTracker.getMax());
       rd.close();
     } finally {
       if (writer != null && context != null) writer.close(context);
@@ -349,7 +347,8 @@ public class TestHFileOutputFormat2  {
   @Ignore("Goes zombie too frequently; needs work. See HBASE-14563") @Test
   public void testJobConfiguration() throws Exception {
     Configuration conf = new Configuration(this.util.getConfiguration());
-    conf.set("hbase.fs.tmp.dir", util.getDataTestDir("testJobConfiguration").toString());
+    conf.set(HConstants.TEMPORARY_FS_DIRECTORY_KEY, util.getDataTestDir("testJobConfiguration")
+        .toString());
     Job job = new Job(conf);
     job.setWorkingDirectory(util.getDataTestDir("testJobConfiguration"));
     Table table = Mockito.mock(Table.class);

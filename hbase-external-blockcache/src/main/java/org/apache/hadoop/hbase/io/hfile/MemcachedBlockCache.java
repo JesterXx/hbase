@@ -149,13 +149,12 @@ public class MemcachedBlockCache implements BlockCache {
       // Update stats if this request doesn't have it turned off 100% of the time
       if (updateCacheMetrics) {
         if (result == null) {
-          cacheStats.miss(caching, cacheKey.isPrimary());
+          cacheStats.miss(caching, cacheKey.isPrimary(), cacheKey.getBlockType());
         } else {
-          cacheStats.hit(caching, cacheKey.isPrimary());
+          cacheStats.hit(caching, cacheKey.isPrimary(), cacheKey.getBlockType());
         }
       }
     }
-
 
     return result;
   }
@@ -260,7 +259,7 @@ public class MemcachedBlockCache implements BlockCache {
     public HFileBlock decode(CachedData d) {
       try {
         ByteBuff buf = new SingleByteBuff(ByteBuffer.wrap(d.getData()));
-        return (HFileBlock) HFileBlock.blockDeserializer.deserialize(buf, true,
+        return (HFileBlock) HFileBlock.BLOCK_DESERIALIZER.deserialize(buf, true,
           MemoryType.EXCLUSIVE);
       } catch (IOException e) {
         LOG.warn("Error deserializing data from memcached",e);

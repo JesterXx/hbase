@@ -221,7 +221,8 @@ public class TestTags {
           CellScanner cellScanner = result.cellScanner();
           cellScanner.advance();
           KeyValue current = (KeyValue) cellScanner.current();
-          assertTrue(current.getValueOffset() + current.getValueLength() == current.getLength());
+          assertTrue(current.getValueOffset() + current.getValueLength() == current.getOffset()
+              + current.getLength());
         }
       } finally {
         if (scanner != null)
@@ -239,7 +240,8 @@ public class TestTags {
           CellScanner cellScanner = result.cellScanner();
           cellScanner.advance();
           KeyValue current = (KeyValue) cellScanner.current();
-          assertTrue(current.getValueOffset() + current.getValueLength() == current.getLength());
+          assertTrue(current.getValueOffset() + current.getValueLength() == current.getOffset()
+              + current.getLength());
         }
       } finally {
         if (scanner != null) {
@@ -551,7 +553,7 @@ public class TestTags {
 
   public static class TestCoprocessorForTags extends BaseRegionObserver {
 
-    public static boolean checkTagPresence = false;
+    public static volatile boolean checkTagPresence = false;
     public static List<Tag> tags = null;
 
     @Override

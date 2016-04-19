@@ -60,13 +60,15 @@ import org.apache.hadoop.hbase.regionserver.ScannerContext;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreConfigInformation;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.regionserver.StoreFileReader;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
 import org.apache.hadoop.hbase.regionserver.StripeMultiFileWriter;
 import org.apache.hadoop.hbase.regionserver.StripeStoreConfig;
 import org.apache.hadoop.hbase.regionserver.StripeStoreFileManager;
 import org.apache.hadoop.hbase.regionserver.StripeStoreFlusher;
-import org.apache.hadoop.hbase.regionserver.TestStripeCompactor.StoreFileWritersCapture;
 import org.apache.hadoop.hbase.regionserver.compactions.StripeCompactionPolicy.StripeInformationProvider;
+import org.apache.hadoop.hbase.regionserver.compactions.TestCompactor.StoreFileWritersCapture;
+import org.apache.hadoop.hbase.regionserver.throttle.NoLimitThroughputController;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
@@ -76,11 +78,16 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.ManualEnvironmentEdge;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
 import org.mockito.ArgumentMatcher;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
+@RunWith(Parameterized.class)
 @Category({RegionServerTests.class, SmallTests.class})
 public class TestStripeCompactionPolicy {
   private static final byte[] KEY_A = Bytes.toBytes("aaa");
@@ -100,6 +107,13 @@ public class TestStripeCompactionPolicy {
   private final static int defaultInitialCount = 1;
   private static long defaultTtl = 1000 * 1000;
 
+  @Parameters(name = "{index}: usePrivateReaders={0}")
+  public static Iterable<Object[]> data() {
+    return Arrays.asList(new Object[] { true }, new Object[] { false });
+  }
+
+  @Parameter
+  public boolean usePrivateReaders;
   @Test
   public void testNoStripesFromFlush() throws Exception {
     Configuration conf = HBaseConfiguration.create();
@@ -216,10 +230,10 @@ public class TestStripeCompactionPolicy {
     assertTrue(policy.needsCompactions(si, al()));
     StripeCompactionPolicy.StripeCompactionRequest scr = policy.selectCompaction(si, al(), false);
     assertEquals(si.getStorefiles(), scr.getRequest().getFiles());
-    scr.execute(sc, NoLimitCompactionThroughputController.INSTANCE, null);
+    scr.execute(sc, NoLimitThroughputController.INSTANCE, null);
     verify(sc, only()).compact(eq(scr.getRequest()), anyInt(), anyLong(), aryEq(OPEN_KEY),
       aryEq(OPEN_KEY), aryEq(OPEN_KEY), aryEq(OPEN_KEY),
-      any(NoLimitCompactionThroughputController.class), any(User.class));
+      any(NoLimitThroughputController.class), any(User.class));
   }
 
   @Test
@@ -397,6 +411,7 @@ public class TestStripeCompactionPolicy {
     }
   }
 
+  @SuppressWarnings("unchecked")
   private static StripeCompactionPolicy.StripeInformationProvider createStripesWithFiles(
       List<StoreFile>... stripeFiles) throws Exception {
     return createStripesWithFiles(createBoundaries(stripeFiles.length),
@@ -469,7 +484,7 @@ public class TestStripeCompactionPolicy {
     // All the Stripes are expired, so the Compactor will not create any Writers. We need to create
     // an empty file to preserve metadata
     StripeCompactor sc = createCompactor();
-    List<Path> paths = scr.execute(sc, NoLimitCompactionThroughputController.INSTANCE, null);
+    List<Path> paths = scr.execute(sc, NoLimitThroughputController.INSTANCE, null);
     assertEquals(1, paths.size());
   }
 
@@ -528,7 +543,7 @@ public class TestStripeCompactionPolicy {
     assertTrue(policy.needsCompactions(si, al()));
     StripeCompactionPolicy.StripeCompactionRequest scr = policy.selectCompaction(si, al(), false);
     verifyCollectionsEqual(sfs, scr.getRequest().getFiles());
-    scr.execute(sc, NoLimitCompactionThroughputController.INSTANCE, null);
+    scr.execute(sc, NoLimitThroughputController.INSTANCE, null);
     verify(sc, times(1)).compact(eq(scr.getRequest()), argThat(new ArgumentMatcher<List<byte[]>>() {
       @Override
       public boolean matches(Object argument) {
@@ -542,7 +557,7 @@ public class TestStripeCompactionPolicy {
       }
     }), dropDeletesFrom == null ? isNull(byte[].class) : aryEq(dropDeletesFrom),
       dropDeletesTo == null ? isNull(byte[].class) : aryEq(dropDeletesTo),
-      any(NoLimitCompactionThroughputController.class), any(User.class));
+      any(NoLimitThroughputController.class), any(User.class));
   }
 
   /**
@@ -563,21 +578,22 @@ public class TestStripeCompactionPolicy {
     assertTrue(!needsCompaction || policy.needsCompactions(si, al()));
     StripeCompactionPolicy.StripeCompactionRequest scr = policy.selectCompaction(si, al(), false);
     verifyCollectionsEqual(sfs, scr.getRequest().getFiles());
-    scr.execute(sc, NoLimitCompactionThroughputController.INSTANCE, null);
+    scr.execute(sc, NoLimitThroughputController.INSTANCE, null);
     verify(sc, times(1)).compact(eq(scr.getRequest()),
       count == null ? anyInt() : eq(count.intValue()),
       size == null ? anyLong() : eq(size.longValue()), aryEq(start), aryEq(end),
       dropDeletesMatcher(dropDeletes, start), dropDeletesMatcher(dropDeletes, end),
-      any(NoLimitCompactionThroughputController.class), any(User.class));
+      any(NoLimitThroughputController.class), any(User.class));
   }
 
   /** Verify arbitrary flush. */
   protected void verifyFlush(StripeCompactionPolicy policy, StripeInformationProvider si,
       KeyValue[] input, KeyValue[][] expected, byte[][] boundaries) throws IOException {
     StoreFileWritersCapture writers = new StoreFileWritersCapture();
-    StripeStoreFlusher.StripeFlushRequest req = policy.selectFlush(si, input.length);
+    StripeStoreFlusher.StripeFlushRequest req = policy.selectFlush(CellComparator.COMPARATOR, si,
+      input.length);
     StripeMultiFileWriter mw = req.createWriter();
-    mw.init(null, writers, CellComparator.COMPARATOR);
+    mw.init(null, writers);
     for (KeyValue kv : input) {
       mw.append(kv);
     }
@@ -729,7 +745,7 @@ public class TestStripeCompactionPolicy {
   private static StoreFile createFile(long size) throws Exception {
     StoreFile sf = mock(StoreFile.class);
     when(sf.getPath()).thenReturn(new Path("moo"));
-    StoreFile.Reader r = mock(StoreFile.Reader.class);
+    StoreFileReader r = mock(StoreFileReader.class);
     when(r.getEntries()).thenReturn(size);
     when(r.length()).thenReturn(size);
     when(r.getBloomFilterType()).thenReturn(BloomType.NONE);
@@ -739,6 +755,7 @@ public class TestStripeCompactionPolicy {
     when(sf.getReader()).thenReturn(r);
     when(sf.createReader(anyBoolean())).thenReturn(r);
     when(sf.createReader()).thenReturn(r);
+    when(sf.cloneForReader()).thenReturn(sf);
     return sf;
   }
 
@@ -751,7 +768,7 @@ public class TestStripeCompactionPolicy {
     when(sf.getMetadataValue(StripeStoreFileManager.STRIPE_END_KEY)).thenReturn(endKey);
   }
 
-  private static StripeCompactor createCompactor() throws Exception {
+  private StripeCompactor createCompactor() throws Exception {
     HColumnDescriptor col = new HColumnDescriptor(Bytes.toBytes("foo"));
     StoreFileWritersCapture writers = new StoreFileWritersCapture();
     Store store = mock(Store.class);
@@ -764,6 +781,7 @@ public class TestStripeCompactionPolicy {
         anyBoolean(), anyBoolean(), anyBoolean())).thenAnswer(writers);
 
     Configuration conf = HBaseConfiguration.create();
+    conf.setBoolean("hbase.regionserver.compaction.private.readers", usePrivateReaders);
     final Scanner scanner = new Scanner();
     return new StripeCompactor(conf, store) {
       @Override

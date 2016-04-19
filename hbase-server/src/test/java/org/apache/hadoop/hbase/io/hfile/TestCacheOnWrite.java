@@ -55,7 +55,7 @@ import org.apache.hadoop.hbase.io.hfile.bucket.BucketCache;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.Region;
-import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.testclassification.IOTests;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.BloomFilterFactory;
@@ -259,7 +259,6 @@ public class TestCacheOnWrite {
     assertTrue(testDescription, scanner.seekTo());
 
     long offset = 0;
-    HFileBlock prevBlock = null;
     EnumMap<BlockType, Integer> blockCountByType =
         new EnumMap<BlockType, Integer>(BlockType.class);
 
@@ -267,14 +266,10 @@ public class TestCacheOnWrite {
     List<Long> cachedBlocksOffset = new ArrayList<Long>();
     Map<Long, HFileBlock> cachedBlocks = new HashMap<Long, HFileBlock>();
     while (offset < reader.getTrailer().getLoadOnOpenDataOffset()) {
-      long onDiskSize = -1;
-      if (prevBlock != null) {
-         onDiskSize = prevBlock.getNextBlockOnDiskSizeWithHeader();
-      }
       // Flags: don't cache the block, use pread, this is not a compaction.
       // Also, pass null for expected block type to avoid checking it.
-      HFileBlock block = reader.readBlock(offset, onDiskSize, false, true,
-        false, true, null, encodingInCache);
+      HFileBlock block = reader.readBlock(offset, -1, false, true, false, true, null,
+          encodingInCache);
       BlockCacheKey blockCacheKey = new BlockCacheKey(reader.getName(),
           offset);
       HFileBlock fromCache = (HFileBlock) blockCache.getBlock(blockCacheKey, true, false, true);
@@ -307,7 +302,6 @@ public class TestCacheOnWrite {
         assertEquals(
           block.getUncompressedSizeWithoutHeader(), fromCache.getUncompressedSizeWithoutHeader());
       }
-      prevBlock = block;
       offset += block.getOnDiskSizeWithHeader();
       BlockType bt = block.getBlockType();
       Integer count = blockCountByType.get(bt);
@@ -375,7 +369,7 @@ public class TestCacheOnWrite {
         .withBlockSize(DATA_BLOCK_SIZE)
         .withDataBlockEncoding(NoOpDataBlockEncoder.INSTANCE.getDataBlockEncoding())
         .withIncludesTags(useTags).build();
-    StoreFile.Writer sfw = new StoreFile.WriterBuilder(conf, cacheConf, fs)
+    StoreFileWriter sfw = new StoreFileWriter.Builder(conf, cacheConf, fs)
         .withOutputDir(storeFileParentDir).withComparator(CellComparator.COMPARATOR)
         .withFileContext(meta)
         .withBloomType(BLOOM_TYPE).withMaxKeyCount(NUM_KV).build();

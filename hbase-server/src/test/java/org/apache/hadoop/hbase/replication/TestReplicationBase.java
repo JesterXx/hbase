@@ -18,6 +18,9 @@
  */
 package org.apache.hadoop.hbase.replication;
 
+import java.util.NavigableMap;
+import java.util.TreeMap;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -63,6 +66,7 @@ public class TestReplicationBase {
 
   protected static Table htable1;
   protected static Table htable2;
+  protected static NavigableMap<byte[], Integer> scopes;
 
   protected static HBaseTestingUtility utility1;
   protected static HBaseTestingUtility utility2;
@@ -124,7 +128,9 @@ public class TestReplicationBase {
     utility2.setZkCluster(miniZK);
     zkw2 = new ZooKeeperWatcher(conf2, "cluster2", null, true);
 
-    admin.addPeer("2", utility2.getClusterKey());
+    ReplicationPeerConfig rpc = new ReplicationPeerConfig();
+    rpc.setClusterKey(utility2.getClusterKey());
+    admin.addPeer("2", rpc, null);
 
     LOG.info("Setup second Zk");
     CONF_WITH_LOCALFS = HBaseConfiguration.create(conf1);
@@ -140,6 +146,11 @@ public class TestReplicationBase {
     table.addFamily(fam);
     fam = new HColumnDescriptor(noRepfamName);
     table.addFamily(fam);
+    scopes = new TreeMap<byte[], Integer>(
+        Bytes.BYTES_COMPARATOR);
+    for(HColumnDescriptor f : table.getColumnFamilies()) {
+      scopes.put(f.getName(), f.getScope());
+    }
     Connection connection1 = ConnectionFactory.createConnection(conf1);
     Connection connection2 = ConnectionFactory.createConnection(conf2);
     try (Admin admin1 = connection1.getAdmin()) {

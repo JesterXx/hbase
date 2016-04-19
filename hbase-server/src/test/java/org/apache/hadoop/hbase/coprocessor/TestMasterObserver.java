@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 
 import org.apache.commons.logging.Log;
@@ -47,7 +48,6 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.master.AssignmentManager;
@@ -74,6 +74,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
+
+import com.google.common.net.HostAndPort;
 
 /**
  * Tests invocation of the {@link org.apache.hadoop.hbase.coprocessor.MasterObserver}
@@ -342,6 +344,17 @@ public class TestMasterObserver {
 
     public boolean preTruncateTableCalledOnly() {
       return preTruncateTableCalled && !postTruncateTableCalled;
+    }
+
+    @Override
+    public boolean preSetSplitOrMergeEnabled(final ObserverContext<MasterCoprocessorEnvironment> ctx,
+        final boolean newValue, final Admin.MasterSwitchType switchType) throws IOException {
+      return false;
+    }
+
+    @Override
+    public void postSetSplitOrMergeEnabled(final ObserverContext<MasterCoprocessorEnvironment> ctx,
+        final boolean newValue, final Admin.MasterSwitchType switchType) throws IOException {
     }
 
     @Override
@@ -1312,6 +1325,56 @@ public class TestMasterObserver {
     @Override
     public void postSetNamespaceQuota(final ObserverContext<MasterCoprocessorEnvironment> ctx,
         final String namespace, final Quotas quotas) throws IOException {
+    }
+
+    @Override
+    public void preMoveServers(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                               Set<HostAndPort> servers, String targetGroup) throws IOException {
+    }
+
+    @Override
+    public void postMoveServers(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                Set<HostAndPort> servers, String targetGroup) throws IOException {
+    }
+
+    @Override
+    public void preMoveTables(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                              Set<TableName> tables, String targetGroupGroup) throws IOException {
+    }
+
+    @Override
+    public void postMoveTables(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                               Set<TableName> tables, String targetGroup) throws IOException {
+    }
+
+    @Override
+    public void preAddRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                              String name) throws IOException {
+    }
+
+    @Override
+    public void postAddRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                               String name) throws IOException {
+    }
+
+    @Override
+    public void preRemoveRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                 String name) throws IOException {
+    }
+
+    @Override
+    public void postRemoveRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                  String name) throws IOException {
+    }
+
+    @Override
+    public void preBalanceRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                  String groupName) throws IOException {
+    }
+
+    @Override
+    public void postBalanceRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                   String groupName, boolean balancerRan) throws IOException {
     }
   }
 

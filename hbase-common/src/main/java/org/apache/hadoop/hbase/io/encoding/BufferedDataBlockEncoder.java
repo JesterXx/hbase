@@ -23,12 +23,12 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 
 import org.apache.hadoop.hbase.ByteBufferedCell;
+import org.apache.hadoop.hbase.ByteBufferedKeyOnlyKeyValue;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
-import org.apache.hadoop.hbase.ByteBufferedKeyOnlyKeyValue;
 import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.SettableSequenceId;
@@ -52,7 +52,9 @@ import org.apache.hadoop.io.WritableUtils;
  */
 @InterfaceAudience.Private
 abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
-
+  /**
+   * TODO: This datablockencoder is dealing in internals of hfileblocks. Purge reference to HFBs
+   */
   private static int INITIAL_KEY_BUFFER_SIZE = 512;
 
   @Override
@@ -1002,10 +1004,8 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
         // When tag compression is enabled, tagCompressionContext will have a not null value. Write
         // the tags using Dictionary compression in such a case
         if (tagCompressionContext != null) {
-          // TODO : Make Dictionary interface to work with BBs and then change the corresponding
-          // compress tags code to work with BB
-          tagCompressionContext
-              .compressTags(out, cell.getTagsArray(), cell.getTagsOffset(), tagsLength);
+          // Not passing tagsLength considering that parsing of the tagsLength is not costly
+          CellUtil.compressTags(out, cell, tagCompressionContext);
         } else {
           CellUtil.writeTags(out, cell, tagsLength);
         }
@@ -1142,8 +1142,8 @@ abstract class BufferedDataBlockEncoder implements DataBlockEncoder {
     BufferedDataBlockEncodingState state = (BufferedDataBlockEncodingState) encodingCtx
         .getEncodingState();
     // Write the unencodedDataSizeWritten (with header size)
-    Bytes.putInt(uncompressedBytesWithHeader, HConstants.HFILEBLOCK_HEADER_SIZE
-        + DataBlockEncoding.ID_SIZE, state.unencodedDataSizeWritten
+    Bytes.putInt(uncompressedBytesWithHeader,
+      HConstants.HFILEBLOCK_HEADER_SIZE + DataBlockEncoding.ID_SIZE, state.unencodedDataSizeWritten
         );
     if (encodingCtx.getDataBlockEncoding() != DataBlockEncoding.NONE) {
       encodingCtx.postEncoding(BlockType.ENCODED_DATA);

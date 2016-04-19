@@ -145,8 +145,9 @@ public class MultiVersionConcurrencyControl {
    * of the passed in WriteEntry.  Thus, the write is visible to MVCC readers.
    */
   public void completeAndWait(WriteEntry e) {
-    complete(e);
-    waitForRead(e);
+    if (!complete(e)) {
+      waitForRead(e);
+    }
   }
 
   /**
@@ -155,7 +156,7 @@ public class MultiVersionConcurrencyControl {
    * changes completely) so we can clean up the outstanding transaction.
    *
    * How much is the read point advanced?
-   * 
+   *
    * Let S be the set of all write numbers that are completed. Set the read point to the highest
    * numbered write of S.
    *
@@ -166,7 +167,6 @@ public class MultiVersionConcurrencyControl {
   public boolean complete(WriteEntry writeEntry) {
     synchronized (writeQueue) {
       writeEntry.markCompleted();
-
       long nextReadValue = NONE;
       boolean ranOnce = false;
       while (!writeQueue.isEmpty()) {

@@ -17,18 +17,17 @@
  */
 package org.apache.hadoop.hbase.protobuf;
 
-
-import static org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier.RegionSpecifierType.REGION_NAME;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.nio.ByteBuffer;
+import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -40,11 +39,14 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import static org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier
+.RegionSpecifierType.REGION_NAME;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -112,16 +114,21 @@ import org.apache.hadoop.hbase.protobuf.generated.ClusterStatusProtos.RegionLoad
 import org.apache.hadoop.hbase.protobuf.generated.ComparatorProtos;
 import org.apache.hadoop.hbase.protobuf.generated.FilterProtos;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos;
+import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.BytesBytesPair;
+import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ColumnFamilySchema;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.NameBytesPair;
+import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.NameStringPair;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionInfo;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier.RegionSpecifierType;
+import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.TableSchema;
 import org.apache.hadoop.hbase.protobuf.generated.MapReduceProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.CreateTableRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.GetTableDescriptorsResponse;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.MasterService;
 import org.apache.hadoop.hbase.protobuf.generated.QuotaProtos;
+import org.apache.hadoop.hbase.protobuf.generated.RSGroupProtos;
 import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.RegionServerReportRequest;
 import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.RegionServerStartupRequest;
 import org.apache.hadoop.hbase.protobuf.generated.WALProtos;
@@ -137,6 +144,8 @@ import org.apache.hadoop.hbase.quotas.QuotaType;
 import org.apache.hadoop.hbase.quotas.ThrottleType;
 import org.apache.hadoop.hbase.replication.ReplicationLoadSink;
 import org.apache.hadoop.hbase.replication.ReplicationLoadSource;
+import org.apache.hadoop.hbase.rsgroup.RSGroupInfo;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.access.Permission;
 import org.apache.hadoop.hbase.security.access.TablePermission;
 import org.apache.hadoop.hbase.security.access.UserPermission;
@@ -157,12 +166,14 @@ import org.apache.hadoop.security.token.Token;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.net.HostAndPort;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedInputStream;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
 import com.google.protobuf.Parser;
 import com.google.protobuf.RpcChannel;
+import com.google.protobuf.RpcController;
 import com.google.protobuf.Service;
 import com.google.protobuf.ServiceException;
 import com.google.protobuf.TextFormat;
@@ -190,8 +201,8 @@ public final class ProtobufUtil {
    */
   private final static Cell[] EMPTY_CELL_ARRAY = new Cell[]{};
   private final static Result EMPTY_RESULT = Result.create(EMPTY_CELL_ARRAY);
-  private final static Result EMPTY_RESULT_EXISTS_TRUE = Result.create(null, true);
-  private final static Result EMPTY_RESULT_EXISTS_FALSE = Result.create(null, false);
+  final static Result EMPTY_RESULT_EXISTS_TRUE = Result.create(null, true);
+  final static Result EMPTY_RESULT_EXISTS_FALSE = Result.create(null, false);
   private final static Result EMPTY_RESULT_STALE = Result.create(EMPTY_CELL_ARRAY, null, true);
   private final static Result EMPTY_RESULT_EXISTS_TRUE_STALE
     = Result.create((Cell[])null, true, true);
@@ -374,7 +385,7 @@ public final class ProtobufUtil {
 
     HTableDescriptor[] ret = new HTableDescriptor[proto.getTableSchemaCount()];
     for (int i = 0; i < proto.getTableSchemaCount(); ++i) {
-      ret[i] = HTableDescriptor.convert(proto.getTableSchema(i));
+      ret[i] = convertToHTableDesc(proto.getTableSchema(i));
     }
     return ret;
   }
@@ -540,7 +551,7 @@ public final class ProtobufUtil {
     MutationType type = proto.getMutateType();
     assert type == MutationType.PUT: type.name();
     long timestamp = proto.hasTimestamp()? proto.getTimestamp(): HConstants.LATEST_TIMESTAMP;
-    Put put = null;
+    Put put = proto.hasRow() ? new Put(proto.getRow().toByteArray(), timestamp) : null;
     int cellCount = proto.hasAssociatedCellCount()? proto.getAssociatedCellCount(): 0;
     if (cellCount > 0) {
       // The proto has metadata only and the data is separate to be found in the cellScanner.
@@ -560,9 +571,7 @@ public final class ProtobufUtil {
         put.add(cell);
       }
     } else {
-      if (proto.hasRow()) {
-        put = new Put(proto.getRow().asReadOnlyByteBuffer(), timestamp);
-      } else {
+      if (put == null) {
         throw new IllegalArgumentException("row cannot be null");
       }
       // The proto has the metadata and the data itself
@@ -636,12 +645,8 @@ public final class ProtobufUtil {
   throws IOException {
     MutationType type = proto.getMutateType();
     assert type == MutationType.DELETE : type.name();
-    byte [] row = proto.hasRow()? proto.getRow().toByteArray(): null;
-    long timestamp = HConstants.LATEST_TIMESTAMP;
-    if (proto.hasTimestamp()) {
-      timestamp = proto.getTimestamp();
-    }
-    Delete delete = null;
+    long timestamp = proto.hasTimestamp() ? proto.getTimestamp() : HConstants.LATEST_TIMESTAMP;
+    Delete delete = proto.hasRow() ? new Delete(proto.getRow().toByteArray(), timestamp) : null;
     int cellCount = proto.hasAssociatedCellCount()? proto.getAssociatedCellCount(): 0;
     if (cellCount > 0) {
       // The proto has metadata only and the data is separate to be found in the cellScanner.
@@ -664,7 +669,9 @@ public final class ProtobufUtil {
         delete.addDeleteMarker(cell);
       }
     } else {
-      delete = new Delete(row, timestamp);
+      if (delete == null) {
+        throw new IllegalArgumentException("row cannot be null");
+      }
       for (ColumnValue column: proto.getColumnValueList()) {
         byte[] family = column.getFamily().toByteArray();
         for (QualifierValue qv: column.getQualifierValueList()) {
@@ -1189,10 +1196,6 @@ public final class ProtobufUtil {
         valueBuilder.setValue(ByteStringer.wrap(
             cell.getValueArray(), cell.getValueOffset(), cell.getValueLength()));
         valueBuilder.setTimestamp(cell.getTimestamp());
-        if(cell.getTagsLength() > 0) {
-          valueBuilder.setTags(ByteStringer.wrap(cell.getTagsArray(), cell.getTagsOffset(),
-              cell.getTagsLength()));
-        }
         if (type == MutationType.DELETE || (type == MutationType.PUT && CellUtil.isDelete(cell))) {
           KeyValue.Type keyValueType = KeyValue.Type.codeToType(cell.getTypeByte());
           valueBuilder.setDeleteType(toDeleteType(keyValueType));
@@ -1576,21 +1579,22 @@ public final class ProtobufUtil {
     }
   }
 
-  public static CoprocessorServiceResponse execService(final ClientService.BlockingInterface client,
-      final CoprocessorServiceCall call, final byte[] regionName) throws IOException {
+  public static CoprocessorServiceResponse execService(final RpcController controller,
+      final ClientService.BlockingInterface client, final CoprocessorServiceCall call,
+      final byte[] regionName) throws IOException {
     CoprocessorServiceRequest request = CoprocessorServiceRequest.newBuilder()
         .setCall(call).setRegion(
             RequestConverter.buildRegionSpecifier(REGION_NAME, regionName)).build();
     try {
       CoprocessorServiceResponse response =
-          client.execService(null, request);
+          client.execService(controller, request);
       return response;
     } catch (ServiceException se) {
       throw getRemoteException(se);
     }
   }
 
-  public static CoprocessorServiceResponse execService(
+  public static CoprocessorServiceResponse execService(final RpcController controller,
     final MasterService.BlockingInterface client, final CoprocessorServiceCall call)
   throws IOException {
     CoprocessorServiceRequest request = CoprocessorServiceRequest.newBuilder()
@@ -1598,7 +1602,7 @@ public final class ProtobufUtil {
            RequestConverter.buildRegionSpecifier(REGION_NAME, HConstants.EMPTY_BYTE_ARRAY)).build();
     try {
       CoprocessorServiceResponse response =
-          client.execMasterService(null, request);
+          client.execMasterService(controller, request);
       return response;
     } catch (ServiceException se) {
       throw getRemoteException(se);
@@ -1613,7 +1617,8 @@ public final class ProtobufUtil {
    * @throws IOException
    */
   public static CoprocessorServiceResponse execRegionServerService(
-      final ClientService.BlockingInterface client, final CoprocessorServiceCall call)
+      final RpcController controller, final ClientService.BlockingInterface client,
+      final CoprocessorServiceCall call)
       throws IOException {
     CoprocessorServiceRequest request =
         CoprocessorServiceRequest
@@ -1623,7 +1628,7 @@ public final class ProtobufUtil {
               RequestConverter.buildRegionSpecifier(REGION_NAME, HConstants.EMPTY_BYTE_ARRAY))
             .build();
     try {
-      CoprocessorServiceResponse response = client.execRegionServerService(null, request);
+      CoprocessorServiceResponse response = client.execRegionServerService(controller, request);
       return response;
     } catch (ServiceException se) {
       throw getRemoteException(se);
@@ -1649,13 +1654,13 @@ public final class ProtobufUtil {
    * @return the retrieved region info
    * @throws IOException
    */
-  public static HRegionInfo getRegionInfo(final AdminService.BlockingInterface admin,
-      final byte[] regionName) throws IOException {
+  public static HRegionInfo getRegionInfo(final RpcController controller,
+      final AdminService.BlockingInterface admin, final byte[] regionName) throws IOException {
     try {
       GetRegionInfoRequest request =
         RequestConverter.buildGetRegionInfoRequest(regionName);
       GetRegionInfoResponse response =
-        admin.getRegionInfo(null, request);
+        admin.getRegionInfo(controller, request);
       return HRegionInfo.convert(response.getRegionInfo());
     } catch (ServiceException se) {
       throw getRemoteException(se);
@@ -1670,12 +1675,13 @@ public final class ProtobufUtil {
    * @param regionName
    * @throws IOException
    */
-  public static void closeRegion(final AdminService.BlockingInterface admin,
-      final ServerName server, final byte[] regionName) throws IOException {
+  public static void closeRegion(final RpcController controller,
+      final AdminService.BlockingInterface admin, final ServerName server, final byte[] regionName)
+          throws IOException {
     CloseRegionRequest closeRegionRequest =
       RequestConverter.buildCloseRegionRequest(server, regionName);
     try {
-      admin.closeRegion(null, closeRegionRequest);
+      admin.closeRegion(controller, closeRegionRequest);
     } catch (ServiceException se) {
       throw getRemoteException(se);
     }
@@ -1690,14 +1696,15 @@ public final class ProtobufUtil {
    * @return true if the region is closed
    * @throws IOException
    */
-  public static boolean closeRegion(final AdminService.BlockingInterface admin,
+  public static boolean closeRegion(final RpcController controller,
+      final AdminService.BlockingInterface admin,
       final ServerName server, final byte[] regionName,
       final ServerName destinationServer) throws IOException {
     CloseRegionRequest closeRegionRequest =
       RequestConverter.buildCloseRegionRequest(server,
         regionName, destinationServer);
     try {
-      CloseRegionResponse response = admin.closeRegion(null, closeRegionRequest);
+      CloseRegionResponse response = admin.closeRegion(controller, closeRegionRequest);
       return ResponseConverter.isClosed(response);
     } catch (ServiceException se) {
       throw getRemoteException(se);
@@ -1712,14 +1719,14 @@ public final class ProtobufUtil {
    * @param regionInfo
    *
    */
-  public static void warmupRegion(final AdminService.BlockingInterface admin,
-      final HRegionInfo regionInfo) throws IOException  {
+  public static void warmupRegion(final RpcController controller,
+      final AdminService.BlockingInterface admin, final HRegionInfo regionInfo) throws IOException {
 
     try {
       WarmupRegionRequest warmupRegionRequest =
            RequestConverter.buildWarmupRegionRequest(regionInfo);
 
-      admin.warmupRegion(null, warmupRegionRequest);
+      admin.warmupRegion(controller, warmupRegionRequest);
     } catch (ServiceException e) {
       throw getRemoteException(e);
     }
@@ -1731,17 +1738,17 @@ public final class ProtobufUtil {
    * @param region
    * @throws IOException
    */
-  public static void openRegion(final AdminService.BlockingInterface admin,
-      ServerName server, final HRegionInfo region) throws IOException {
+  public static void openRegion(final RpcController controller,
+      final AdminService.BlockingInterface admin, ServerName server, final HRegionInfo region)
+          throws IOException {
     OpenRegionRequest request =
       RequestConverter.buildOpenRegionRequest(server, region, null, null);
     try {
-      admin.openRegion(null, request);
+      admin.openRegion(controller, request);
     } catch (ServiceException se) {
       throw ProtobufUtil.getRemoteException(se);
     }
   }
-
 
   /**
    * A helper to get the all the online regions on a region
@@ -1752,11 +1759,22 @@ public final class ProtobufUtil {
    * @throws IOException
    */
   public static List<HRegionInfo> getOnlineRegions(final AdminService.BlockingInterface admin)
+      throws IOException {
+    return getOnlineRegions(null, admin);
+  }
+
+  /**
+   * A helper to get the all the online regions on a region
+   * server using admin protocol.
+   * @return a list of online region info
+   */
+  public static List<HRegionInfo> getOnlineRegions(final RpcController controller,
+      final AdminService.BlockingInterface admin)
   throws IOException {
     GetOnlineRegionRequest request = RequestConverter.buildGetOnlineRegionRequest();
     GetOnlineRegionResponse response = null;
     try {
-      response = admin.getOnlineRegion(null, request);
+      response = admin.getOnlineRegion(controller, request);
     } catch (ServiceException se) {
       throw getRemoteException(se);
     }
@@ -1780,16 +1798,14 @@ public final class ProtobufUtil {
 
   /**
    * A helper to get the info of a region server using admin protocol.
-   *
-   * @param admin
    * @return the server name
-   * @throws IOException
    */
-  public static ServerInfo getServerInfo(final AdminService.BlockingInterface admin)
+  public static ServerInfo getServerInfo(final RpcController controller,
+      final AdminService.BlockingInterface admin)
   throws IOException {
     GetServerInfoRequest request = RequestConverter.buildGetServerInfoRequest();
     try {
-      GetServerInfoResponse response = admin.getServerInfo(null, request);
+      GetServerInfoResponse response = admin.getServerInfo(controller, request);
       return response.getServerInfo();
     } catch (ServiceException se) {
       throw getRemoteException(se);
@@ -1800,19 +1816,27 @@ public final class ProtobufUtil {
    * A helper to get the list of files of a column family
    * on a given region using admin protocol.
    *
-   * @param admin
-   * @param regionName
-   * @param family
    * @return the list of store files
-   * @throws IOException
    */
   public static List<String> getStoreFiles(final AdminService.BlockingInterface admin,
       final byte[] regionName, final byte[] family)
   throws IOException {
+    return getStoreFiles(null, admin, regionName, family);
+  }
+
+  /**
+   * A helper to get the list of files of a column family
+   * on a given region using admin protocol.
+   *
+   * @return the list of store files
+   */
+  public static List<String> getStoreFiles(final RpcController controller,
+      final AdminService.BlockingInterface admin, final byte[] regionName, final byte[] family)
+  throws IOException {
     GetStoreFileRequest request =
       RequestConverter.buildGetStoreFileRequest(regionName, family);
     try {
-      GetStoreFileResponse response = admin.getStoreFile(null, request);
+      GetStoreFileResponse response = admin.getStoreFile(controller, request);
       return response.getStoreFileList();
     } catch (ServiceException se) {
       throw ProtobufUtil.getRemoteException(se);
@@ -1827,12 +1851,13 @@ public final class ProtobufUtil {
    * @param splitPoint
    * @throws IOException
    */
-  public static void split(final AdminService.BlockingInterface admin,
-      final HRegionInfo hri, byte[] splitPoint) throws IOException {
+  public static void split(final RpcController controller,
+      final AdminService.BlockingInterface admin, final HRegionInfo hri, byte[] splitPoint)
+          throws IOException {
     SplitRegionRequest request =
       RequestConverter.buildSplitRegionRequest(hri.getRegionName(), splitPoint);
     try {
-      admin.splitRegion(null, request);
+      admin.splitRegion(controller, request);
     } catch (ServiceException se) {
       throw ProtobufUtil.getRemoteException(se);
     }
@@ -1846,17 +1871,35 @@ public final class ProtobufUtil {
    * @param region_b
    * @param forcible true if do a compulsory merge, otherwise we will only merge
    *          two adjacent regions
+   * @param user effective user
    * @throws IOException
    */
-  public static void mergeRegions(final AdminService.BlockingInterface admin,
+  public static void mergeRegions(final RpcController controller,
+      final AdminService.BlockingInterface admin,
       final HRegionInfo region_a, final HRegionInfo region_b,
-      final boolean forcible) throws IOException {
-    MergeRegionsRequest request = RequestConverter.buildMergeRegionsRequest(
+      final boolean forcible, final User user) throws IOException {
+    final MergeRegionsRequest request = RequestConverter.buildMergeRegionsRequest(
         region_a.getRegionName(), region_b.getRegionName(),forcible);
-    try {
-      admin.mergeRegions(null, request);
-    } catch (ServiceException se) {
-      throw ProtobufUtil.getRemoteException(se);
+    if (user != null) {
+      try {
+        user.getUGI().doAs(new PrivilegedExceptionAction<Void>() {
+          @Override
+          public Void run() throws Exception {
+            admin.mergeRegions(controller, request);
+            return null;
+          }
+        });
+      } catch (InterruptedException ie) {
+        InterruptedIOException iioe = new InterruptedIOException();
+        iioe.initCause(ie);
+        throw iioe;
+      }
+    } else {
+      try {
+        admin.mergeRegions(controller, request);
+      } catch (ServiceException se) {
+        throw ProtobufUtil.getRemoteException(se);
+      }
     }
   }
 
@@ -2128,8 +2171,9 @@ public final class ProtobufUtil {
    * @param actions the permissions to be granted
    * @throws ServiceException
    */
-  public static void grant(AccessControlService.BlockingInterface protocol,
-      String userShortName, Permission.Action... actions) throws ServiceException {
+  public static void grant(RpcController controller,
+      AccessControlService.BlockingInterface protocol, String userShortName,
+      Permission.Action... actions) throws ServiceException {
     List<AccessControlProtos.Permission.Action> permActions =
         Lists.newArrayListWithCapacity(actions.length);
     for (Permission.Action a : actions) {
@@ -2138,7 +2182,7 @@ public final class ProtobufUtil {
     AccessControlProtos.GrantRequest request = RequestConverter.
       buildGrantRequest(userShortName, permActions.toArray(
         new AccessControlProtos.Permission.Action[actions.length]));
-    protocol.grant(null, request);
+    protocol.grant(controller, request);
   }
 
   /**
@@ -2155,9 +2199,9 @@ public final class ProtobufUtil {
    * @param actions the permissions to be granted
    * @throws ServiceException
    */
-  public static void grant(AccessControlService.BlockingInterface protocol,
-      String userShortName, TableName tableName, byte[] f, byte[] q,
-      Permission.Action... actions) throws ServiceException {
+  public static void grant(RpcController controller,
+      AccessControlService.BlockingInterface protocol, String userShortName, TableName tableName,
+      byte[] f, byte[] q, Permission.Action... actions) throws ServiceException {
     List<AccessControlProtos.Permission.Action> permActions =
         Lists.newArrayListWithCapacity(actions.length);
     for (Permission.Action a : actions) {
@@ -2166,7 +2210,7 @@ public final class ProtobufUtil {
     AccessControlProtos.GrantRequest request = RequestConverter.
       buildGrantRequest(userShortName, tableName, f, q, permActions.toArray(
         new AccessControlProtos.Permission.Action[actions.length]));
-    protocol.grant(null, request);
+    protocol.grant(controller, request);
   }
 
   /**
@@ -2179,8 +2223,8 @@ public final class ProtobufUtil {
    * @param actions the permissions to be granted
    * @throws ServiceException
    */
-  public static void grant(AccessControlService.BlockingInterface protocol,
-      String userShortName, String namespace,
+  public static void grant(RpcController controller,
+      AccessControlService.BlockingInterface protocol, String userShortName, String namespace,
       Permission.Action... actions) throws ServiceException {
     List<AccessControlProtos.Permission.Action> permActions =
         Lists.newArrayListWithCapacity(actions.length);
@@ -2190,7 +2234,7 @@ public final class ProtobufUtil {
     AccessControlProtos.GrantRequest request = RequestConverter.
       buildGrantRequest(userShortName, namespace, permActions.toArray(
         new AccessControlProtos.Permission.Action[actions.length]));
-    protocol.grant(null, request);
+    protocol.grant(controller, request);
   }
 
   /**
@@ -2203,8 +2247,9 @@ public final class ProtobufUtil {
    * @param actions the permissions to be revoked
    * @throws ServiceException
    */
-  public static void revoke(AccessControlService.BlockingInterface protocol,
-      String userShortName, Permission.Action... actions) throws ServiceException {
+  public static void revoke(RpcController controller,
+      AccessControlService.BlockingInterface protocol, String userShortName,
+      Permission.Action... actions) throws ServiceException {
     List<AccessControlProtos.Permission.Action> permActions =
         Lists.newArrayListWithCapacity(actions.length);
     for (Permission.Action a : actions) {
@@ -2213,7 +2258,7 @@ public final class ProtobufUtil {
     AccessControlProtos.RevokeRequest request = RequestConverter.
       buildRevokeRequest(userShortName, permActions.toArray(
         new AccessControlProtos.Permission.Action[actions.length]));
-    protocol.revoke(null, request);
+    protocol.revoke(controller, request);
   }
 
   /**
@@ -2230,9 +2275,9 @@ public final class ProtobufUtil {
    * @param actions the permissions to be revoked
    * @throws ServiceException
    */
-  public static void revoke(AccessControlService.BlockingInterface protocol,
-      String userShortName, TableName tableName, byte[] f, byte[] q,
-      Permission.Action... actions) throws ServiceException {
+  public static void revoke(RpcController controller,
+      AccessControlService.BlockingInterface protocol, String userShortName, TableName tableName,
+      byte[] f, byte[] q, Permission.Action... actions) throws ServiceException {
     List<AccessControlProtos.Permission.Action> permActions =
         Lists.newArrayListWithCapacity(actions.length);
     for (Permission.Action a : actions) {
@@ -2241,7 +2286,7 @@ public final class ProtobufUtil {
     AccessControlProtos.RevokeRequest request = RequestConverter.
       buildRevokeRequest(userShortName, tableName, f, q, permActions.toArray(
         new AccessControlProtos.Permission.Action[actions.length]));
-    protocol.revoke(null, request);
+    protocol.revoke(controller, request);
   }
 
   /**
@@ -2255,8 +2300,8 @@ public final class ProtobufUtil {
    * @param actions the permissions to be revoked
    * @throws ServiceException
    */
-  public static void revoke(AccessControlService.BlockingInterface protocol,
-      String userShortName, String namespace,
+  public static void revoke(RpcController controller,
+      AccessControlService.BlockingInterface protocol, String userShortName, String namespace,
       Permission.Action... actions) throws ServiceException {
     List<AccessControlProtos.Permission.Action> permActions =
         Lists.newArrayListWithCapacity(actions.length);
@@ -2266,7 +2311,7 @@ public final class ProtobufUtil {
     AccessControlProtos.RevokeRequest request = RequestConverter.
       buildRevokeRequest(userShortName, namespace, permActions.toArray(
         new AccessControlProtos.Permission.Action[actions.length]));
-    protocol.revoke(null, request);
+    protocol.revoke(controller, request);
   }
 
   /**
@@ -2277,14 +2322,14 @@ public final class ProtobufUtil {
    * @param protocol the AccessControlService protocol proxy
    * @throws ServiceException
    */
-  public static List<UserPermission> getUserPermissions(
+  public static List<UserPermission> getUserPermissions(RpcController controller,
       AccessControlService.BlockingInterface protocol) throws ServiceException {
     AccessControlProtos.GetUserPermissionsRequest.Builder builder =
       AccessControlProtos.GetUserPermissionsRequest.newBuilder();
     builder.setType(AccessControlProtos.Permission.Type.Global);
     AccessControlProtos.GetUserPermissionsRequest request = builder.build();
     AccessControlProtos.GetUserPermissionsResponse response =
-      protocol.getUserPermissions(null, request);
+      protocol.getUserPermissions(controller, request);
     List<UserPermission> perms = new ArrayList<UserPermission>(response.getUserPermissionCount());
     for (AccessControlProtos.UserPermission perm: response.getUserPermissionList()) {
       perms.add(ProtobufUtil.toUserPermission(perm));
@@ -2301,7 +2346,7 @@ public final class ProtobufUtil {
    * @param t optional table name
    * @throws ServiceException
    */
-  public static List<UserPermission> getUserPermissions(
+  public static List<UserPermission> getUserPermissions(RpcController controller,
       AccessControlService.BlockingInterface protocol,
       TableName t) throws ServiceException {
     AccessControlProtos.GetUserPermissionsRequest.Builder builder =
@@ -2312,7 +2357,7 @@ public final class ProtobufUtil {
     builder.setType(AccessControlProtos.Permission.Type.Table);
     AccessControlProtos.GetUserPermissionsRequest request = builder.build();
     AccessControlProtos.GetUserPermissionsResponse response =
-      protocol.getUserPermissions(null, request);
+      protocol.getUserPermissions(controller, request);
     List<UserPermission> perms = new ArrayList<UserPermission>(response.getUserPermissionCount());
     for (AccessControlProtos.UserPermission perm: response.getUserPermissionList()) {
       perms.add(ProtobufUtil.toUserPermission(perm));
@@ -2329,7 +2374,7 @@ public final class ProtobufUtil {
    * @param namespace name of the namespace
    * @throws ServiceException
    */
-  public static List<UserPermission> getUserPermissions(
+  public static List<UserPermission> getUserPermissions(RpcController controller,
       AccessControlService.BlockingInterface protocol,
       byte[] namespace) throws ServiceException {
     AccessControlProtos.GetUserPermissionsRequest.Builder builder =
@@ -2340,7 +2385,7 @@ public final class ProtobufUtil {
     builder.setType(AccessControlProtos.Permission.Type.Namespace);
     AccessControlProtos.GetUserPermissionsRequest request = builder.build();
     AccessControlProtos.GetUserPermissionsResponse response =
-      protocol.getUserPermissions(null, request);
+      protocol.getUserPermissions(controller, request);
     List<UserPermission> perms = new ArrayList<UserPermission>(response.getUserPermissionCount());
     for (AccessControlProtos.UserPermission perm: response.getUserPermissionList()) {
       perms.add(ProtobufUtil.toUserPermission(perm));
@@ -2410,13 +2455,13 @@ public final class ProtobufUtil {
    */
   public static String getRegionEncodedName(
       final RegionSpecifier regionSpecifier) throws DoNotRetryIOException {
-    byte[] value = regionSpecifier.getValue().toByteArray();
+    ByteString value = regionSpecifier.getValue();
     RegionSpecifierType type = regionSpecifier.getType();
     switch (type) {
       case REGION_NAME:
-        return HRegionInfo.encodeRegionName(value);
+        return HRegionInfo.encodeRegionName(value.toByteArray());
       case ENCODED_REGION_NAME:
-        return Bytes.toString(value);
+        return value.toStringUtf8();
       default:
         throw new DoNotRetryIOException(
           "Unsupported region specifier type: " + type);
@@ -2613,15 +2658,36 @@ public final class ProtobufUtil {
   public static RegionEventDescriptor toRegionEventDescriptor(
       EventType eventType, HRegionInfo hri, long seqId, ServerName server,
       Map<byte[], List<Path>> storeFiles) {
+    final byte[] tableNameAsBytes = hri.getTable().getName();
+    final byte[] encodedNameAsBytes = hri.getEncodedNameAsBytes();
+    final byte[] regionNameAsBytes = hri.getRegionName();
+    return toRegionEventDescriptor(eventType,
+        tableNameAsBytes,
+        encodedNameAsBytes,
+        regionNameAsBytes,
+        seqId,
+
+        server,
+        storeFiles);
+  }
+
+  public static RegionEventDescriptor toRegionEventDescriptor(EventType eventType,
+                                                              byte[] tableNameAsBytes,
+                                                              byte[] encodedNameAsBytes,
+                                                              byte[] regionNameAsBytes,
+                                                               long seqId,
+
+                                                              ServerName server,
+                                                              Map<byte[], List<Path>> storeFiles) {
     RegionEventDescriptor.Builder desc = RegionEventDescriptor.newBuilder()
         .setEventType(eventType)
-        .setTableName(ByteStringer.wrap(hri.getTable().getName()))
-        .setEncodedRegionName(ByteStringer.wrap(hri.getEncodedNameAsBytes()))
-        .setRegionName(ByteStringer.wrap(hri.getRegionName()))
+        .setTableName(ByteStringer.wrap(tableNameAsBytes))
+        .setEncodedRegionName(ByteStringer.wrap(encodedNameAsBytes))
+        .setRegionName(ByteStringer.wrap(regionNameAsBytes))
         .setLogSequenceNumber(seqId)
         .setServer(toServerName(server));
 
-    for (Map.Entry<byte[], List<Path>> entry : storeFiles.entrySet()) {
+    for (Entry<byte[], List<Path>> entry : storeFiles.entrySet()) {
       StoreDescriptor.Builder builder = StoreDescriptor.newBuilder()
           .setFamilyName(ByteStringer.wrap(entry.getKey()))
           .setStoreHomeDir(Bytes.toString(entry.getKey()));
@@ -3045,7 +3111,7 @@ public final class ProtobufUtil {
    * @param builder current message builder
    * @param in InputStream containing protobuf data
    * @param size known size of protobuf data
-   * @throws IOException 
+   * @throws IOException
    */
   public static void mergeFrom(Message.Builder builder, InputStream in, int size)
       throws IOException {
@@ -3060,7 +3126,7 @@ public final class ProtobufUtil {
    * buffers where the message size is not known
    * @param builder current message builder
    * @param in InputStream containing protobuf data
-   * @throws IOException 
+   * @throws IOException
    */
   public static void mergeFrom(Message.Builder builder, InputStream in)
       throws IOException {
@@ -3074,8 +3140,8 @@ public final class ProtobufUtil {
    * This version of protobuf's mergeFrom avoids the hard-coded 64MB limit for decoding
    * buffers when working with ByteStrings
    * @param builder current message builder
-   * @param bs ByteString containing the 
-   * @throws IOException 
+   * @param bs ByteString containing the
+   * @throws IOException
    */
   public static void mergeFrom(Message.Builder builder, ByteString bs) throws IOException {
     final CodedInputStream codedInput = bs.newCodedInput();
@@ -3089,7 +3155,7 @@ public final class ProtobufUtil {
    * buffers when working with byte arrays
    * @param builder current message builder
    * @param b byte array
-   * @throws IOException 
+   * @throws IOException
    */
   public static void mergeFrom(Message.Builder builder, byte[] b) throws IOException {
     final CodedInputStream codedInput = CodedInputStream.newInstance(b);
@@ -3113,6 +3179,19 @@ public final class ProtobufUtil {
     codedInput.setSizeLimit(length);
     builder.mergeFrom(codedInput);
     codedInput.checkLastTagWas(0);
+  }
+
+  public static void mergeFrom(Message.Builder builder, CodedInputStream codedInput, int length)
+      throws IOException {
+    codedInput.resetSizeCounter();
+    int prevLimit = codedInput.setSizeLimit(length);
+
+    int limit = codedInput.pushLimit(length);
+    builder.mergeFrom(codedInput);
+    codedInput.popLimit(limit);
+
+    codedInput.checkLastTagWas(0);
+    codedInput.setSizeLimit(prevLimit);
   }
 
   public static ReplicationLoadSink toReplicationLoadSink(
@@ -3196,4 +3275,126 @@ public final class ProtobufUtil {
     return new TimeRange(minStamp, maxStamp);
   }
 
+  public static RSGroupInfo toGroupInfo(RSGroupProtos.RSGroupInfo proto) {
+    RSGroupInfo RSGroupInfo = new RSGroupInfo(proto.getName());
+    for(HBaseProtos.ServerName el: proto.getServersList()) {
+      RSGroupInfo.addServer(HostAndPort.fromParts(el.getHostName(), el.getPort()));
+    }
+    for(HBaseProtos.TableName pTableName: proto.getTablesList()) {
+      RSGroupInfo.addTable(ProtobufUtil.toTableName(pTableName));
+    }
+    return RSGroupInfo;
+  }
+
+  public static RSGroupProtos.RSGroupInfo toProtoGroupInfo(RSGroupInfo pojo) {
+    List<HBaseProtos.TableName> tables =
+        new ArrayList<HBaseProtos.TableName>(pojo.getTables().size());
+    for(TableName arg: pojo.getTables()) {
+      tables.add(ProtobufUtil.toProtoTableName(arg));
+    }
+    List<HBaseProtos.ServerName> hostports =
+        new ArrayList<HBaseProtos.ServerName>(pojo.getServers().size());
+    for(HostAndPort el: pojo.getServers()) {
+      hostports.add(HBaseProtos.ServerName.newBuilder()
+          .setHostName(el.getHostText())
+          .setPort(el.getPort())
+          .build());
+    }
+    return RSGroupProtos.RSGroupInfo.newBuilder().setName(pojo.getName())
+        .addAllServers(hostports)
+        .addAllTables(tables).build();
+  }
+
+  /**
+   * Converts an HColumnDescriptor to ColumnFamilySchema
+   * @param hcd the HColummnDescriptor
+   * @return Convert this instance to a the pb column family type
+   */
+  public static ColumnFamilySchema convertToColumnFamilySchema(HColumnDescriptor hcd) {
+    ColumnFamilySchema.Builder builder = ColumnFamilySchema.newBuilder();
+    builder.setName(ByteStringer.wrap(hcd.getName()));
+    for (Map.Entry<Bytes, Bytes> e : hcd.getValues().entrySet()) {
+      BytesBytesPair.Builder aBuilder = BytesBytesPair.newBuilder();
+      aBuilder.setFirst(ByteStringer.wrap(e.getKey().get()));
+      aBuilder.setSecond(ByteStringer.wrap(e.getValue().get()));
+      builder.addAttributes(aBuilder.build());
+    }
+    for (Map.Entry<String, String> e : hcd.getConfiguration().entrySet()) {
+      NameStringPair.Builder aBuilder = NameStringPair.newBuilder();
+      aBuilder.setName(e.getKey());
+      aBuilder.setValue(e.getValue());
+      builder.addConfiguration(aBuilder.build());
+    }
+    return builder.build();
+  }
+
+  /**
+   * Converts a ColumnFamilySchema to HColumnDescriptor
+   * @param cfs the ColumnFamilySchema
+   * @return An {@link HColumnDescriptor} made from the passed in <code>cfs</code>
+   */
+  public static HColumnDescriptor convertToHColumnDesc(final ColumnFamilySchema cfs) {
+    // Use the empty constructor so we preserve the initial values set on construction for things
+    // like maxVersion.  Otherwise, we pick up wrong values on deserialization which makes for
+    // unrelated-looking test failures that are hard to trace back to here.
+    HColumnDescriptor hcd = new HColumnDescriptor(cfs.getName().toByteArray());
+    for (BytesBytesPair a: cfs.getAttributesList()) {
+      hcd.setValue(a.getFirst().toByteArray(), a.getSecond().toByteArray());
+    }
+    for (NameStringPair a: cfs.getConfigurationList()) {
+      hcd.setConfiguration(a.getName(), a.getValue());
+    }
+    return hcd;
+  }
+
+  /**
+   * Converts an HTableDescriptor to TableSchema
+   * @param htd the HTableDescriptor
+   * @return Convert the current {@link HTableDescriptor} into a pb TableSchema instance.
+   */
+  public static TableSchema convertToTableSchema(HTableDescriptor htd) {
+    TableSchema.Builder builder = TableSchema.newBuilder();
+    builder.setTableName(toProtoTableName(htd.getTableName()));
+    for (Map.Entry<Bytes, Bytes> e : htd.getValues().entrySet()) {
+      BytesBytesPair.Builder aBuilder = BytesBytesPair.newBuilder();
+      aBuilder.setFirst(ByteStringer.wrap(e.getKey().get()));
+      aBuilder.setSecond(ByteStringer.wrap(e.getValue().get()));
+      builder.addAttributes(aBuilder.build());
+    }
+    for (HColumnDescriptor hcd : htd.getColumnFamilies()) {
+      builder.addColumnFamilies(convertToColumnFamilySchema(hcd));
+    }
+    for (Map.Entry<String, String> e : htd.getConfiguration().entrySet()) {
+      NameStringPair.Builder aBuilder = NameStringPair.newBuilder();
+      aBuilder.setName(e.getKey());
+      aBuilder.setValue(e.getValue());
+      builder.addConfiguration(aBuilder.build());
+    }
+    return builder.build();
+  }
+
+  /**
+   * Converts a TableSchema to HTableDescriptor
+   * @param ts A pb TableSchema instance.
+   * @return An {@link HTableDescriptor} made from the passed in pb <code>ts</code>.
+   */
+  public static HTableDescriptor convertToHTableDesc(final TableSchema ts) {
+    List<ColumnFamilySchema> list = ts.getColumnFamiliesList();
+    HColumnDescriptor [] hcds = new HColumnDescriptor[list.size()];
+    int index = 0;
+    for (ColumnFamilySchema cfs: list) {
+      hcds[index++] = ProtobufUtil.convertToHColumnDesc(cfs);
+    }
+    HTableDescriptor htd = new HTableDescriptor(ProtobufUtil.toTableName(ts.getTableName()));
+    for (HColumnDescriptor hcd : hcds) {
+      htd.addFamily(hcd);
+    }
+    for (BytesBytesPair a: ts.getAttributesList()) {
+      htd.setValue(a.getFirst().toByteArray(), a.getSecond().toByteArray());
+    }
+    for (NameStringPair a: ts.getConfigurationList()) {
+      htd.setConfiguration(a.getName(), a.getValue());
+    }
+    return htd;
+  }
 }

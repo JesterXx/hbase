@@ -70,10 +70,16 @@
     <module>hbase-external-blockcache</module>
     <module>hbase-shaded</module>
     <module>hbase-spark</module>
+    <module>hbase-archetypes</module>
   </modules>
   <!--Add apache snapshots in case we want to use unreleased versions of plugins:
       e.g. surefire 2.18-SNAPSHOT-->
   <pluginRepositories>
+    <pluginRepository>
+      <id>scala-tools.org</id>
+      <name>Scala-tools Maven2 Repository</name>
+      <url>http://scala-tools.org/repo-releases</url>
+    </pluginRepository>
     <pluginRepository>
       <id>apache.snapshots</id>
       <url>http://repository.apache.org/snapshots/</url>
@@ -166,6 +172,14 @@
       <timezone>-8</timezone>
       <organization>Facebook</organization>
       <organizationUrl>http://www.facebook.com/</organizationUrl>
+    </developer>
+    <developer>
+      <id>ashishsinghi</id>
+      <name>Ashish Singhi</name>
+      <email>ashishsinghi@apache.org</email>
+      <timezone>+5</timezone>
+      <organization>Huawei</organization>
+      <organizationUrl>http://www.huawei.com/en/</organizationUrl>
     </developer>
     <developer>
       <id>busbey</id>
@@ -360,6 +374,14 @@
       <organizationUrl>http://www.facebook.com</organizationUrl>
     </developer>
     <developer>
+      <id>liyu</id>
+      <name>Yu Li</name>
+      <email>liyu@apache.org</email>
+      <timezone>+8</timezone>
+      <organization>Alibaba</organization>
+      <organizationUrl>http://www.taobao.com</organizationUrl>
+    </developer>
+    <developer>
       <id>mbautin</id>
       <name>Mikhail Bautin</name>
       <email>mbautin@apache.org</email>
@@ -500,8 +522,8 @@
       <name>Duo Zhang</name>
       <email>zhangduo@apache.org</email>
       <timezone>+8</timezone>
-      <organization>unaffiliated</organization>
-      <organizationUrl>https://github.com/Apache9</organizationUrl>
+      <organization>Xiaomi</organization>
+      <organizationUrl>http://www.mi.com</organizationUrl>
     </developer>
     <developer>
       <id>zjushch</id>
@@ -828,6 +850,7 @@
               <exclude>**/patchprocess/**</exclude>
               <exclude>src/main/site/resources/repo/**</exclude>
               <exclude>**/dependency-reduced-pom.xml</exclude>
+              <exclude>**/ESAPI.properties</exclude>
               <exclude>**/rat.txt</exclude>
             </excludes>
           </configuration>
@@ -1148,6 +1171,11 @@
         <inherited>true</inherited>
         <extensions>true</extensions>
       </plugin>
+      <plugin>
+        <groupId>org.scala-tools</groupId>
+        <artifactId>maven-scala-plugin</artifactId>
+        <version>2.15.2</version>
+      </plugin>
     </plugins>
   </build>
   <properties>
@@ -1204,7 +1232,7 @@
     <protobuf.version>2.5.0</protobuf.version>
     <thrift.path>thrift</thrift.path>
     <thrift.version>0.9.3</thrift.version>
-    <zookeeper.version>3.4.6</zookeeper.version>
+    <zookeeper.version>3.4.8</zookeeper.version>
     <slf4j.version>1.7.7</slf4j.version>
     <clover.version>4.0.3</clover.version>
     <jamon-runtime.version>2.4.1</jamon-runtime.version>
@@ -1346,6 +1374,18 @@
       <dependency>
         <groupId>org.apache.hbase</groupId>
         <artifactId>${compat.module}</artifactId>
+        <version>${project.version}</version>
+        <type>test-jar</type>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <artifactId>hbase-rsgroup</artifactId>
+        <groupId>org.apache.hbase</groupId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <artifactId>hbase-rsgroup</artifactId>
+        <groupId>org.apache.hbase</groupId>
         <version>${project.version}</version>
         <type>test-jar</type>
         <scope>test</scope>
@@ -1797,6 +1837,17 @@
 
   -->
   <profiles>
+    <profile>
+      <id>rsgroup</id>
+      <activation>
+        <property>
+            <name>!skip-rsgroup</name>
+        </property>
+      </activation>
+      <modules>
+        <module>hbase-rsgroup</module>
+      </modules>
+    </profile>
     <profile>
       <id>build-with-jdk8</id>
       <activation>
@@ -3026,6 +3077,10 @@
         </configuration>
       </plugin>
 
+      <plugin>
+        <groupId>org.scala-tools</groupId>
+        <artifactId>maven-scala-plugin</artifactId>
+      </plugin>
     </plugins>
   </reporting>
   <distributionManagement>

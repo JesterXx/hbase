@@ -31,6 +31,7 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Action;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
@@ -76,6 +77,7 @@ import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.ScanRequest;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.CompareType;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier.RegionSpecifierType;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.AddColumnRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.AssignRegionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.BalanceRequest;
@@ -95,14 +97,17 @@ import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsBalancerEnabled
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsCatalogJanitorEnabledRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsMasterRunningRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsNormalizerEnabledRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.IsSplitOrMergeEnabledRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.ModifyColumnRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.ModifyTableRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.MoveRegionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.NormalizeRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.OfflineRegionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.RunCatalogScanRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.ReleaseSplitOrMergeLockAndRollbackRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SetBalancerRunningRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SetNormalizerRunningRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SetSplitOrMergeEnabledRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.TruncateTableRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.UnassignRegionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.RegionServerStatusProtos.GetLastFlushedSequenceIdRequest;
@@ -648,8 +653,16 @@ public final class RequestConverter {
         cells.add(i);
         builder.addAction(actionBuilder.setMutation(ProtobufUtil.toMutationNoData(
           MutationType.INCREMENT, i, mutationBuilder, action.getNonce())));
+      } else if (row instanceof RegionCoprocessorServiceExec) {
+        RegionCoprocessorServiceExec exec = (RegionCoprocessorServiceExec) row;
+        builder.addAction(actionBuilder.setServiceCall(
+            ClientProtos.CoprocessorServiceCall.newBuilder()
+              .setRow(ByteStringer.wrap(exec.getRow()))
+              .setServiceName(exec.getMethod().getService().getFullName())
+              .setMethodName(exec.getMethod().getName())
+              .setRequest(exec.getRequest().toByteString())));
       } else if (row instanceof RowMutations) {
-        continue; // ignore RowMutations
+        throw new UnsupportedOperationException("No RowMutations in multi calls; use mutateRow");
       } else {
         throw new DoNotRetryIOException("Multi doesn't support " + row.getClass().getName());
       }
@@ -1022,7 +1035,7 @@ public final class RequestConverter {
       final long nonce) {
     AddColumnRequest.Builder builder = AddColumnRequest.newBuilder();
     builder.setTableName(ProtobufUtil.toProtoTableName(tableName));
-    builder.setColumnFamilies(column.convert());
+    builder.setColumnFamilies(ProtobufUtil.convertToColumnFamilySchema(column));
     builder.setNonceGroup(nonceGroup);
     builder.setNonce(nonce);
     return builder.build();
@@ -1062,7 +1075,7 @@ public final class RequestConverter {
       final long nonce) {
     ModifyColumnRequest.Builder builder = ModifyColumnRequest.newBuilder();
     builder.setTableName(ProtobufUtil.toProtoTableName((tableName)));
-    builder.setColumnFamilies(column.convert());
+    builder.setColumnFamilies(ProtobufUtil.convertToColumnFamilySchema(column));
     builder.setNonceGroup(nonceGroup);
     builder.setNonce(nonce);
     return builder.build();
@@ -1224,7 +1237,7 @@ public final class RequestConverter {
       final long nonceGroup,
       final long nonce) {
     CreateTableRequest.Builder builder = CreateTableRequest.newBuilder();
-    builder.setTableSchema(hTableDesc.convert());
+    builder.setTableSchema(ProtobufUtil.convertToTableSchema(hTableDesc));
     if (splitKeys != null) {
       for (byte [] splitKey : splitKeys) {
         builder.addSplitKeys(ByteStringer.wrap(splitKey));
@@ -1250,7 +1263,7 @@ public final class RequestConverter {
       final long nonce) {
     ModifyTableRequest.Builder builder = ModifyTableRequest.newBuilder();
     builder.setTableName(ProtobufUtil.toProtoTableName((tableName)));
-    builder.setTableSchema(hTableDesc.convert());
+    builder.setTableSchema(ProtobufUtil.convertToTableSchema(hTableDesc));
     builder.setNonceGroup(nonceGroup);
     builder.setNonce(nonce);
     return builder.build();
@@ -1683,5 +1696,58 @@ public final class RequestConverter {
    */
   public static SetNormalizerRunningRequest buildSetNormalizerRunningRequest(boolean on) {
     return SetNormalizerRunningRequest.newBuilder().setOn(on).build();
+  }
+
+  /**
+   * Creates a protocol buffer IsSplitOrMergeEnabledRequest
+   *
+   * @param switchType see {@link org.apache.hadoop.hbase.client.Admin.MasterSwitchType}
+   * @return a IsSplitOrMergeEnabledRequest
+   */
+  public static IsSplitOrMergeEnabledRequest buildIsSplitOrMergeEnabledRequest(
+    Admin.MasterSwitchType switchType) {
+    IsSplitOrMergeEnabledRequest.Builder builder = IsSplitOrMergeEnabledRequest.newBuilder();
+    builder.setSwitchType(convert(switchType));
+    return builder.build();
+  }
+
+  public static ReleaseSplitOrMergeLockAndRollbackRequest
+    buildReleaseSplitOrMergeLockAndRollbackRequest() {
+    ReleaseSplitOrMergeLockAndRollbackRequest.Builder builder =
+      ReleaseSplitOrMergeLockAndRollbackRequest.newBuilder();
+    return builder.build();
+  }
+
+  /**
+   * Creates a protocol buffer SetSplitOrMergeEnabledRequest
+   *
+   * @param enabled switch is enabled or not
+   * @param synchronous set switch sync?
+   * @param switchTypes see {@link org.apache.hadoop.hbase.client.Admin.MasterSwitchType}, it is
+   *                    a list.
+   * @return a SetSplitOrMergeEnabledRequest
+   */
+  public static SetSplitOrMergeEnabledRequest buildSetSplitOrMergeEnabledRequest(boolean enabled,
+    boolean synchronous, boolean skipLock, Admin.MasterSwitchType... switchTypes) {
+    SetSplitOrMergeEnabledRequest.Builder builder = SetSplitOrMergeEnabledRequest.newBuilder();
+    builder.setEnabled(enabled);
+    builder.setSynchronous(synchronous);
+    builder.setSkipLock(skipLock);
+    for (Admin.MasterSwitchType switchType : switchTypes) {
+      builder.addSwitchTypes(convert(switchType));
+    }
+    return builder.build();
+  }
+
+  private static MasterProtos.MasterSwitchType convert(Admin.MasterSwitchType switchType) {
+    switch (switchType) {
+      case SPLIT:
+        return MasterProtos.MasterSwitchType.SPLIT;
+      case MERGE:
+        return MasterProtos.MasterSwitchType.MERGE;
+      default:
+        break;
+    }
+    throw new UnsupportedOperationException("Unsupport switch type:" + switchType);
   }
 }

@@ -22,6 +22,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseConfiguration;
@@ -77,6 +78,10 @@ public abstract class ClientScanner extends AbstractClientScanner {
      * via the methods {@link #addToPartialResults(Result)} and {@link #clearPartialResults()}
      */
     protected byte[] partialResultsRow = null;
+    /**
+     * The last cell from a not full Row which is added to cache
+     */
+    protected Cell lastCellLoadedToCache = null;
     protected final int caching;
     protected long lastNext;
     // Keep lastResult returned successfully in case we have to reset scanner.
@@ -381,9 +386,7 @@ public abstract class ClientScanner extends AbstractClientScanner {
     Result[] values = null;
     long remainingResultSize = maxScannerResultSize;
     int countdown = this.caching;
-
-    // We need to reset it if it's a new callable that was created
-    // with a countdown in nextScanner
+    // We need to reset it if it's a new callable that was created with a countdown in nextScanner
     callable.setCaching(this.caching);
     // This flag is set when we want to skip the result returned. We do
     // this when we reset scanner because it split under us.
@@ -391,18 +394,19 @@ public abstract class ClientScanner extends AbstractClientScanner {
     // We don't expect that the server will have more results for us if
     // it doesn't tell us otherwise. We rely on the size or count of results
     boolean serverHasMoreResults = false;
+    boolean allResultsSkipped = false;
     do {
+      allResultsSkipped = false;
       try {
         // Server returns a null values if scanning is to stop. Else,
         // returns an empty array if scanning is to go on and we've just
         // exhausted current region.
         values = call(callable, caller, scannerTimeout);
-        // When the replica switch happens, we need to do certain operations
-        // again. The callable will openScanner with the right startkey
-        // but we need to pick up from there. Bypass the rest of the loop
-        // and let the catch-up happen in the beginning of the loop as it
-        // happens for the cases where we see exceptions. Since only openScanner
-        // would have happened, values would be null
+        // When the replica switch happens, we need to do certain operations again.
+        // The callable will openScanner with the right startkey but we need to pick up
+        // from there. Bypass the rest of the loop and let the catch-up happen in the beginning
+        // of the loop as it happens for the cases where we see exceptions.
+        // Since only openScanner would have happened, values would be null
         if (values == null && callable.switchedToADifferentReplica()) {
           // Any accumulated partial results are no longer valid since the callable will
           // openScanner with the correct startkey and we must pick up from there
@@ -415,7 +419,6 @@ public abstract class ClientScanner extends AbstractClientScanner {
         // An exception was thrown which makes any partial results that we were collecting
         // invalid. The scanner will need to be reset to the beginning of a row.
         clearPartialResults();
-
         // DNRIOEs are thrown to make us break out of retries. Some types of DNRIOEs want us
         // to reset the scanner and come back in again.
         if (e instanceof UnknownScannerException) {
@@ -424,8 +427,8 @@ public abstract class ClientScanner extends AbstractClientScanner {
           // a ScannerTimeoutException. Else, it's because the region moved and we used the old
           // id against the new region server; reset the scanner.
           if (timeout < System.currentTimeMillis()) {
-            LOG.info("For hints related to the following exception, please try taking a look at: " +
-                "https://hbase.apache.org/book.html#trouble.client.scantimeout");
+            LOG.info("For hints related to the following exception, please try taking a look at: "
+                    + "https://hbase.apache.org/book.html#trouble.client.scantimeout");
             long elapsed = System.currentTimeMillis() - lastNext;
             ScannerTimeoutException ex =
                 new ScannerTimeoutException(elapsed + "ms passed since the last invocation, "
@@ -440,8 +443,7 @@ public abstract class ClientScanner extends AbstractClientScanner {
           if ((cause != null && cause instanceof NotServingRegionException) ||
               (cause != null && cause instanceof RegionServerStoppedException) ||
               e instanceof OutOfOrderScannerNextException) {
-            // Pass
-            // It is easier writing the if loop test as list of what is allowed rather than
+            // Pass. It is easier writing the if loop test as list of what is allowed rather than
             // as a list of what is not allowed... so if in here, it means we do not throw.
           } else {
             throw e;
@@ -449,16 +451,19 @@ public abstract class ClientScanner extends AbstractClientScanner {
         }
         // Else, its signal from depths of ScannerCallable that we need to reset the scanner.
         if (this.lastResult != null) {
-          // The region has moved. We need to open a brand new scanner at
-          // the new location.
-          // Reset the startRow to the row we've seen last so that the new
-          // scanner starts at the correct row. Otherwise we may see previously
-          // returned rows again.
+          // The region has moved. We need to open a brand new scanner at the new location.
+          // Reset the startRow to the row we've seen last so that the new scanner starts at
+          // the correct row. Otherwise we may see previously returned rows again.
           // (ScannerCallable by now has "relocated" the correct region)
-          if (scan.isReversed()) {
-            scan.setStartRow(createClosestRowBefore(lastResult.getRow()));
+          if (!this.lastResult.isPartial() && scan.getBatch() < 0 ) {
+            if (scan.isReversed()) {
+              scan.setStartRow(createClosestRowBefore(lastResult.getRow()));
+            } else {
+              scan.setStartRow(Bytes.add(lastResult.getRow(), new byte[1]));
+            }
           } else {
-            scan.setStartRow(Bytes.add(lastResult.getRow(), new byte[1]));
+            // we need rescan this row because we only loaded partial row before
+            scan.setStartRow(lastResult.getRow());
           }
         }
         if (e instanceof OutOfOrderScannerNextException) {
@@ -475,7 +480,6 @@ public abstract class ClientScanner extends AbstractClientScanner {
         // Set this to zero so we don't try and do an rpc and close on remote server when
         // the exception we got was UnknownScanner or the Server is going down.
         callable = null;
-
         // This continue will take us to while at end of loop where we will set up new scanner.
         continue;
       }
@@ -491,25 +495,42 @@ public abstract class ClientScanner extends AbstractClientScanner {
           getResultsToAddToCache(values, callable.isHeartbeatMessage());
       if (!resultsToAddToCache.isEmpty()) {
         for (Result rs : resultsToAddToCache) {
+          rs = filterLoadedCell(rs);
+          if (rs == null) {
+            continue;
+          }
+
           cache.add(rs);
           long estimatedHeapSizeOfResult = calcEstimatedSize(rs);
           countdown--;
           remainingResultSize -= estimatedHeapSizeOfResult;
           addEstimatedSize(estimatedHeapSizeOfResult);
           this.lastResult = rs;
+          if (this.lastResult.isPartial() || scan.getBatch() > 0 ) {
+            updateLastCellLoadedToCache(this.lastResult);
+          } else {
+            this.lastCellLoadedToCache = null;
+          }
+        }
+        if (cache.isEmpty()) {
+          // all result has been seen before, we need scan more.
+          allResultsSkipped = true;
+          continue;
         }
       }
-
-      // Caller of this method just wants a Result. If we see a heartbeat message, it means
-      // processing of the scan is taking a long time server side. Rather than continue to
-      // loop until a limit (e.g. size or caching) is reached, break out early to avoid causing
-      // unnecesary delays to the caller
-      if (callable.isHeartbeatMessage() && cache.size() > 0) {
-        if (LOG.isTraceEnabled()) {
-          LOG.trace("Heartbeat message received and cache contains Results."
-              + " Breaking out of scan loop");
+      if (callable.isHeartbeatMessage()) {
+        if (cache.size() > 0) {
+          // Caller of this method just wants a Result. If we see a heartbeat message, it means
+          // processing of the scan is taking a long time server side. Rather than continue to
+          // loop until a limit (e.g. size or caching) is reached, break out early to avoid causing
+          // unnecesary delays to the caller
+          if (LOG.isTraceEnabled()) {
+            LOG.trace("Heartbeat message received and cache contains Results."
+                    + " Breaking out of scan loop");
+          }
+          break;
         }
-        break;
+        continue;
       }
 
       // We expect that the server won't have more results for us when we exhaust
@@ -519,14 +540,15 @@ public abstract class ClientScanner extends AbstractClientScanner {
       if (null != values && values.length > 0 && callable.hasMoreResultsContext()) {
         // Only adhere to more server results when we don't have any partialResults
         // as it keeps the outer loop logic the same.
-        serverHasMoreResults = callable.getServerHasMoreResults() & partialResults.isEmpty();
+        serverHasMoreResults = callable.getServerHasMoreResults() && partialResults.isEmpty();
       }
       // Values == null means server-side filter has determined we must STOP
       // !partialResults.isEmpty() means that we are still accumulating partial Results for a
       // row. We should not change scanners before we receive all the partial Results for that
       // row.
-    } while (doneWithRegion(remainingResultSize, countdown, serverHasMoreResults)
-        && (!partialResults.isEmpty() || possiblyNextScanner(countdown, values == null)));
+    } while (allResultsSkipped || (callable != null && callable.isHeartbeatMessage())
+        || (doneWithRegion(remainingResultSize, countdown, serverHasMoreResults)
+        && (!partialResults.isEmpty() || possiblyNextScanner(countdown, values == null))));
   }
 
   /**
@@ -787,5 +809,56 @@ public abstract class ClientScanner extends AbstractClientScanner {
       return true;
     }
     return false;
+  }
+
+  protected void updateLastCellLoadedToCache(Result result) {
+    if (result.rawCells().length == 0) {
+      return;
+    }
+    this.lastCellLoadedToCache = result.rawCells()[result.rawCells().length - 1];
+  }
+
+  /**
+   * Compare two Cells considering reversed scanner.
+   * ReversedScanner only reverses rows, not columns.
+   */
+  private int compare(Cell a, Cell b) {
+    CellComparator comparator = currentRegion != null && currentRegion.isMetaRegion() ?
+        CellComparator.META_COMPARATOR : CellComparator.COMPARATOR;
+    int r = comparator.compareRows(a, b);
+    if (r != 0) {
+      return this.scan.isReversed() ? -r : r;
+    }
+    return CellComparator.compareWithoutRow(a, b);
+  }
+
+  private Result filterLoadedCell(Result result) {
+    // we only filter result when last result is partial
+    // so lastCellLoadedToCache and result should have same row key.
+    // However, if 1) read some cells; 1.1) delete this row at the same time 2) move region;
+    // 3) read more cell. lastCellLoadedToCache and result will be not at same row.
+    if (lastCellLoadedToCache == null || result.rawCells().length == 0) {
+      return result;
+    }
+    if (compare(this.lastCellLoadedToCache, result.rawCells()[0]) < 0) {
+      // The first cell of this result is larger than the last cell of loadcache.
+      // If user do not allow partial result, it must be true.
+      return result;
+    }
+    if (compare(this.lastCellLoadedToCache, result.rawCells()[result.rawCells().length - 1]) >= 0) {
+      // The last cell of this result is smaller than the last cell of loadcache, skip all.
+      return null;
+    }
+
+    // The first one must not in filtered result, we start at the second.
+    int index = 1;
+    while (index < result.rawCells().length) {
+      if (compare(this.lastCellLoadedToCache, result.rawCells()[index]) < 0) {
+        break;
+      }
+      index++;
+    }
+    Cell[] list = Arrays.copyOfRange(result.rawCells(), index, result.rawCells().length);
+    return Result.create(list, result.getExists(), result.isStale(), result.isPartial());
   }
 }

@@ -35,6 +35,7 @@ import org.apache.hadoop.hbase.KeyValue.Type;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.io.HeapSize;
+import org.apache.hadoop.hbase.io.TagCompressionContext;
 import org.apache.hadoop.hbase.util.ByteBufferUtils;
 import org.apache.hadoop.hbase.util.ByteRange;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -459,7 +460,7 @@ public final class CellUtil {
 
   public static boolean matchingRow(final Cell left, final byte[] buf) {
     if (buf == null) {
-      return left.getQualifierLength() == 0;
+      return left.getRowLength() == 0;
     }
     return matchingRow(left, buf, 0, buf.length);
   }
@@ -841,7 +842,7 @@ public final class CellUtil {
     final int tagsLength = cell.getTagsLength();
     // Save an object allocation where we can
     if (tagsLength == 0) {
-      return EMPTY_TAGS_ITR;
+      return TagUtil.EMPTY_TAGS_ITR;
     }
     if (cell instanceof ByteBufferedCell) {
       return tagsIterator(((ByteBufferedCell) cell).getTagsByteBuffer(),
@@ -1387,7 +1388,7 @@ public final class CellUtil {
 
   /**
    * Compares the row of two keyvalues for equality
-   * 
+   *
    * @param left
    * @param right
    * @return True if rows match.
@@ -1629,13 +1630,35 @@ public final class CellUtil {
     return new FirstOnRowDeleteFamilyCell(row, fam);
   }
 
+  /**
+   * Compresses the tags to the given outputstream using the TagcompressionContext
+   * @param out the outputstream to which the compression should happen
+   * @param cell the cell which has tags
+   * @param tagCompressionContext the TagCompressionContext
+   * @throws IOException can throw IOException if the compression encounters issue
+   */
+  public static void compressTags(DataOutputStream out, Cell cell,
+      TagCompressionContext tagCompressionContext) throws IOException {
+    if (cell instanceof ByteBufferedCell) {
+      tagCompressionContext.compressTags(out, ((ByteBufferedCell) cell).getTagsByteBuffer(),
+          ((ByteBufferedCell) cell).getTagsPosition(), cell.getTagsLength());
+    } else {
+      tagCompressionContext.compressTags(out, cell.getTagsArray(), cell.getTagsOffset(),
+          cell.getTagsLength());
+    }
+  }
+
   @InterfaceAudience.Private
   /**
    * These cells are used in reseeks/seeks to improve the read performance.
    * They are not real cells that are returned back to the clients
    */
-  private static abstract class EmptyCell implements Cell {
+  private static abstract class EmptyCell implements Cell, SettableSequenceId {
 
+    @Override
+    public void setSequenceId(long seqId) {
+      // Fake cells don't need seqId, so leaving it as a noop.
+    }
     @Override
     public byte[] getRowArray() {
       return EMPTY_BYTE_ARRAY;

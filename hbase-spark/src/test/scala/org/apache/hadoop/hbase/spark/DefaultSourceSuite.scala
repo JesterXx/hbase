@@ -17,13 +17,70 @@
 
 package org.apache.hadoop.hbase.spark
 
-import org.apache.hadoop.hbase.client.{Put, ConnectionFactory}
+import org.apache.avro.Schema
+import org.apache.avro.generic.GenericData
+import org.apache.hadoop.hbase.client.{ConnectionFactory, Put}
 import org.apache.hadoop.hbase.spark.datasources.HBaseSparkConf
 import org.apache.hadoop.hbase.util.Bytes
-import org.apache.hadoop.hbase.{TableNotFoundException, TableName, HBaseTestingUtility}
+import org.apache.hadoop.hbase.{HBaseTestingUtility, TableName}
+import org.apache.spark.sql.datasources.hbase.HBaseTableCatalog
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.{DataFrame, SQLContext}
-import org.apache.spark.{SparkConf, SparkContext, Logging}
+import org.apache.spark.{Logging, SparkConf, SparkContext}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, FunSuite}
+
+case class HBaseRecord(
+  col0: String,
+  col1: Boolean,
+  col2: Double,
+  col3: Float,
+  col4: Int,
+  col5: Long,
+  col6: Short,
+  col7: String,
+  col8: Byte)
+
+object HBaseRecord {
+  def apply(i: Int, t: String): HBaseRecord = {
+    val s = s"""row${"%03d".format(i)}"""
+    HBaseRecord(s,
+      i % 2 == 0,
+      i.toDouble,
+      i.toFloat,
+      i,
+      i.toLong,
+      i.toShort,
+      s"String$i: $t",
+      i.toByte)
+  }
+}
+
+
+case class AvroHBaseKeyRecord(col0: Array[Byte],
+                              col1: Array[Byte])
+
+object AvroHBaseKeyRecord {
+  val schemaString =
+    s"""{"namespace": "example.avro",
+        |   "type": "record",      "name": "User",
+        |    "fields": [      {"name": "name", "type": "string"},
+        |      {"name": "favorite_number",  "type": ["int", "null"]},
+        |        {"name": "favorite_color", "type": ["string", "null"]}      ]    }""".stripMargin
+
+  val avroSchema: Schema = {
+    val p = new Schema.Parser
+    p.parse(schemaString)
+  }
+
+  def apply(i: Int): AvroHBaseKeyRecord = {
+    val user = new GenericData.Record(avroSchema);
+    user.put("name", s"name${"%03d".format(i)}")
+    user.put("favorite_number", i)
+    user.put("favorite_color", s"color${"%03d".format(i)}")
+    val avroByte = AvroSerdes.serialize(user, avroSchema)
+    AvroHBaseKeyRecord(avroByte, avroByte)
+  }
+}
 
 class DefaultSourceSuite extends FunSuite with
 BeforeAndAfterEach with BeforeAndAfterAll with Logging {
@@ -62,6 +119,7 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
     sparkConf.set(HBaseSparkConf.BLOCK_CACHE_ENABLE, "true")
     sparkConf.set(HBaseSparkConf.BATCH_NUM, "100")
     sparkConf.set(HBaseSparkConf.CACHE_SIZE, "100")
+
     sc  = new SparkContext("local", "test", sparkConf)
 
     val connection = ConnectionFactory.createConnection(TEST_UTIL.getConfiguration)
@@ -137,20 +195,37 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
       connection.close()
     }
 
+    def hbaseTable1Catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"string"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"b", "type":"string"}
+            |}
+          |}""".stripMargin
+
     new HBaseContext(sc, TEST_UTIL.getConfiguration)
     sqlContext = new SQLContext(sc)
 
     df = sqlContext.load("org.apache.hadoop.hbase.spark",
-      Map("hbase.columns.mapping" ->
-        "KEY_FIELD STRING :key, A_FIELD STRING c:a, B_FIELD STRING c:b,",
-        "hbase.table" -> "t1"))
+      Map(HBaseTableCatalog.tableCatalog->hbaseTable1Catalog))
 
     df.registerTempTable("hbaseTable1")
 
+    def hbaseTable2Catalog = s"""{
+            |"table":{"namespace":"default", "name":"t2"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"int"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"b", "type":"string"}
+            |}
+          |}""".stripMargin
+
+
     df = sqlContext.load("org.apache.hadoop.hbase.spark",
-      Map("hbase.columns.mapping" ->
-        "KEY_FIELD INT :key, A_FIELD STRING c:a, B_FIELD STRING c:b,",
-        "hbase.table" -> "t2"))
+      Map(HBaseTableCatalog.tableCatalog->hbaseTable2Catalog))
 
     df.registerTempTable("hbaseTable2")
   }
@@ -512,13 +587,20 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
     assert(scanRange1.isUpperBoundEqualTo)
   }
 
-
   test("Test table that doesn't exist") {
-    intercept[TableNotFoundException] {
+    val catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1NotThere"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"string"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"c", "type":"string"}
+            |}
+          |}""".stripMargin
+
+    intercept[Exception] {
       df = sqlContext.load("org.apache.hadoop.hbase.spark",
-        Map("hbase.columns.mapping" ->
-          "KEY_FIELD STRING :key, A_FIELD STRING c:a, B_FIELD STRING c:b,",
-          "hbase.table" -> "t1NotThere"))
+        Map(HBaseTableCatalog.tableCatalog->catalog))
 
       df.registerTempTable("hbaseNonExistingTmp")
 
@@ -530,11 +612,20 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
     DefaultSourceStaticUtils.lastFiveExecutionRules.poll()
   }
 
+
   test("Test table with column that doesn't exist") {
+    val catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"string"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"b", "type":"string"},
+              |"C_FIELD":{"cf":"c", "col":"c", "type":"string"}
+            |}
+          |}""".stripMargin
     df = sqlContext.load("org.apache.hadoop.hbase.spark",
-      Map("hbase.columns.mapping" ->
-        "KEY_FIELD STRING :key, A_FIELD STRING c:a, B_FIELD STRING c:b, C_FIELD STRING c:c,",
-        "hbase.table" -> "t1"))
+      Map(HBaseTableCatalog.tableCatalog->catalog))
 
     df.registerTempTable("hbaseFactColumnTmp")
 
@@ -549,10 +640,18 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
   }
 
   test("Test table with INT column") {
+    val catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"string"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"b", "type":"string"},
+              |"I_FIELD":{"cf":"c", "col":"i", "type":"int"}
+            |}
+          |}""".stripMargin
     df = sqlContext.load("org.apache.hadoop.hbase.spark",
-      Map("hbase.columns.mapping" ->
-        "KEY_FIELD STRING :key, A_FIELD STRING c:a, B_FIELD STRING c:b, I_FIELD INT c:i,",
-        "hbase.table" -> "t1"))
+      Map(HBaseTableCatalog.tableCatalog->catalog))
 
     df.registerTempTable("hbaseIntTmp")
 
@@ -571,10 +670,18 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
   }
 
   test("Test table with INT column defined at wrong type") {
+    val catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"string"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"b", "type":"string"},
+              |"I_FIELD":{"cf":"c", "col":"i", "type":"string"}
+            |}
+          |}""".stripMargin
     df = sqlContext.load("org.apache.hadoop.hbase.spark",
-      Map("hbase.columns.mapping" ->
-        "KEY_FIELD STRING :key, A_FIELD STRING c:a, B_FIELD STRING c:b, I_FIELD STRING c:i,",
-        "hbase.table" -> "t1"))
+      Map(HBaseTableCatalog.tableCatalog->catalog))
 
     df.registerTempTable("hbaseIntWrongTypeTmp")
 
@@ -594,32 +701,19 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
     assert(localResult(0).getString(2).charAt(3).toByte == 1)
   }
 
-  test("Test improperly formatted column mapping") {
-    intercept[IllegalArgumentException] {
-      df = sqlContext.load("org.apache.hadoop.hbase.spark",
-        Map("hbase.columns.mapping" ->
-          "KEY_FIELD,STRING,:key, A_FIELD,STRING,c:a, B_FIELD,STRING,c:b, I_FIELD,STRING,c:i,",
-          "hbase.table" -> "t1"))
-
-      df.registerTempTable("hbaseBadTmp")
-
-      val result = sqlContext.sql("SELECT KEY_FIELD, " +
-        "B_FIELD, I_FIELD FROM hbaseBadTmp")
-
-      val executionRules = DefaultSourceStaticUtils.lastFiveExecutionRules.poll()
-      assert(executionRules.dynamicLogicExpression == null)
-
-      result.take(5)
-    }
-  }
-
-
   test("Test bad column type") {
-    intercept[IllegalArgumentException] {
+    val catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"FOOBAR"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"I_FIELD":{"cf":"c", "col":"i", "type":"string"}
+            |}
+          |}""".stripMargin
+    intercept[Exception] {
       df = sqlContext.load("org.apache.hadoop.hbase.spark",
-        Map("hbase.columns.mapping" ->
-          "KEY_FIELD FOOBAR :key, A_FIELD STRING c:a, B_FIELD STRING c:b, I_FIELD STRING c:i,",
-          "hbase.table" -> "t1"))
+        Map(HBaseTableCatalog.tableCatalog->catalog))
 
       df.registerTempTable("hbaseIntWrongTypeTmp")
 
@@ -665,10 +759,18 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
   }
 
   test("Test table with sparse column") {
+    val catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"string"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"b", "type":"string"},
+              |"Z_FIELD":{"cf":"c", "col":"z", "type":"string"}
+            |}
+          |}""".stripMargin
     df = sqlContext.load("org.apache.hadoop.hbase.spark",
-      Map("hbase.columns.mapping" ->
-        "KEY_FIELD STRING :key, A_FIELD STRING c:a, B_FIELD STRING c:b, Z_FIELD STRING c:z,",
-        "hbase.table" -> "t1"))
+      Map(HBaseTableCatalog.tableCatalog->catalog))
 
     df.registerTempTable("hbaseZTmp")
 
@@ -688,11 +790,19 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
   }
 
   test("Test with column logic disabled") {
+    val catalog = s"""{
+            |"table":{"namespace":"default", "name":"t1"},
+            |"rowkey":"key",
+            |"columns":{
+              |"KEY_FIELD":{"cf":"rowkey", "col":"key", "type":"string"},
+              |"A_FIELD":{"cf":"c", "col":"a", "type":"string"},
+              |"B_FIELD":{"cf":"c", "col":"b", "type":"string"},
+              |"Z_FIELD":{"cf":"c", "col":"z", "type":"string"}
+            |}
+          |}""".stripMargin
     df = sqlContext.load("org.apache.hadoop.hbase.spark",
-      Map("hbase.columns.mapping" ->
-        "KEY_FIELD STRING :key, A_FIELD STRING c:a, B_FIELD STRING c:b, Z_FIELD STRING c:z,",
-        "hbase.table" -> "t1",
-        "hbase.push.down.column.filter" -> "false"))
+      Map(HBaseTableCatalog.tableCatalog->catalog,
+        HBaseSparkConf.PUSH_DOWN_COLUMN_FILTER -> "false"))
 
     df.registerTempTable("hbaseNoPushDownTmp")
 
@@ -705,5 +815,237 @@ BeforeAndAfterEach with BeforeAndAfterAll with Logging {
     assert(results.length == 2)
 
     assert(executionRules.dynamicLogicExpression == null)
+  }
+
+  def writeCatalog = s"""{
+                    |"table":{"namespace":"default", "name":"table1"},
+                    |"rowkey":"key",
+                    |"columns":{
+                    |"col0":{"cf":"rowkey", "col":"key", "type":"string"},
+                    |"col1":{"cf":"cf1", "col":"col1", "type":"boolean"},
+                    |"col2":{"cf":"cf2", "col":"col2", "type":"double"},
+                    |"col3":{"cf":"cf3", "col":"col3", "type":"float"},
+                    |"col4":{"cf":"cf4", "col":"col4", "type":"int"},
+                    |"col5":{"cf":"cf5", "col":"col5", "type":"bigint"},
+                    |"col6":{"cf":"cf6", "col":"col6", "type":"smallint"},
+                    |"col7":{"cf":"cf7", "col":"col7", "type":"string"},
+                    |"col8":{"cf":"cf8", "col":"col8", "type":"tinyint"}
+                    |}
+                    |}""".stripMargin
+
+  def withCatalog(cat: String): DataFrame = {
+    sqlContext
+      .read
+      .options(Map(HBaseTableCatalog.tableCatalog->cat))
+      .format("org.apache.hadoop.hbase.spark")
+      .load()
+  }
+
+  test("populate table") {
+    val sql = sqlContext
+    import sql.implicits._
+    val data = (0 to 255).map { i =>
+      HBaseRecord(i, "extra")
+    }
+    sc.parallelize(data).toDF.write.options(
+      Map(HBaseTableCatalog.tableCatalog -> writeCatalog, HBaseTableCatalog.newTable -> "5"))
+      .format("org.apache.hadoop.hbase.spark")
+      .save()
+  }
+
+  test("empty column") {
+    val df = withCatalog(writeCatalog)
+    df.registerTempTable("table0")
+    val c = sqlContext.sql("select count(1) from table0").rdd.collect()(0)(0).asInstanceOf[Long]
+    assert(c == 256)
+  }
+
+  test("full query") {
+    val df = withCatalog(writeCatalog)
+    df.show
+    assert(df.count() == 256)
+  }
+
+  test("filtered query0") {
+    val sql = sqlContext
+    import sql.implicits._
+    val df = withCatalog(writeCatalog)
+    val s = df.filter($"col0" <= "row005")
+      .select("col0", "col1")
+    s.show
+    assert(s.count() == 6)
+  }
+
+  test("Timestamp semantics") {
+    val sql = sqlContext
+    import sql.implicits._
+
+    // There's already some data in here from recently. Let's throw something in
+    // from 1993 which we can include/exclude and add some data with the implicit (now) timestamp.
+    // Then we should be able to cross-section it and only get points in between, get the most recent view
+    // and get an old view.
+    val oldMs = 754869600000L
+    val startMs = System.currentTimeMillis()
+    val oldData = (0 to 100).map { i =>
+      HBaseRecord(i, "old")
+    }
+    val newData = (200 to 255).map { i =>
+      HBaseRecord(i, "new")
+    }
+
+    sc.parallelize(oldData).toDF.write.options(
+      Map(HBaseTableCatalog.tableCatalog -> writeCatalog, HBaseTableCatalog.tableName -> "5",
+        HBaseSparkConf.TIMESTAMP -> oldMs.toString))
+      .format("org.apache.hadoop.hbase.spark")
+      .save()
+    sc.parallelize(newData).toDF.write.options(
+      Map(HBaseTableCatalog.tableCatalog -> writeCatalog, HBaseTableCatalog.tableName -> "5"))
+      .format("org.apache.hadoop.hbase.spark")
+      .save()
+
+    // Test specific timestamp -- Full scan, Timestamp
+    val individualTimestamp = sqlContext.read
+      .options(Map(HBaseTableCatalog.tableCatalog -> writeCatalog, HBaseSparkConf.TIMESTAMP -> oldMs.toString))
+      .format("org.apache.hadoop.hbase.spark")
+      .load()
+    assert(individualTimestamp.count() == 101)
+
+    // Test getting everything -- Full Scan, No range
+    val everything = sqlContext.read
+      .options(Map(HBaseTableCatalog.tableCatalog -> writeCatalog))
+      .format("org.apache.hadoop.hbase.spark")
+      .load()
+    assert(everything.count() == 256)
+    // Test getting everything -- Pruned Scan, TimeRange
+    val element50 = everything.where(col("col0") === lit("row050")).select("col7").collect()(0)(0)
+    assert(element50 == "String50: extra")
+    val element200 = everything.where(col("col0") === lit("row200")).select("col7").collect()(0)(0)
+    assert(element200 == "String200: new")
+
+    // Test Getting old stuff -- Full Scan, TimeRange
+    val oldRange = sqlContext.read
+      .options(Map(HBaseTableCatalog.tableCatalog -> writeCatalog, HBaseSparkConf.MIN_TIMESTAMP -> "0",
+        HBaseSparkConf.MAX_TIMESTAMP -> (oldMs + 100).toString))
+      .format("org.apache.hadoop.hbase.spark")
+      .load()
+    assert(oldRange.count() == 101)
+    // Test Getting old stuff -- Pruned Scan, TimeRange
+    val oldElement50 = oldRange.where(col("col0") === lit("row050")).select("col7").collect()(0)(0)
+    assert(oldElement50 == "String50: old")
+
+    // Test Getting middle stuff -- Full Scan, TimeRange
+    val middleRange = sqlContext.read
+      .options(Map(HBaseTableCatalog.tableCatalog -> writeCatalog, HBaseSparkConf.MIN_TIMESTAMP -> "0",
+        HBaseSparkConf.MAX_TIMESTAMP -> (startMs + 100).toString))
+      .format("org.apache.hadoop.hbase.spark")
+      .load()
+    assert(middleRange.count() == 256)
+    // Test Getting middle stuff -- Pruned Scan, TimeRange
+    val middleElement200 = middleRange.where(col("col0") === lit("row200")).select("col7").collect()(0)(0)
+    assert(middleElement200 == "String200: extra")
+  }
+
+
+  // catalog for insertion
+  def avroWriteCatalog = s"""{
+                             |"table":{"namespace":"default", "name":"avrotable"},
+                             |"rowkey":"key",
+                             |"columns":{
+                             |"col0":{"cf":"rowkey", "col":"key", "type":"binary"},
+                             |"col1":{"cf":"cf1", "col":"col1", "type":"binary"}
+                             |}
+                             |}""".stripMargin
+
+  // catalog for read
+  def avroCatalog = s"""{
+                        |"table":{"namespace":"default", "name":"avrotable"},
+                        |"rowkey":"key",
+                        |"columns":{
+                        |"col0":{"cf":"rowkey", "col":"key",  "avro":"avroSchema"},
+                        |"col1":{"cf":"cf1", "col":"col1", "avro":"avroSchema"}
+                        |}
+                        |}""".stripMargin
+
+  // for insert to another table
+  def avroCatalogInsert = s"""{
+                              |"table":{"namespace":"default", "name":"avrotableInsert"},
+                              |"rowkey":"key",
+                              |"columns":{
+                              |"col0":{"cf":"rowkey", "col":"key", "avro":"avroSchema"},
+                              |"col1":{"cf":"cf1", "col":"col1", "avro":"avroSchema"}
+                              |}
+                              |}""".stripMargin
+
+  def withAvroCatalog(cat: String): DataFrame = {
+    sqlContext
+      .read
+      .options(Map("avroSchema"->AvroHBaseKeyRecord.schemaString,
+        HBaseTableCatalog.tableCatalog->avroCatalog))
+      .format("org.apache.hadoop.hbase.spark")
+      .load()
+  }
+
+
+  test("populate avro table") {
+    val sql = sqlContext
+    import sql.implicits._
+
+    val data = (0 to 255).map { i =>
+      AvroHBaseKeyRecord(i)
+    }
+    sc.parallelize(data).toDF.write.options(
+      Map(HBaseTableCatalog.tableCatalog -> avroWriteCatalog,
+        HBaseTableCatalog.newTable -> "5"))
+      .format("org.apache.hadoop.hbase.spark")
+      .save()
+  }
+
+  test("avro empty column") {
+    val df = withAvroCatalog(avroCatalog)
+    df.registerTempTable("avrotable")
+    val c = sqlContext.sql("select count(1) from avrotable")
+      .rdd.collect()(0)(0).asInstanceOf[Long]
+    assert(c == 256)
+  }
+
+  test("avro full query") {
+    val df = withAvroCatalog(avroCatalog)
+    df.show
+    df.printSchema()
+    assert(df.count() == 256)
+  }
+
+  test("avro serialization and deserialization query") {
+    val df = withAvroCatalog(avroCatalog)
+    df.write.options(
+      Map("avroSchema"->AvroHBaseKeyRecord.schemaString,
+        HBaseTableCatalog.tableCatalog->avroCatalogInsert,
+        HBaseTableCatalog.newTable -> "5"))
+      .format("org.apache.hadoop.hbase.spark")
+      .save()
+    val newDF = withAvroCatalog(avroCatalogInsert)
+    newDF.show
+    newDF.printSchema()
+    assert(newDF.count() == 256)
+  }
+
+  test("avro filtered query") {
+    val sql = sqlContext
+    import sql.implicits._
+    val df = withAvroCatalog(avroCatalog)
+    val r = df.filter($"col1.name" === "name005" || $"col1.name" <= "name005")
+      .select("col0", "col1.favorite_color", "col1.favorite_number")
+    r.show
+    assert(r.count() == 6)
+  }
+
+  test("avro Or filter") {
+    val sql = sqlContext
+    import sql.implicits._
+    val df = withAvroCatalog(avroCatalog)
+    val s = df.filter($"col1.name" <= "name005" || $"col1.name".contains("name007"))
+      .select("col0", "col1.favorite_color", "col1.favorite_number")
+    s.show
+    assert(s.count() == 7)
   }
 }

@@ -1330,6 +1330,22 @@ public interface Admin extends Abortable, Closeable {
   void restoreSnapshot(final String snapshotName) throws IOException, RestoreSnapshotException;
 
   /**
+   * Restore the specified snapshot on the original table. (The table must be disabled) If the
+   * "hbase.snapshot.restore.take.failsafe.snapshot" configuration property is set to true, a
+   * snapshot of the current table is taken before executing the restore operation. In case of
+   * restore failure, the failsafe snapshot will be restored. If the restore completes without
+   * problem the failsafe snapshot is deleted.
+   *
+   * @param snapshotName name of the snapshot to restore
+   * @throws IOException if a remote or network exception occurs
+   * @throws RestoreSnapshotException if snapshot failed to be restored
+   * @return the result of the async restore snapshot. You can use Future.get(long, TimeUnit)
+   *    to wait on the operation to complete.
+   */
+  Future<Void> restoreSnapshotAsync(final String snapshotName)
+      throws IOException, RestoreSnapshotException;
+
+  /**
    * Restore the specified snapshot on the original table. (The table must be disabled) If
    * 'takeFailSafeSnapshot' is set to true, a snapshot of the current table is taken before
    * executing the restore operation. In case of restore failure, the failsafe snapshot will be
@@ -1360,7 +1376,7 @@ public interface Admin extends Abortable, Closeable {
    * @throws RestoreSnapshotException if snapshot failed to be restored
    * @throws IllegalArgumentException if the restore request is formatted incorrectly
    */
-  void restoreSnapshot(final String snapshotName, boolean takeFailSafeSnapshot)
+  void restoreSnapshot(final String snapshotName, final boolean takeFailSafeSnapshot)
       throws IOException, RestoreSnapshotException;
 
   /**
@@ -1388,6 +1404,24 @@ public interface Admin extends Abortable, Closeable {
    */
   void cloneSnapshot(final String snapshotName, final TableName tableName)
       throws IOException, TableExistsException, RestoreSnapshotException;
+
+  /**
+   * Create a new table by cloning the snapshot content, but does not block
+   * and wait for it be completely cloned.
+   * You can use Future.get(long, TimeUnit) to wait on the operation to complete.
+   * It may throw ExecutionException if there was an error while executing the operation
+   * or TimeoutException in case the wait timeout was not long enough to allow the
+   * operation to complete.
+   *
+   * @param snapshotName name of the snapshot to be cloned
+   * @param tableName name of the table where the snapshot will be restored
+   * @throws IOException if a remote or network exception occurs
+   * @throws TableExistsException if table to be cloned already exists
+   * @return the result of the async clone snapshot. You can use Future.get(long, TimeUnit)
+   *    to wait on the operation to complete.
+   */
+  Future<Void> cloneSnapshotAsync(final String snapshotName, final TableName tableName)
+      throws IOException, TableExistsException;
 
   /**
    * Execute a distributed procedure on a cluster.
@@ -1678,11 +1712,41 @@ public interface Admin extends Abortable, Closeable {
   List<SecurityCapability> getSecurityCapabilities() throws IOException;
 
   /**
+   * Turn the Split or Merge switches on or off.
+   *
+   * @param enabled enabled or not
+   * @param synchronous If true, it waits until current split() call, if outstanding, to return.
+   * @param skipLock if false, we will do lock before change switch.
+   *                 with the lock, other requests to change the switch will be rejected!
+   *                 And when you set it to be false,
+   *                 you should call {@link #releaseSplitOrMergeLockAndRollback()} by yourself
+   * @param switchTypes switchType list {@link MasterSwitchType}
+   * @return Previous switch value array
+   */
+  boolean[] setSplitOrMergeEnabled(final boolean enabled, final boolean synchronous,
+                                   final boolean skipLock,
+                                   final MasterSwitchType... switchTypes) throws IOException;
+
+  /**
+   * Query the current state of the switch
+   *
+   * @return true if the switch is enabled, false otherwise.
+   */
+  boolean isSplitOrMergeEnabled(final MasterSwitchType switchType) throws IOException;
+
+  /**
+   *  You should call this method after you call
+   *  {@link #setSplitOrMergeEnabled(boolean, boolean, boolean, MasterSwitchType...)}
+   *  with skipLock be false, this method will release the lock created by above method
+   *  and rollback the switch state to be original state before you change switch
+   * */
+  void releaseSplitOrMergeLockAndRollback() throws IOException;
+
+  /**
    * Currently, there are only two compact types:
    * {@code NORMAL} means do store files compaction;
    * {@code MOB} means do mob files compaction.
    * */
-
   @InterfaceAudience.Public
   @InterfaceStability.Unstable
   public enum CompactType {
@@ -1692,4 +1756,12 @@ public interface Admin extends Abortable, Closeable {
 
     CompactType(int value) {}
   }
+  
+  @InterfaceAudience.Public
+  @InterfaceStability.Evolving
+  public enum MasterSwitchType {
+    SPLIT,
+    MERGE
+  }
+
 }

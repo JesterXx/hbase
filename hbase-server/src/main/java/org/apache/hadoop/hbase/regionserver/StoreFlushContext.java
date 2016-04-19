@@ -21,8 +21,8 @@ package org.apache.hadoop.hbase.regionserver;
 import java.io.IOException;
 import java.util.List;
 
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 
 /**
@@ -85,4 +85,9 @@ interface StoreFlushContext {
    * @return a list of Paths for new files
    */
   List<Path> getCommittedFiles();
+
+  /**
+   * @return the total file size for flush output files, in bytes
+   */
+  long getOutputFileSize();
 }

@@ -22,12 +22,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.TreeSet;
 
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.mapreduce.Reducer;
@@ -67,8 +67,9 @@ public class PutSortReducer extends
         for (List<Cell> cells: p.getFamilyCellMap().values()) {
           for (Cell cell: cells) {
             KeyValue kv = KeyValueUtil.ensureKeyValue(cell);
-            map.add(kv);
-            curSize += kv.heapSize();
+            if (map.add(kv)) {// don't count duplicated kv into size
+              curSize += kv.heapSize();
+            }
           }
         }
       }

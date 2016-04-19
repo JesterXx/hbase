@@ -40,10 +40,6 @@ import org.apache.hadoop.hbase.TableName;
  * <p>Cluster-wide load balancing will occur only when there are no regions in
  * transition and according to a fixed period of a time using {@link #balanceCluster(Map)}.
  *
- * <p>Inline region placement with {@link #immediateAssignment} can be used when
- * the Master needs to handle closed regions that it currently does not have
- * a destination set for.  This can happen during master failover.
- *
  * <p>On cluster startup, bulk assignment can be used to determine
  * locations for all Regions in a cluster.
  *
@@ -51,6 +47,9 @@ import org.apache.hadoop.hbase.TableName;
  */
 @InterfaceAudience.Private
 public interface LoadBalancer extends Configurable, Stoppable, ConfigurationObserver {
+
+  //used to signal to the caller that the region(s) cannot be assigned
+  ServerName BOGUS_SERVER_NAME = ServerName.parseServerName("localhost,1,1");
 
   /**
    * Set the current cluster status.  This allows a LoadBalancer to map host name to a server
@@ -102,17 +101,6 @@ public interface LoadBalancer extends Configurable, Stoppable, ConfigurationObse
   @Nullable
   Map<ServerName, List<HRegionInfo>> retainAssignment(
     Map<HRegionInfo, ServerName> regions,
-    List<ServerName> servers
-  ) throws HBaseIOException;
-
-  /**
-   * Sync assign a region
-   * @param regions
-   * @param servers
-    * @return Map regioninfos to servernames
-   */
-  Map<HRegionInfo, ServerName> immediateAssignment(
-    List<HRegionInfo> regions,
     List<ServerName> servers
   ) throws HBaseIOException;
 

@@ -65,6 +65,7 @@ import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.SequenceFile;
@@ -305,12 +306,12 @@ public class HFileOutputFormat2
                                     
         if (null == favoredNodes) {
           wl.writer =
-              new StoreFile.WriterBuilder(conf, new CacheConfig(tempConf), fs)
+              new StoreFileWriter.Builder(conf, new CacheConfig(tempConf), fs)
                   .withOutputDir(familydir).withBloomType(bloomType)
                   .withComparator(CellComparator.COMPARATOR).withFileContext(hFileContext).build();
         } else {
           wl.writer =
-              new StoreFile.WriterBuilder(conf, new CacheConfig(tempConf), new HFileSystem(fs))
+              new StoreFileWriter.Builder(conf, new CacheConfig(tempConf), new HFileSystem(fs))
                   .withOutputDir(familydir).withBloomType(bloomType)
                   .withComparator(CellComparator.COMPARATOR).withFileContext(hFileContext)
                   .withFavoredNodes(favoredNodes).build();
@@ -320,7 +321,7 @@ public class HFileOutputFormat2
         return wl;
       }
 
-      private void close(final StoreFile.Writer w) throws IOException {
+      private void close(final StoreFileWriter w) throws IOException {
         if (w != null) {
           w.appendFileInfo(StoreFile.BULKLOAD_TIME_KEY,
               Bytes.toBytes(System.currentTimeMillis()));
@@ -350,7 +351,7 @@ public class HFileOutputFormat2
    */
   static class WriterLength {
     long written = 0;
-    StoreFile.Writer writer = null;
+    StoreFileWriter writer = null;
   }
 
   /**
@@ -636,7 +637,10 @@ public class HFileOutputFormat2
     Configuration conf = job.getConfiguration();
     // create the partitions file
     FileSystem fs = FileSystem.get(conf);
-    Path partitionsPath = new Path(conf.get("hbase.fs.tmp.dir"), "partitions_" + UUID.randomUUID());
+    String hbaseTmpFsDir =
+        conf.get(HConstants.TEMPORARY_FS_DIRECTORY_KEY,
+          HConstants.DEFAULT_TEMPORARY_HDFS_DIRECTORY);
+    Path partitionsPath = new Path(hbaseTmpFsDir, "partitions_" + UUID.randomUUID());
     fs.makeQualified(partitionsPath);
     writePartitions(conf, partitionsPath, splitPoints);
     fs.deleteOnExit(partitionsPath);

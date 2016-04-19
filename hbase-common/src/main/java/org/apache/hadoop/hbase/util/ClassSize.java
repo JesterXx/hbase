@@ -110,12 +110,14 @@ public class ClassSize {
   /** Overhead for CellSkipListSet */
   public static final int CELL_SKIPLIST_SET;
 
+  public static final int STORE_SERVICES;
+
   /* Are we running on jdk7? */
   private static final boolean JDK7;
   static {
     final String version = System.getProperty("java.version");
     // Verify String looks like this: 1.6.0_29
-    if (!version.matches("\\d\\.\\d\\..*")) {
+    if (version == null || !version.matches("\\d\\.\\d\\..*")) {
       throw new RuntimeException("Unexpected version format: " + version);
     }
     // Convert char to int
@@ -193,6 +195,8 @@ public class ClassSize {
     TIMERANGE_TRACKER = align(ClassSize.OBJECT + Bytes.SIZEOF_LONG * 2);
 
     CELL_SKIPLIST_SET = align(OBJECT + REFERENCE);
+
+    STORE_SERVICES = align(OBJECT + REFERENCE + ATOMIC_LONG);
   }
 
   /**
@@ -327,7 +331,8 @@ public class ClassSize {
    * know this too.
    */
   public static boolean is32BitJVM() {
-    return System.getProperty("sun.arch.data.model").equals("32");
+    final String model = System.getProperty("sun.arch.data.model");
+    return model != null && model.equals("32");
   }
 
 }

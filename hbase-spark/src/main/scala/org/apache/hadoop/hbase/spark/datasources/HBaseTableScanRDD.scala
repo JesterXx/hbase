@@ -20,18 +20,19 @@ package org.apache.hadoop.hbase.spark.datasources
 import java.util.ArrayList
 
 import org.apache.hadoop.hbase.client._
-import org.apache.hadoop.hbase.spark.{ScanRange, SchemaQualifierDefinition, HBaseRelation, SparkSQLPushDownFilter}
+import org.apache.hadoop.hbase.spark._
 import org.apache.hadoop.hbase.spark.hbase._
 import org.apache.hadoop.hbase.spark.datasources.HBaseResources._
+import org.apache.spark.sql.datasources.hbase.Field
 import org.apache.spark.{SparkEnv, TaskContext, Logging, Partition}
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
 
-
 class HBaseTableScanRDD(relation: HBaseRelation,
-     @transient val filter: Option[SparkSQLPushDownFilter] = None,
-     val columns: Seq[SchemaQualifierDefinition] = Seq.empty
+                       val hbaseContext: HBaseContext,
+                       @transient val filter: Option[SparkSQLPushDownFilter] = None,
+                        val columns: Seq[Field] = Seq.empty
      )extends RDD[Result](relation.sqlContext.sparkContext, Nil) with Logging  {
   private def sparkConf = SparkEnv.get.conf
   @transient var ranges = Seq.empty[Range]
@@ -98,19 +99,22 @@ class HBaseTableScanRDD(relation: HBaseRelation,
       tbr: TableResource,
       g: Seq[Array[Byte]],
       filter: Option[SparkSQLPushDownFilter],
-      columns: Seq[SchemaQualifierDefinition]): Iterator[Result] = {
+      columns: Seq[Field],
+      hbaseContext: HBaseContext): Iterator[Result] = {
     g.grouped(relation.bulkGetSize).flatMap{ x =>
       val gets = new ArrayList[Get]()
       x.foreach{ y =>
         val g = new Get(y)
+        handleTimeSemantics(g)
         columns.foreach { d =>
-          if (d.columnFamilyBytes.length > 0) {
-            g.addColumn(d.columnFamilyBytes, d.qualifierBytes)
+          if (!d.isRowKey) {
+            g.addColumn(d.cfBytes, d.colBytes)
           }
         }
         filter.foreach(g.setFilter(_))
         gets.add(g)
       }
+      hbaseContext.applyCreds()
       val tmp = tbr.get(gets)
       rddResources.addResource(tmp)
       toResultIterator(tmp)
@@ -147,17 +151,18 @@ class HBaseTableScanRDD(relation: HBaseRelation,
 
   private def buildScan(range: Range,
       filter: Option[SparkSQLPushDownFilter],
-      columns: Seq[SchemaQualifierDefinition]): Scan = {
+      columns: Seq[Field]): Scan = {
     val scan = (range.lower, range.upper) match {
       case (Some(Bound(a, b)), Some(Bound(c, d))) => new Scan(a, c)
       case (None, Some(Bound(c, d))) => new Scan(Array[Byte](), c)
       case (Some(Bound(a, b)), None) => new Scan(a)
       case (None, None) => new Scan()
     }
+    handleTimeSemantics(scan)
 
     columns.foreach { d =>
-      if (d.columnFamilyBytes.length > 0) {
-        scan.addColumn(d.columnFamilyBytes, d.qualifierBytes)
+      if (!d.isRowKey) {
+        scan.addColumn(d.cfBytes, d.colBytes)
       }
     }
     scan.setCacheBlocks(relation.blockCacheEnable)
@@ -208,11 +213,12 @@ class HBaseTableScanRDD(relation: HBaseRelation,
       if (points.isEmpty) {
         Iterator.empty: Iterator[Result]
       } else {
-        buildGets(tableResource, points, filter, columns)
+        buildGets(tableResource, points, filter, columns, hbaseContext)
       }
     }
     val rIts = scans.par
       .map { scan =>
+      hbaseContext.applyCreds()
       val scanner = tableResource.getScanner(scan)
       rddResources.addResource(scanner)
       scanner
@@ -221,6 +227,30 @@ class HBaseTableScanRDD(relation: HBaseRelation,
       x ++ y
     } ++ gIt
     rIts
+  }
+
+  private def handleTimeSemantics(query: Query): Unit = {
+    // Set timestamp related values if present
+    (query, relation.timestamp, relation.minTimestamp, relation.maxTimestamp)  match {
+      case (q: Scan, Some(ts), None, None) => q.setTimeStamp(ts)
+      case (q: Get, Some(ts), None, None) => q.setTimeStamp(ts)
+
+      case (q:Scan, None, Some(minStamp), Some(maxStamp)) => q.setTimeRange(minStamp, maxStamp)
+      case (q:Get, None, Some(minStamp), Some(maxStamp)) => q.setTimeRange(minStamp, maxStamp)
+
+      case (q, None, None, None) =>
+
+      case _ => throw new IllegalArgumentException(s"Invalid combination of query/timestamp/time range provided. " +
+        s"timeStamp is: ${relation.timestamp.get}, minTimeStamp is: ${relation.minTimestamp.get}, " +
+        s"maxTimeStamp is: ${relation.maxTimestamp.get}")
+    }
+    if (relation.maxVersions.isDefined) {
+      query match {
+        case q: Scan => q.setMaxVersions(relation.maxVersions.get)
+        case q: Get => q.setMaxVersions(relation.maxVersions.get)
+        case _ => throw new IllegalArgumentException("Invalid query provided with maxVersions")
+      }
+    }
   }
 }
 

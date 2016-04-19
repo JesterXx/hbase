@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -45,6 +46,7 @@ import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
 import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
+import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProcedureProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProcedureProtos.ModifyTableState;
 import org.apache.hadoop.hbase.util.ServerRegionReplicaUtil;
@@ -230,11 +232,12 @@ public class ModifyTableProcedure
     MasterProcedureProtos.ModifyTableStateData.Builder modifyTableMsg =
         MasterProcedureProtos.ModifyTableStateData.newBuilder()
             .setUserInfo(MasterProcedureUtil.toProtoUserInfo(user))
-            .setModifiedTableSchema(modifiedHTableDescriptor.convert())
+            .setModifiedTableSchema(ProtobufUtil.convertToTableSchema(modifiedHTableDescriptor))
             .setDeleteColumnFamilyInModify(deleteColumnFamilyInModify);
 
     if (unmodifiedHTableDescriptor != null) {
-      modifyTableMsg.setUnmodifiedTableSchema(unmodifiedHTableDescriptor.convert());
+      modifyTableMsg
+          .setUnmodifiedTableSchema(ProtobufUtil.convertToTableSchema(unmodifiedHTableDescriptor));
     }
 
     modifyTableMsg.build().writeDelimitedTo(stream);
@@ -247,12 +250,12 @@ public class ModifyTableProcedure
     MasterProcedureProtos.ModifyTableStateData modifyTableMsg =
         MasterProcedureProtos.ModifyTableStateData.parseDelimitedFrom(stream);
     user = MasterProcedureUtil.toUserInfo(modifyTableMsg.getUserInfo());
-    modifiedHTableDescriptor = HTableDescriptor.convert(modifyTableMsg.getModifiedTableSchema());
+    modifiedHTableDescriptor = ProtobufUtil.convertToHTableDesc(modifyTableMsg.getModifiedTableSchema());
     deleteColumnFamilyInModify = modifyTableMsg.getDeleteColumnFamilyInModify();
 
     if (modifyTableMsg.hasUnmodifiedTableSchema()) {
       unmodifiedHTableDescriptor =
-          HTableDescriptor.convert(modifyTableMsg.getUnmodifiedTableSchema());
+          ProtobufUtil.convertToHTableDesc(modifyTableMsg.getUnmodifiedTableSchema());
     }
   }
 
@@ -283,6 +286,12 @@ public class ModifyTableProcedure
     // Checks whether the table exists
     if (!MetaTableAccessor.tableExists(env.getMasterServices().getConnection(), getTableName())) {
       throw new TableNotFoundException(getTableName());
+    }
+
+    // check that we have at least 1 CF
+    if (modifiedHTableDescriptor.getColumnFamilies().length == 0) {
+      throw new DoNotRetryIOException("Table " + getTableName().toString() +
+        " should have at least one column family.");
     }
 
     // In order to update the descriptor, we need to retrieve the old descriptor for comparison.

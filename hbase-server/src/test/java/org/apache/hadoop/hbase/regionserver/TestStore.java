@@ -27,6 +27,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.lang.ref.SoftReference;
 import java.security.PrivilegedExceptionAction;
@@ -72,7 +73,7 @@ import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionConfiguration;
 import org.apache.hadoop.hbase.regionserver.compactions.DefaultCompactor;
-import org.apache.hadoop.hbase.regionserver.compactions.NoLimitCompactionThroughputController;
+import org.apache.hadoop.hbase.regionserver.throttle.NoLimitThroughputController;
 import org.apache.hadoop.hbase.wal.DefaultWALProvider;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.security.User;
@@ -91,8 +92,6 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
 import org.mockito.Mockito;
-
-import com.google.common.collect.Lists;
 
 /**
  * Test class for the Store
@@ -268,7 +267,7 @@ public class TestStore {
     init(name.getMethodName(), conf, hcd);
 
     // Test createWriterInTmp()
-    StoreFile.Writer writer = store.createWriterInTmp(4, hcd.getCompressionType(), false, true, false);
+    StoreFileWriter writer = store.createWriterInTmp(4, hcd.getCompressionType(), false, true, false);
     Path path = writer.getPath();
     writer.append(new KeyValue(row, family, qf1, Bytes.toBytes(1)));
     writer.append(new KeyValue(row, family, qf2, Bytes.toBytes(2)));
@@ -382,7 +381,7 @@ public class TestStore {
     Assert.assertEquals(lowestTimeStampFromManager,lowestTimeStampFromFS);
 
     // after compact; check the lowest time stamp
-    store.compact(store.requestCompaction(), NoLimitCompactionThroughputController.INSTANCE);
+    store.compact(store.requestCompaction(), NoLimitThroughputController.INSTANCE);
     lowestTimeStampFromManager = StoreUtils.getLowestTimestamp(store.getStorefiles());
     lowestTimeStampFromFS = getLowestTimeStampFromFS(fs, store.getStorefiles());
     Assert.assertEquals(lowestTimeStampFromManager, lowestTimeStampFromFS);
@@ -435,7 +434,7 @@ public class TestStore {
     Configuration c = HBaseConfiguration.create();
     FileSystem fs = FileSystem.get(c);
     HFileContext meta = new HFileContextBuilder().withBlockSize(BLOCKSIZE_SMALL).build();
-    StoreFile.Writer w = new StoreFile.WriterBuilder(c, new CacheConfig(c),
+    StoreFileWriter w = new StoreFileWriter.Builder(c, new CacheConfig(c),
         fs)
             .withOutputDir(storedir)
             .withFileContext(meta)
@@ -555,7 +554,7 @@ public class TestStore {
     this.store.snapshot();
     flushStore(store, id++);
     Assert.assertEquals(storeFilessize, this.store.getStorefiles().size());
-    Assert.assertEquals(0, ((DefaultMemStore)this.store.memstore).cellSet.size());
+    Assert.assertEquals(0, ((AbstractMemStore)this.store.memstore).getActive().getCellsCount());
   }
 
   private void assertCheck() {
@@ -600,7 +599,7 @@ public class TestStore {
     flushStore(store, id++);
     Assert.assertEquals(1, this.store.getStorefiles().size());
     // from the one we inserted up there, and a new one
-    Assert.assertEquals(2, ((DefaultMemStore)this.store.memstore).cellSet.size());
+    Assert.assertEquals(2, ((AbstractMemStore)this.store.memstore).getActive().getCellsCount());
 
     // how many key/values for this row are there?
     Get get = new Get(row);
@@ -669,7 +668,7 @@ public class TestStore {
     }
 
     long computedSize=0;
-    for (Cell cell : ((DefaultMemStore)this.store.memstore).cellSet) {
+    for (Cell cell : ((AbstractMemStore)this.store.memstore).getActive().getCellSet()) {
       long kvsize = DefaultMemStore.heapSizeChange(cell, true);
       //System.out.println(kv + " size= " + kvsize + " kvsize= " + kv.heapSize());
       computedSize += kvsize;
@@ -701,7 +700,7 @@ public class TestStore {
     // then flush.
     flushStore(store, id++);
     Assert.assertEquals(1, this.store.getStorefiles().size());
-    Assert.assertEquals(1, ((DefaultMemStore)this.store.memstore).cellSet.size());
+    Assert.assertEquals(1, ((AbstractMemStore)this.store.memstore).getActive().getCellsCount());
 
     // now increment again:
     newValue += 1;
@@ -1010,7 +1009,7 @@ public class TestStore {
     Configuration c = TEST_UTIL.getConfiguration();
     FileSystem fs = FileSystem.get(c);
     HFileContext fileContext = new HFileContextBuilder().withBlockSize(BLOCKSIZE_SMALL).build();
-    StoreFile.Writer w = new StoreFile.WriterBuilder(c, new CacheConfig(c),
+    StoreFileWriter w = new StoreFileWriter.Builder(c, new CacheConfig(c),
         fs)
             .withOutputDir(storedir)
             .withFileContext(fileContext)

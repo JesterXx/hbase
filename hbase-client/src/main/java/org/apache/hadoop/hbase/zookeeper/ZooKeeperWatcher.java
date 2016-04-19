@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -113,6 +115,10 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
   public String balancerZNode;
   // znode containing the state of region normalizer
   private String regionNormalizerZNode;
+  // znode containing the state of all switches, currently there are split and merge child node.
+  private String switchZNode;
+  // znode containing the lock for the switches
+  private String switchLockZNode;
   // znode containing the lock for the tables
   public String tableLockZNode;
   // znode containing the state of recovering regions
@@ -125,6 +131,9 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
   private final Configuration conf;
 
   private final Exception constructorCaller;
+
+  /* A pattern that matches a Kerberos name, borrowed from Hadoop's KerberosName */
+  private static final Pattern NAME_PATTERN = Pattern.compile("([^/@]*)(/([^/@]*))?@([^/@]*)");
 
   /**
    * Instantiate a ZooKeeper connection and watcher.
@@ -215,6 +224,7 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
    */
   public void checkAndSetZNodeAcls() {
     if (!ZKUtil.isSecureZooKeeper(getConfiguration())) {
+      LOG.info("not a secure deployment, proceeding");
       return;
     }
 
@@ -259,6 +269,9 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
    * @throws IOException
    */
   private boolean isBaseZnodeAclSetup(List<ACL> acls) throws IOException {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Checking znode ACLs");
+    }
     String[] superUsers = conf.getStrings(Superusers.SUPERUSER_CONF_KEY);
     // Check whether ACL set for all superusers
     if (superUsers != null && !checkACLForSuperUsers(superUsers, acls)) {
@@ -270,6 +283,9 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
     String hbaseUser = UserGroupInformation.getCurrentUser().getShortUserName();
 
     if (acls.isEmpty()) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("ACL is empty");
+      }
       return false;
     }
 
@@ -280,23 +296,51 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
       // and one for the hbase user
       if (Ids.ANYONE_ID_UNSAFE.equals(id)) {
         if (perms != Perms.READ) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug(String.format("permissions for '%s' are not correct: have 0x%x, want 0x%x",
+              id, perms, Perms.READ));
+          }
           return false;
         }
       } else if (superUsers != null && isSuperUserId(superUsers, id)) {
         if (perms != Perms.ALL) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug(String.format("permissions for '%s' are not correct: have 0x%x, want 0x%x",
+              id, perms, Perms.ALL));
+          }
           return false;
         }
-      } else if (new Id("sasl", hbaseUser).equals(id)) {
-        if (perms != Perms.ALL) {
+      } else if ("sasl".equals(id.getScheme())) {
+        String name = id.getId();
+        // If ZooKeeper recorded the Kerberos full name in the ACL, use only the shortname
+        Matcher match = NAME_PATTERN.matcher(name);
+        if (match.matches()) {
+          name = match.group(1);
+        }
+        if (name.equals(hbaseUser)) {
+          if (perms != Perms.ALL) {
+            if (LOG.isDebugEnabled()) {
+              LOG.debug(String.format("permissions for '%s' are not correct: have 0x%x, want 0x%x",
+                id, perms, Perms.ALL));
+            }
+            return false;
+          }
+        } else {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Unexpected shortname in SASL ACL: " + id);
+          }
           return false;
         }
       } else {
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("unexpected ACL id '" + id + "'");
+        }
         return false;
       }
     }
     return true;
   }
-  
+
   /*
    * Validate whether ACL set for all superusers.
    */
@@ -306,8 +350,16 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
       // TODO: Validate super group members also when ZK supports setting node ACL for groups.
       if (!user.startsWith(AuthUtil.GROUP_PREFIX)) {
         for (ACL acl : acls) {
-          if (user.equals(acl.getId().getId()) && acl.getPerms() == Perms.ALL) {
-            hasAccess = true;
+          if (user.equals(acl.getId().getId())) {
+            if (acl.getPerms() == Perms.ALL) {
+              hasAccess = true;
+            } else {
+              if (LOG.isDebugEnabled()) {
+                LOG.debug(String.format(
+                  "superuser '%s' does not have correct permissions: have 0x%x, want 0x%x",
+                  acl.getId().getId(), acl.getPerms(), Perms.ALL));
+              }
+            }
             break;
           }
         }
@@ -318,7 +370,7 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
     }
     return true;
   }
-  
+
   /*
    * Validate whether ACL ID is superuser.
    */
@@ -382,6 +434,8 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
         conf.get("zookeeper.znode.balancer", "balancer"));
     regionNormalizerZNode = ZKUtil.joinZNode(baseZNode,
       conf.get("zookeeper.znode.regionNormalizer", "normalizer"));
+    switchZNode = ZKUtil.joinZNode(baseZNode, conf.get("zookeeper.znode.switch", "switch"));
+    switchLockZNode = ZKUtil.joinZNode(switchZNode, "locks");
     tableLockZNode = ZKUtil.joinZNode(baseZNode,
         conf.get("zookeeper.znode.tableLock", "table-lock"));
     recoveringRegionsZNode = ZKUtil.joinZNode(baseZNode,
@@ -740,5 +794,19 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
    */
   public String getRegionNormalizerZNode() {
     return regionNormalizerZNode;
+  }
+
+  /**
+   *  @return ZK node for switch
+   * */
+  public String getSwitchZNode() {
+    return switchZNode;
+  }
+
+  /**
+   *  @return ZK node for switchLock node.
+   * */
+  public String getSwitchLockZNode() {
+    return switchLockZNode;
   }
 }

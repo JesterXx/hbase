@@ -60,7 +60,7 @@ import org.apache.hadoop.hbase.mob.MobFileName;
 import org.apache.hadoop.hbase.mob.MobStoreEngine;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
-import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputController;
+import org.apache.hadoop.hbase.regionserver.throttle.ThroughputController;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.HFileArchiveUtil;
@@ -189,7 +189,7 @@ public class HMobStore extends HStore {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public StoreFile.Writer createWriterInTmp(Date date, long maxKeyCount,
+  public StoreFileWriter createWriterInTmp(Date date, long maxKeyCount,
       Compression.Algorithm compression, byte[] startKey) throws IOException {
     if (startKey == null) {
       startKey = HConstants.EMPTY_START_ROW;
@@ -209,7 +209,7 @@ public class HMobStore extends HStore {
    * @return The writer for the del file.
    * @throws IOException
    */
-  public StoreFile.Writer createDelFileWriterInTmp(Date date, long maxKeyCount,
+  public StoreFileWriter createDelFileWriterInTmp(Date date, long maxKeyCount,
       Compression.Algorithm compression, byte[] startKey) throws IOException {
     if (startKey == null) {
       startKey = HConstants.EMPTY_START_ROW;
@@ -231,7 +231,7 @@ public class HMobStore extends HStore {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public StoreFile.Writer createWriterInTmp(String date, Path basePath, long maxKeyCount,
+  public StoreFileWriter createWriterInTmp(String date, Path basePath, long maxKeyCount,
       Compression.Algorithm compression, byte[] startKey) throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID()
         .toString().replaceAll("-", ""));
@@ -247,7 +247,7 @@ public class HMobStore extends HStore {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public StoreFile.Writer createWriterInTmp(MobFileName mobFileName, Path basePath,
+  public StoreFileWriter createWriterInTmp(MobFileName mobFileName, Path basePath,
       long maxKeyCount, Compression.Algorithm compression) throws IOException {
     final CacheConfig writerCacheConf = mobCacheConfig;
     HFileContext hFileContext = new HFileContextBuilder().withCompression(compression)
@@ -264,7 +264,7 @@ public class HMobStore extends HStore {
       favoredNodes = region.getRegionServerServices().getFavoredNodesForRegion(
         region.getRegionInfo().getEncodedName());
     }
-    StoreFile.Writer w = new StoreFile.WriterBuilder(conf, writerCacheConf, region.getFilesystem())
+    StoreFileWriter w = new StoreFileWriter.Builder(conf, writerCacheConf, region.getFilesystem())
       .withFilePath(new Path(basePath, mobFileName.getFileName()))
       .withComparator(CellComparator.COMPARATOR).withBloomType(BloomType.NONE)
       .withMaxKeyCount(maxKeyCount).withFavoredNodes(favoredNodes).withFileContext(hFileContext)
@@ -464,7 +464,7 @@ public class HMobStore extends HStore {
    */
   @Override
   public List<StoreFile> compact(CompactionContext compaction,
-      CompactionThroughputController throughputController) throws IOException {
+      ThroughputController throughputController) throws IOException {
     // If it's major compaction, try to find whether there's a sweeper is running
     // If yes, mark the major compaction as retainDeleteMarkers
     if (compaction.getRequest().isAllFiles()) {
@@ -515,6 +515,9 @@ public class HMobStore extends HStore {
       // If it's not a major compaction, continue the compaction.
       return super.compact(compaction, throughputController);
     }
+  }
+
+  @Override public void finalizeFlush() {
   }
 
   public void updateCellsCountCompactedToMob(long count) {

@@ -33,6 +33,7 @@ import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
@@ -55,11 +56,13 @@ import org.apache.hadoop.hbase.regionserver.SplitTransactionImpl;
 import org.apache.hadoop.hbase.regionserver.SplitTransactionFactory;
 import org.apache.hadoop.hbase.regionserver.TestEndToEndSplitTransaction;
 import org.apache.hadoop.hbase.replication.ReplicationFactory;
+import org.apache.hadoop.hbase.replication.ReplicationPeerConfig;
 import org.apache.hadoop.hbase.replication.ReplicationQueues;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.testclassification.MiscTests;
 import org.apache.hadoop.hbase.util.hbck.HFileCorruptionChecker;
 import org.apache.hadoop.hbase.util.hbck.HbckTestingUtil;
+import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -68,6 +71,8 @@ import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -88,6 +93,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.hadoop.hbase.util.hbck.HbckTestingUtil.*;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 
 @Category({MiscTests.class, LargeTests.class})
 public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
@@ -938,6 +945,10 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
 
         HRegionInfo hri = location.getRegionInfo();
 
+        // Disable CatalogJanitor to prevent it from cleaning up the parent region
+        // after split.
+        admin.enableCatalogJanitor(false);
+
         // do a regular split
         byte[] regionName = location.getRegionInfo().getRegionName();
         admin.splitRegion(location.getRegionInfo().getRegionName(), Bytes.toBytes("BM"));
@@ -995,6 +1006,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
         assertNoErrors(doFsck(conf, false)); //should be fixed by now
       }
     } finally {
+      admin.enableCatalogJanitor(true);
       meta.close();
       cleanupTable(table);
     }
@@ -1436,7 +1448,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     }
   }
 
-  @Test(timeout=60000)
+  @Test(timeout=180000)
   public void testCheckTableLocks() throws Exception {
     IncrementingEnvironmentEdge edge = new IncrementingEnvironmentEdge(0);
     EnvironmentEdgeManager.injectEdge(edge);
@@ -1522,7 +1534,9 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     Assert.assertEquals(0, replicationAdmin.getPeersCount());
     int zkPort = conf.getInt(HConstants.ZOOKEEPER_CLIENT_PORT,
       HConstants.DEFAULT_ZOOKEPER_CLIENT_PORT);
-    replicationAdmin.addPeer("1", "127.0.0.1:" + zkPort + ":/hbase");
+    ReplicationPeerConfig rpc = new ReplicationPeerConfig();
+    rpc.setClusterKey("127.0.0.1:" + zkPort + ":/hbase");
+    replicationAdmin.addPeer("1", rpc, null);
     replicationAdmin.getPeersCount();
     Assert.assertEquals(1, replicationAdmin.getPeersCount());
     
@@ -1834,5 +1848,54 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     };
     doQuarantineTest(table, hbck, 3, 0, 0, 0, 1);
     hbck.close();
+  }
+
+  /**
+   *  See HBASE-15406
+   * */
+  @Test
+  public void testSplitOrMergeStatWhenHBCKAbort() throws Exception {
+    admin.setSplitOrMergeEnabled(true, false, true,
+      Admin.MasterSwitchType.SPLIT, Admin.MasterSwitchType.MERGE);
+    boolean oldSplit = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.SPLIT);
+    boolean oldMerge = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.MERGE);
+
+    assertTrue(oldSplit);
+    assertTrue(oldMerge);
+
+    ExecutorService exec = new ScheduledThreadPoolExecutor(10);
+    HBaseFsck hbck = new HBaseFsck(conf, exec);
+    HBaseFsck.setDisplayFullReport(); // i.e. -details
+    final HBaseFsck spiedHbck = spy(hbck);
+    doAnswer(new Answer() {
+      @Override
+      public Object answer(InvocationOnMock invocation) throws Throwable {
+        // we close splitOrMerge flag in hbck, so in finally hbck will not set splitOrMerge back.
+        spiedHbck.setDisableSplitAndMerge(false);
+        return null;
+      }
+    }).when(spiedHbck).onlineConsistencyRepair();
+    spiedHbck.setDisableSplitAndMerge();
+    spiedHbck.connect();
+    spiedHbck.onlineHbck();
+    spiedHbck.close();
+
+    boolean split = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.SPLIT);
+    boolean merge = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.MERGE);
+    assertFalse(split);
+    assertFalse(merge);
+
+    // rerun hbck to repair the switches state
+    hbck = new HBaseFsck(conf, exec);
+    hbck.setDisableSplitAndMerge();
+    hbck.connect();
+    hbck.onlineHbck();
+    hbck.close();
+
+    split = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.SPLIT);
+    merge = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.MERGE);
+
+    assertTrue(split);
+    assertTrue(merge);
   }
 }

@@ -207,7 +207,7 @@ public class TestCacheOnWriteInSchema {
   @Test
   public void testCacheOnWriteInSchema() throws IOException {
     // Write some random data into the store
-    StoreFile.Writer writer = store.createWriterInTmp(Integer.MAX_VALUE,
+    StoreFileWriter writer = store.createWriterInTmp(Integer.MAX_VALUE,
         HFile.DEFAULT_COMPRESSION_ALGORITHM, false, true, false);
     writeStoreFile(writer);
     writer.close();
@@ -227,15 +227,10 @@ public class TestCacheOnWriteInSchema {
       assertTrue(testDescription, scanner.seekTo());
       // Cribbed from io.hfile.TestCacheOnWrite
       long offset = 0;
-      HFileBlock prevBlock = null;
       while (offset < reader.getTrailer().getLoadOnOpenDataOffset()) {
-        long onDiskSize = -1;
-        if (prevBlock != null) {
-          onDiskSize = prevBlock.getNextBlockOnDiskSizeWithHeader();
-        }
         // Flags: don't cache the block, use pread, this is not a compaction.
         // Also, pass null for expected block type to avoid checking it.
-        HFileBlock block = reader.readBlock(offset, onDiskSize, false, true,
+        HFileBlock block = reader.readBlock(offset, -1, false, true,
           false, true, null, DataBlockEncoding.NONE);
         BlockCacheKey blockCacheKey = new BlockCacheKey(reader.getName(),
           offset);
@@ -249,7 +244,6 @@ public class TestCacheOnWriteInSchema {
             "block: " + block + "\n" +
             "blockCacheKey: " + blockCacheKey);
         }
-        prevBlock = block;
         offset += block.getOnDiskSizeWithHeader();
       }
     } finally {
@@ -273,7 +267,7 @@ public class TestCacheOnWriteInSchema {
     }
   }
 
-  private void writeStoreFile(StoreFile.Writer writer) throws IOException {
+  private void writeStoreFile(StoreFileWriter writer) throws IOException {
     final int rowLen = 32;
     for (int i = 0; i < NUM_KV; ++i) {
       byte[] k = RandomKeyValueUtil.randomOrderedKey(rand, i);

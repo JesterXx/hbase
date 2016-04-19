@@ -28,7 +28,7 @@ import org.junit.experimental.categories.Category;
 
 /**
  * Test all client operations with a coprocessor that
- * just implements the default flush/compact/scan policy
+ * just implements the default flush/compact/scan policy.
  */
 @Category({LargeTests.class, ClientTests.class})
 public class TestFromClientSideWithCoprocessor extends TestFromClientSide {

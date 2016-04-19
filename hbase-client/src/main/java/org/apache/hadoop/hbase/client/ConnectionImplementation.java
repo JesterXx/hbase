@@ -25,6 +25,26 @@ import com.google.protobuf.BlockingRpcChannel;
 import com.google.protobuf.RpcController;
 import com.google.protobuf.ServiceException;
 
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.lang.reflect.UndeclaredThrowableException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.annotation.Nullable;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -35,10 +55,7 @@ import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.MasterNotRunningException;
 import org.apache.hadoop.hbase.MetaTableAccessor;
-import org.apache.hadoop.hbase.MultiActionResultTooLarge;
 import org.apache.hadoop.hbase.RegionLocations;
-import org.apache.hadoop.hbase.RegionTooBusyException;
-import org.apache.hadoop.hbase.RetryImmediatelyException;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotEnabledException;
@@ -48,8 +65,8 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.backoff.ClientBackoffPolicy;
 import org.apache.hadoop.hbase.client.backoff.ClientBackoffPolicyFactory;
 import org.apache.hadoop.hbase.client.coprocessor.Batch;
+import org.apache.hadoop.hbase.exceptions.ClientExceptionsUtil;
 import org.apache.hadoop.hbase.exceptions.RegionMovedException;
-import org.apache.hadoop.hbase.exceptions.RegionOpeningException;
 import org.apache.hadoop.hbase.ipc.RpcClient;
 import org.apache.hadoop.hbase.ipc.RpcClientFactory;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
@@ -68,7 +85,6 @@ import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SecurityCapabilit
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SecurityCapabilitiesResponse;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SetNormalizerRunningRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.SetNormalizerRunningResponse;
-import org.apache.hadoop.hbase.quotas.ThrottlingException;
 import org.apache.hadoop.hbase.regionserver.RegionServerStoppedException;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -82,25 +98,6 @@ import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.ipc.RemoteException;
 import org.apache.zookeeper.KeeperException;
 
-import javax.annotation.Nullable;
-
-import java.io.Closeable;
-import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.lang.reflect.UndeclaredThrowableException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Main implementation of {@link Connection} and {@link ClusterConnection} interfaces.
@@ -162,7 +159,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
   // cache the configuration value for tables so that we can avoid calling
   // the expensive Configuration to fetch the value multiple times.
-  private final TableConfiguration tableConfig;
+  private final ConnectionConfiguration connectionConfig;
 
   // Client rpc instance.
   private RpcClient rpcClient;
@@ -194,14 +191,14 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     this.conf = conf;
     this.user = user;
     this.batchPool = pool;
-    this.tableConfig = new TableConfiguration(conf);
+    this.connectionConfig = new ConnectionConfiguration(conf);
     this.closed = false;
     this.pause = conf.getLong(HConstants.HBASE_CLIENT_PAUSE,
         HConstants.DEFAULT_HBASE_CLIENT_PAUSE);
     this.useMetaReplicas = conf.getBoolean(HConstants.USE_META_REPLICAS,
       HConstants.DEFAULT_USE_META_REPLICAS);
     // how many times to try, one more than max *retry* time
-    this.numTries = tableConfig.getRetriesNumber() + 1;
+    this.numTries = connectionConfig.getRetriesNumber() + 1;
     this.rpcTimeout = conf.getInt(
         HConstants.HBASE_RPC_TIMEOUT_KEY,
         HConstants.DEFAULT_HBASE_RPC_TIMEOUT);
@@ -282,47 +279,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     return ng;
   }
 
-  /**
-   * Look for an exception we know in the remote exception:
-   * - hadoop.ipc wrapped exceptions
-   * - nested exceptions
-   *
-   * Looks for: RegionMovedException / RegionOpeningException / RegionTooBusyException /
-   *            ThrottlingException
-   * @return null if we didn't find the exception, the exception otherwise.
-   */
-  public static Throwable findException(Object exception) {
-    if (exception == null || !(exception instanceof Throwable)) {
-      return null;
-    }
-    Throwable cur = (Throwable) exception;
-    while (cur != null) {
-      if (cur instanceof RegionMovedException || cur instanceof RegionOpeningException
-          || cur instanceof RegionTooBusyException || cur instanceof ThrottlingException
-          || cur instanceof RetryImmediatelyException) {
-        return cur;
-      }
-      if (cur instanceof RemoteException) {
-        RemoteException re = (RemoteException) cur;
-        cur = re.unwrapRemoteException(
-            RegionOpeningException.class, RegionMovedException.class,
-            RegionTooBusyException.class);
-        if (cur == null) {
-          cur = re.unwrapRemoteException();
-        }
-        // unwrapRemoteException can return the exception given as a parameter when it cannot
-        //  unwrap it. In this case, there is no need to look further
-        // noinspection ObjectEquality
-        if (cur == re) {
-          return null;
-        }
-      } else {
-        cur = cur.getCause();
-      }
-    }
-
-    return null;
-  }
 
   @Override
   public HTableInterface getTable(String tableName) throws IOException {
@@ -351,7 +307,8 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
   @Override
   public HTableInterface getTable(TableName tableName, ExecutorService pool) throws IOException {
-    return new HTable(tableName, this, tableConfig, rpcCallerFactory, rpcControllerFactory, pool);
+    return new HTable(tableName, this, connectionConfig,
+      rpcCallerFactory, rpcControllerFactory, pool);
   }
 
   @Override
@@ -363,10 +320,10 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       params.pool(HTable.getDefaultExecutor(getConfiguration()));
     }
     if (params.getWriteBufferSize() == BufferedMutatorParams.UNSET) {
-      params.writeBufferSize(tableConfig.getWriteBufferSize());
+      params.writeBufferSize(connectionConfig.getWriteBufferSize());
     }
     if (params.getMaxKeyValueSize() == BufferedMutatorParams.UNSET) {
-      params.maxKeyValueSize(tableConfig.getMaxKeyValueSize());
+      params.maxKeyValueSize(connectionConfig.getMaxKeyValueSize());
     }
     return new BufferedMutatorImpl(this, rpcCallerFactory, rpcControllerFactory, params);
   }
@@ -1631,13 +1588,6 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       }
 
       @Override
-      public MasterProtos.IsRestoreSnapshotDoneResponse isRestoreSnapshotDone(
-          RpcController controller, MasterProtos.IsRestoreSnapshotDoneRequest request)
-          throws ServiceException {
-        return stub.isRestoreSnapshotDone(controller, request);
-      }
-
-      @Override
       public MasterProtos.ExecProcedureResponse execProcedure(
           RpcController controller, MasterProtos.ExecProcedureRequest request)
           throws ServiceException {
@@ -1787,6 +1737,27 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       }
 
       @Override
+      public MasterProtos.SetSplitOrMergeEnabledResponse setSplitOrMergeEnabled(
+        RpcController controller, MasterProtos.SetSplitOrMergeEnabledRequest request)
+        throws ServiceException {
+        return stub.setSplitOrMergeEnabled(controller, request);
+      }
+
+      @Override
+      public MasterProtos.IsSplitOrMergeEnabledResponse isSplitOrMergeEnabled(
+        RpcController controller, MasterProtos.IsSplitOrMergeEnabledRequest request)
+              throws ServiceException {
+        return stub.isSplitOrMergeEnabled(controller, request);
+      }
+
+      @Override
+      public MasterProtos.ReleaseSplitOrMergeLockAndRollbackResponse
+        releaseSplitOrMergeLockAndRollback(RpcController controller,
+        MasterProtos.ReleaseSplitOrMergeLockAndRollbackRequest request) throws ServiceException {
+        return stub.releaseSplitOrMergeLockAndRollback(controller, request);
+      }
+
+      @Override
       public IsNormalizerEnabledResponse isNormalizerEnabled(RpcController controller,
           IsNormalizerEnabledRequest request) throws ServiceException {
         return stub.isNormalizerEnabled(controller, request);
@@ -1891,6 +1862,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
 
     if (regionName == null) {
       // we do not know which region, so just remove the cache entry for the row and server
+      if (metrics != null) {
+        metrics.incrCacheDroppingExceptions(exception);
+      }
       metaCache.clearCache(tableName, rowkey, source);
       return;
     }
@@ -1908,10 +1882,9 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
     }
 
     HRegionInfo regionInfo = oldLocation.getRegionInfo();
-    Throwable cause = findException(exception);
+    Throwable cause = ClientExceptionsUtil.findException(exception);
     if (cause != null) {
-      if (cause instanceof RegionTooBusyException || cause instanceof RegionOpeningException
-          || cause instanceof ThrottlingException || cause instanceof MultiActionResultTooLarge) {
+      if (!ClientExceptionsUtil.isMetaClearingException(cause)) {
         // We know that the region is still on this region server
         return;
       }
@@ -1929,6 +1902,10 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
             regionInfo, source, rme.getServerName(), rme.getLocationSeqNum());
         return;
       }
+    }
+
+    if (metrics != null) {
+      metrics.incrCacheDroppingExceptions(exception);
     }
 
     // If we're here, it means that can cannot be sure about the location, so we remove it from
@@ -2271,7 +2248,7 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
       master.close();
     }
     if (!htds.getTableSchemaList().isEmpty()) {
-      return HTableDescriptor.convert(htds.getTableSchemaList().get(0));
+      return ProtobufUtil.convertToHTableDesc(htds.getTableSchemaList().get(0));
     }
     throw new TableNotFoundException(tableName.getNameAsString());
   }
@@ -2300,5 +2277,25 @@ class ConnectionImplementation implements ClusterConnection, Closeable {
   public RpcRetryingCallerFactory getNewRpcRetryingCallerFactory(Configuration conf) {
     return RpcRetryingCallerFactory
         .instantiate(conf, this.interceptor, this.getStatisticsTracker());
+  }
+
+  @Override
+  public boolean hasCellBlockSupport() {
+    return this.rpcClient.hasCellBlockSupport();
+  }
+
+  @Override
+  public ConnectionConfiguration getConnectionConfiguration() {
+    return this.connectionConfig;
+  }
+
+  @Override
+  public RpcRetryingCallerFactory getRpcRetryingCallerFactory() {
+    return this.rpcCallerFactory;
+  }
+
+  @Override
+  public RpcControllerFactory getRpcControllerFactory() {
+    return this.rpcControllerFactory;
   }
 }

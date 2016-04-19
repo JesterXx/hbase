@@ -18,6 +18,8 @@
  */
 package org.apache.hadoop.hbase.security.access;
 
+import com.google.common.net.HostAndPort;
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.security.PrivilegedExceptionAction;
@@ -58,6 +60,7 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagRewriteCell;
 import org.apache.hadoop.hbase.TagUtil;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
@@ -1258,6 +1261,18 @@ public class AccessController extends BaseMasterAndRegionObserver
   }
 
   @Override
+  public boolean preSetSplitOrMergeEnabled(final ObserverContext<MasterCoprocessorEnvironment> ctx,
+      final boolean newValue, final Admin.MasterSwitchType switchType) throws IOException {
+    requirePermission("setSplitOrMergeEnabled", Action.ADMIN);
+    return false;
+  }
+
+  @Override
+  public void postSetSplitOrMergeEnabled(final ObserverContext<MasterCoprocessorEnvironment> ctx,
+      final boolean newValue, final Admin.MasterSwitchType switchType) throws IOException {
+  }
+
+  @Override
   public void preBalance(ObserverContext<MasterCoprocessorEnvironment> c)
       throws IOException {
     requirePermission("balance", Action.ADMIN);
@@ -2449,7 +2464,7 @@ public class AccessController extends BaseMasterAndRegionObserver
     User activeUser = getActiveUser();
     if (!Superusers.isSuperUser(activeUser)) {
       throw new AccessDeniedException("User '" + (activeUser != null ?
-        activeUser.getShortName() : "null") + "is not system or super user.");
+        activeUser.getShortName() : "null") + "' is not system or super user.");
     }
   }
 
@@ -2618,5 +2633,35 @@ public class AccessController extends BaseMasterAndRegionObserver
   @Override
   public void postReplicateLogEntries(ObserverContext<RegionServerCoprocessorEnvironment> ctx,
       List<WALEntry> entries, CellScanner cells) throws IOException {
+  }
+
+  @Override
+  public void preMoveServers(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                             Set<HostAndPort> servers, String targetGroup) throws IOException {
+    requirePermission("moveServers", Action.ADMIN);
+  }
+
+  @Override
+  public void preMoveTables(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                            Set<TableName> tables, String targetGroup) throws IOException {
+    requirePermission("moveTables", Action.ADMIN);
+  }
+
+  @Override
+  public void preAddRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                            String name) throws IOException {
+    requirePermission("addRSGroup", Action.ADMIN);
+  }
+
+  @Override
+  public void preRemoveRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                               String name) throws IOException {
+    requirePermission("removeRSGroup", Action.ADMIN);
+  }
+
+  @Override
+  public void preBalanceRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
+                                String groupName) throws IOException {
+    requirePermission("balanceRSGroup", Action.ADMIN);
   }
 }

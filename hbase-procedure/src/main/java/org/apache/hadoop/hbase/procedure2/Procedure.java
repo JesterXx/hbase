@@ -190,8 +190,31 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
     return false;
   }
 
+  /**
+   * By default, the executor will keep the procedure result around util
+   * the eviction TTL is expired. The client can cut down the waiting time
+   * by requesting that the result is removed from the executor.
+   * In case of system started procedure, we can force the executor to auto-ack.
+   * @param env the environment passed to the ProcedureExecutor
+   * @return true if the executor should wait the client ack for the result.
+   *         Defaults to return true.
+   */
+  protected boolean shouldWaitClientAck(final TEnvironment env) {
+    return true;
+  }
+
   @Override
   public String toString() {
+    // Return the simple String presentation of the procedure.
+    return toStringSimpleSB().toString();
+  }
+
+  /**
+   * Build the StringBuilder for the simple form of
+   * procedure string.
+   * @return the StringBuilder
+   */
+  protected StringBuilder toStringSimpleSB() {
     StringBuilder sb = new StringBuilder();
     toStringClassDetails(sb);
 
@@ -212,6 +235,30 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
 
     sb.append(" state=");
     toStringState(sb);
+
+    return sb;
+  }
+
+  /**
+   * Extend the toString() information with more procedure
+   * details
+   */
+  public String toStringDetails() {
+    StringBuilder sb = toStringSimpleSB();
+
+    sb.append(" startTime=");
+    sb.append(getStartTime());
+
+    sb.append(" lastUpdate=");
+    sb.append(getLastUpdate());
+
+    int[] stackIndices = getStackIndexes();
+    if (stackIndices != null) {
+      sb.append("\n");
+      sb.append("stackIndexes=");
+      sb.append(Arrays.toString(stackIndices));
+    }
+
     return sb.toString();
   }
 

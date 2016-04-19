@@ -132,6 +132,7 @@ public class Bytes implements Comparable<Bytes> {
   // SizeOf which uses java.lang.instrument says 24 bytes. (3 longs?)
   public static final int ESTIMATED_HEAP_TAX = 16;
 
+  private static final boolean UNSAFE_UNALIGNED = UnsafeAvailChecker.unaligned();
 
   /**
    * Returns length of the byte array, returning 0 if the array is null.
@@ -625,6 +626,10 @@ public class Bytes implements Comparable<Bytes> {
     return toStringBinary(toBytes(buf));
   }
 
+  private static final char[] HEX_CHARS_UPPER = {
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
+  };
+
   /**
    * Write a printable representation of a byte array. Non-printable
    * characters are hex escaped in the format \\x%02X, eg:
@@ -642,13 +647,12 @@ public class Bytes implements Comparable<Bytes> {
     if (off + len > b.length) len = b.length - off;
     for (int i = off; i < off + len ; ++i) {
       int ch = b[i] & 0xFF;
-      if ((ch >= '0' && ch <= '9')
-          || (ch >= 'A' && ch <= 'Z')
-          || (ch >= 'a' && ch <= 'z')
-          || " `~!@#$%^&*()-_=+[]{}|;:'\",.<>/?".indexOf(ch) >= 0) {
+      if (ch >= ' ' && ch <= '~' && ch != '\\') {
         result.append((char)ch);
       } else {
-        result.append(String.format("\\x%02X", ch));
+        result.append("\\x");
+        result.append(HEX_CHARS_UPPER[ch / 0x10]);
+        result.append(HEX_CHARS_UPPER[ch % 0x10]);
       }
     }
     return result.toString();
@@ -789,7 +793,7 @@ public class Bytes implements Comparable<Bytes> {
     if (length != SIZEOF_LONG || offset + length > bytes.length) {
       throw explainWrongLengthOrOffset(bytes, offset, length, SIZEOF_LONG);
     }
-    if (UnsafeAccess.unaligned()) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.toLong(bytes, offset);
     } else {
       long l = 0;
@@ -830,7 +834,7 @@ public class Bytes implements Comparable<Bytes> {
       throw new IllegalArgumentException("Not enough room to put a long at"
           + " offset " + offset + " in a " + bytes.length + " byte array");
     }
-    if (UnsafeAccess.unaligned()) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.putLong(bytes, offset, val);
     } else {
       for(int i = offset + 7; i > offset; i--) {
@@ -981,7 +985,7 @@ public class Bytes implements Comparable<Bytes> {
     if (length != SIZEOF_INT || offset + length > bytes.length) {
       throw explainWrongLengthOrOffset(bytes, offset, length, SIZEOF_INT);
     }
-    if (UnsafeAccess.unaligned()) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.toInt(bytes, offset);
     } else {
       int n = 0;
@@ -1065,7 +1069,7 @@ public class Bytes implements Comparable<Bytes> {
       throw new IllegalArgumentException("Not enough room to put an int at"
           + " offset " + offset + " in a " + bytes.length + " byte array");
     }
-    if (UnsafeAccess.unaligned()) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.putInt(bytes, offset, val);
     } else {
       for(int i= offset + 3; i > offset; i--) {
@@ -1135,7 +1139,7 @@ public class Bytes implements Comparable<Bytes> {
     if (length != SIZEOF_SHORT || offset + length > bytes.length) {
       throw explainWrongLengthOrOffset(bytes, offset, length, SIZEOF_SHORT);
     }
-    if (UnsafeAccess.unaligned()) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.toShort(bytes, offset);
     } else {
       short n = 0;
@@ -1173,7 +1177,7 @@ public class Bytes implements Comparable<Bytes> {
       throw new IllegalArgumentException("Not enough room to put a short at"
           + " offset " + offset + " in a " + bytes.length + " byte array");
     }
-    if (UnsafeAccess.unaligned()) {
+    if (UNSAFE_UNALIGNED) {
       return UnsafeAccess.putShort(bytes, offset, val);
     } else {
       bytes[offset+1] = (byte) val;
@@ -1477,7 +1481,7 @@ public class Bytes implements Comparable<Bytes> {
 
       static final Unsafe theUnsafe;
       static {
-        if (UnsafeAccess.unaligned()) {
+        if (UNSAFE_UNALIGNED) {
           theUnsafe = UnsafeAccess.theUnsafe;
         } else {
           // It doesn't matter what we throw;

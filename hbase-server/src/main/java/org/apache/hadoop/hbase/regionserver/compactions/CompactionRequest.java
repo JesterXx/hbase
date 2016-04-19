@@ -18,6 +18,12 @@
  */
 package org.apache.hadoop.hbase.regionserver.compactions;
 
+import com.google.common.base.Function;
+import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Predicate;
+import com.google.common.collect.Collections2;
+
 import java.util.ArrayList;
 import java.util.Collection;
 
@@ -27,15 +33,9 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
-import org.apache.hadoop.hbase.regionserver.StoreFile.Reader;
+import org.apache.hadoop.hbase.regionserver.StoreFileReader;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.util.StringUtils;
-
-import com.google.common.base.Function;
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
-import com.google.common.collect.Collections2;
 
 /**
  * This class holds all logical details necessary to run a compaction.
@@ -76,6 +76,10 @@ public class CompactionRequest implements Comparable<CompactionRequest> {
     recalculateSize();
   }
 
+  public void updateFiles(Collection<StoreFile> files) {
+    this.filesToCompact = files;
+  }
+
   /**
    * Called before compaction is executed by CompactSplitThread; for use by coproc subclasses.
    */
@@ -103,6 +107,7 @@ public class CompactionRequest implements Comparable<CompactionRequest> {
     this.regionName = other.regionName;
     this.storeName = other.storeName;
     this.totalSize = other.totalSize;
+    recalculateSize();
     return this;
   }
 
@@ -225,10 +230,12 @@ public class CompactionRequest implements Comparable<CompactionRequest> {
         Collections2.transform(Collections2.filter(
             this.getFiles(),
             new Predicate<StoreFile>() {
+              @Override
               public boolean apply(StoreFile sf) {
                 return sf.getReader() != null;
               }
           }), new Function<StoreFile, String>() {
+            @Override
             public String apply(StoreFile sf) {
               return StringUtils.humanReadableInt(
                 (sf.getReader() == null) ? 0 : sf.getReader().length());
@@ -249,7 +256,7 @@ public class CompactionRequest implements Comparable<CompactionRequest> {
   private void recalculateSize() {
     long sz = 0;
     for (StoreFile sf : this.filesToCompact) {
-      Reader r = sf.getReader();
+      StoreFileReader r = sf.getReader();
       sz += r == null ? 0 : r.length();
     }
     this.totalSize = sz;

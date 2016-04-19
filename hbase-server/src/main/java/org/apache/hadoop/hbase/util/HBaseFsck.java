@@ -54,6 +54,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -235,6 +236,7 @@ public class HBaseFsck extends Configured implements Closeable {
   private long timelag = DEFAULT_TIME_LAG; // tables whose modtime is older
   private static boolean forceExclusive = false; // only this hbck can modify HBase
   private static boolean disableBalancer = false; // disable load balancer to keep regions stable
+  private static boolean disableSplitAndMerge = false; // disable split and merge
   private boolean fixAssignments = false; // fix assignment errors?
   private boolean fixMeta = false; // fix meta errors?
   private boolean checkHdfs = true; // load and check fs consistency?
@@ -306,6 +308,7 @@ public class HBaseFsck extends Configured implements Closeable {
 
   private Map<TableName, Set<String>> skippedRegions = new HashMap<TableName, Set<String>>();
 
+  ZooKeeperWatcher zkw = null;
   /**
    * Constructor
    *
@@ -344,6 +347,7 @@ public class HBaseFsck extends Configured implements Closeable {
         "hbase.hbck.lockfile.attempt.sleep.interval", DEFAULT_LOCK_FILE_ATTEMPT_SLEEP_INTERVAL),
       getConf().getInt(
         "hbase.hbck.lockfile.attempt.maxsleeptime", DEFAULT_LOCK_FILE_ATTEMPT_MAX_SLEEP_TIME));
+    zkw = createZooKeeperWatcher();
   }
 
   private class FileLockCallable implements Callable<FSDataOutputStream> {
@@ -607,7 +611,7 @@ public class HBaseFsck extends Configured implements Closeable {
    * region servers and the masters.  It makes each region's state in HDFS, in
    * hbase:meta, and deployments consistent.
    *
-   * @return If > 0 , number of errors detected, if &lt; 0 there was an unrecoverable
+   * @return If &gt; 0 , number of errors detected, if &lt; 0 there was an unrecoverable
    *     error.  If 0, we have a clean hbase.
    */
   public int onlineConsistencyRepair() throws IOException, KeeperException,
@@ -683,6 +687,12 @@ public class HBaseFsck extends Configured implements Closeable {
     if (shouldDisableBalancer()) {
       oldBalancer = admin.setBalancerRunning(false, true);
     }
+    boolean[] oldSplitAndMerge = null;
+    if (shouldDisableSplitAndMerge()) {
+      admin.releaseSplitOrMergeLockAndRollback();
+      oldSplitAndMerge = admin.setSplitOrMergeEnabled(false, false, false,
+        Admin.MasterSwitchType.SPLIT, Admin.MasterSwitchType.MERGE);
+    }
 
     try {
       onlineConsistencyRepair();
@@ -693,6 +703,12 @@ public class HBaseFsck extends Configured implements Closeable {
       // hbck that has just restored it.
       if (shouldDisableBalancer() && oldBalancer) {
         admin.setBalancerRunning(oldBalancer, false);
+      }
+
+      if (shouldDisableSplitAndMerge()) {
+        if (oldSplitAndMerge != null) {
+          admin.releaseSplitOrMergeLockAndRollback();
+        }
       }
     }
 
@@ -730,6 +746,10 @@ public class HBaseFsck extends Configured implements Closeable {
     } catch (Exception io) {
       LOG.warn(io);
     } finally {
+      if (zkw != null) {
+        zkw.close();
+        zkw = null;
+      }
       IOUtils.closeQuietly(admin);
       IOUtils.closeQuietly(meta);
       IOUtils.closeQuietly(connection);
@@ -1454,7 +1474,7 @@ public class HBaseFsck extends Configured implements Closeable {
         "You may need to restore the previously sidelined hbase:meta");
       return false;
     }
-    meta.batchMutate(puts.toArray(new Put[puts.size()]));
+    meta.batchMutate(puts.toArray(new Put[puts.size()]), HConstants.NO_NONCE, HConstants.NO_NONCE);
     meta.close();
     if (meta.getWAL() != null) {
       meta.getWAL().close();
@@ -1770,14 +1790,7 @@ public class HBaseFsck extends Configured implements Closeable {
 
   private ServerName getMetaRegionServerName(int replicaId)
   throws IOException, KeeperException {
-    ZooKeeperWatcher zkw = createZooKeeperWatcher();
-    ServerName sn = null;
-    try {
-      sn = new MetaTableLocator().getMetaRegionLocation(zkw, replicaId);
-    } finally {
-      zkw.close();
-    }
-    return sn;
+    return new MetaTableLocator().getMetaRegionLocation(zkw, replicaId);
   }
 
   /**
@@ -2107,7 +2120,7 @@ public class HBaseFsck extends Configured implements Closeable {
    * kept in the AssignementManager.  Because disable uses this state instead of
    * that found in META, we can't seem to cleanly disable/delete tables that
    * have been hbck fixed.  When used on a version of HBase that does not have
-   * the offline ipc call exposed on the master (<0.90.5, <0.92.0) a master
+   * the offline ipc call exposed on the master (&lt;0.90.5, &lt;0.92.0) a master
    * restart or failover may be required.
    */
   private void closeRegion(HbckInfo hi) throws IOException, InterruptedException {
@@ -3262,28 +3275,21 @@ public class HBaseFsck extends Configured implements Closeable {
   }
 
   private void checkAndFixTableLocks() throws IOException {
-    ZooKeeperWatcher zkw = createZooKeeperWatcher();
     TableLockChecker checker = new TableLockChecker(zkw, errors);
     checker.checkTableLocks();
 
     if (this.fixTableLocks) {
       checker.fixExpiredTableLocks();
     }
-    zkw.close();
   }
   
   private void checkAndFixReplication() throws IOException {
-    ZooKeeperWatcher zkw = createZooKeeperWatcher();
-    try {
-      ReplicationChecker checker = new ReplicationChecker(getConf(), zkw, connection, errors);
-      checker.checkUnDeletedQueues();
+    ReplicationChecker checker = new ReplicationChecker(getConf(), zkw, connection, errors);
+    checker.checkUnDeletedQueues();
 
-      if (checker.hasUnDeletedQueues() && this.fixReplication) {
-        checker.fixUnDeletedQueues();
-        setShouldRerun();
-      }
-    } finally {
-      zkw.close();
+    if (checker.hasUnDeletedQueues() && this.fixReplication) {
+      checker.fixUnDeletedQueues();
+      setShouldRerun();
     }
   }
 
@@ -3353,12 +3359,7 @@ public class HBaseFsck extends Configured implements Closeable {
   private void unassignMetaReplica(HbckInfo hi) throws IOException, InterruptedException,
   KeeperException {
     undeployRegions(hi);
-    ZooKeeperWatcher zkw = createZooKeeperWatcher();
-    try {
-      ZKUtil.deleteNode(zkw, zkw.getZNodeForReplica(hi.metaEntry.getReplicaId()));
-    } finally {
-      zkw.close();
-    }
+    ZKUtil.deleteNode(zkw, zkw.getZNodeForReplica(hi.metaEntry.getReplicaId()));
   }
 
   private void assignMetaReplica(int replicaId)
@@ -4184,6 +4185,18 @@ public class HBaseFsck extends Configured implements Closeable {
   }
 
   /**
+   * Disable the split and merge
+   */
+  public static void setDisableSplitAndMerge() {
+    setDisableSplitAndMerge(true);
+  }
+
+  @VisibleForTesting
+  public static void setDisableSplitAndMerge(boolean flag) {
+    disableSplitAndMerge = flag;
+  }
+
+  /**
    * The balancer should be disabled if we are modifying HBase.
    * It can be disabled if you want to prevent region movement from causing
    * false positives.
@@ -4192,6 +4205,15 @@ public class HBaseFsck extends Configured implements Closeable {
     return fixAny || disableBalancer;
   }
 
+  /**
+   * The split and merge should be disabled if we are modifying HBase.
+   * It can be disabled if you want to prevent region movement from causing
+   * false positives.
+   */
+  public boolean shouldDisableSplitAndMerge() {
+    return fixAny || disableSplitAndMerge;
+  }
+  
   /**
    * Set summary mode.
    * Print only summary of the tables and status (OK or INCONSISTENT)
@@ -4551,6 +4573,8 @@ public class HBaseFsck extends Configured implements Closeable {
         setForceExclusive();
       } else if (cmd.equals("-disableBalancer")) {
         setDisableBalancer();
+      }  else if (cmd.equals("-disableSplitAndMerge")) {
+        setDisableSplitAndMerge();
       } else if (cmd.equals("-timelag")) {
         if (i == args.length - 1) {
           errors.reportError(ERROR_CODE.WRONG_USAGE, "HBaseFsck: -timelag needs a value.");

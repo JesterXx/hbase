@@ -29,8 +29,8 @@ import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.fs.HFileSystem;
-import org.apache.hadoop.hbase.regionserver.StoreFile;
 
+import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.testclassification.IOTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.Before;
@@ -78,14 +78,8 @@ public class TestPrefetch {
     // Check that all of the data blocks were preloaded
     BlockCache blockCache = cacheConf.getBlockCache();
     long offset = 0;
-    HFileBlock prevBlock = null;
     while (offset < reader.getTrailer().getLoadOnOpenDataOffset()) {
-      long onDiskSize = -1;
-      if (prevBlock != null) {
-         onDiskSize = prevBlock.getNextBlockOnDiskSizeWithHeader();
-      }
-      HFileBlock block = reader.readBlock(offset, onDiskSize, false, true, false, true, null,
-        null);
+      HFileBlock block = reader.readBlock(offset, -1, false, true, false, true, null, null);
       BlockCacheKey blockCacheKey = new BlockCacheKey(reader.getName(), offset);
       boolean isCached = blockCache.getBlock(blockCacheKey, true, false, true) != null;
       if (block.getBlockType() == BlockType.DATA ||
@@ -93,7 +87,6 @@ public class TestPrefetch {
           block.getBlockType() == BlockType.INTERMEDIATE_INDEX) {
         assertTrue(isCached);
       }
-      prevBlock = block;
       offset += block.getOnDiskSizeWithHeader();
     }
   }
@@ -103,7 +96,7 @@ public class TestPrefetch {
     HFileContext meta = new HFileContextBuilder()
       .withBlockSize(DATA_BLOCK_SIZE)
       .build();
-    StoreFile.Writer sfw = new StoreFile.WriterBuilder(conf, cacheConf, fs)
+    StoreFileWriter sfw = new StoreFileWriter.Builder(conf, cacheConf, fs)
       .withOutputDir(storeFileParentDir)
       .withComparator(CellComparator.COMPARATOR)
       .withFileContext(meta)

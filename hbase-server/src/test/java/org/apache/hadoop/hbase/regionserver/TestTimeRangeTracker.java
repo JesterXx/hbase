@@ -17,6 +17,8 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.apache.hadoop.hbase.io.TimeRange;
@@ -24,6 +26,8 @@ import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+
+import java.io.IOException;
 
 @Category({RegionServerTests.class, SmallTests.class})
 public class TestTimeRangeTracker {
@@ -33,8 +37,8 @@ public class TestTimeRangeTracker {
     trr.includeTimestamp(3);
     trr.includeTimestamp(2);
     trr.includeTimestamp(1);
-    assertTrue(trr.getMinimumTimestamp() != TimeRangeTracker.INITIAL_MINIMUM_TIMESTAMP);
-    assertTrue(trr.getMaximumTimestamp() != -1 /*The initial max value*/);
+    assertTrue(trr.getMin() != TimeRangeTracker.INITIAL_MIN_TIMESTAMP);
+    assertTrue(trr.getMax() != -1 /*The initial max value*/);
   }
 
   @Test
@@ -77,8 +81,41 @@ public class TestTimeRangeTracker {
     for (int i = 0; i < threads.length; i++) {
       threads[i].join();
     }
-    assertTrue(trr.getMaximumTimestamp() == calls * threadCount);
-    assertTrue(trr.getMinimumTimestamp() == 0);
+    assertTrue(trr.getMax() == calls * threadCount);
+    assertTrue(trr.getMin() == 0);
+  }
+
+  @Test
+  public void testRangeConstruction() throws IOException {
+    TimeRange defaultRange = new TimeRange();
+    assertEquals(0L, defaultRange.getMin());
+    assertEquals(Long.MAX_VALUE, defaultRange.getMax());
+    assertTrue(defaultRange.isAllTime());
+
+    TimeRange oneArgRange = new TimeRange(0L);
+    assertEquals(0L, oneArgRange.getMin());
+    assertEquals(Long.MAX_VALUE, oneArgRange.getMax());
+    assertTrue(oneArgRange.isAllTime());
+
+    TimeRange oneArgRange2 = new TimeRange(1);
+    assertEquals(1, oneArgRange2.getMin());
+    assertEquals(Long.MAX_VALUE, oneArgRange2.getMax());
+    assertFalse(oneArgRange2.isAllTime());
+
+    TimeRange twoArgRange = new TimeRange(0L, Long.MAX_VALUE);
+    assertEquals(0L, twoArgRange.getMin());
+    assertEquals(Long.MAX_VALUE, twoArgRange.getMax());
+    assertTrue(twoArgRange.isAllTime());
+
+    TimeRange twoArgRange2 = new TimeRange(0L, Long.MAX_VALUE - 1);
+    assertEquals(0L, twoArgRange2.getMin());
+    assertEquals(Long.MAX_VALUE - 1, twoArgRange2.getMax());
+    assertFalse(twoArgRange2.isAllTime());
+
+    TimeRange twoArgRange3 = new TimeRange(1, Long.MAX_VALUE);
+    assertEquals(1, twoArgRange3.getMin());
+    assertEquals(Long.MAX_VALUE, twoArgRange3.getMax());
+    assertFalse(twoArgRange3.isAllTime());
   }
 
   /**
@@ -105,7 +142,7 @@ public class TestTimeRangeTracker {
     for (int i = 0; i < threads.length; i++) {
       threads[i].join();
     }
-    System.out.println(trr.getMinimumTimestamp() + " " + trr.getMaximumTimestamp() + " " +
+    System.out.println(trr.getMin() + " " + trr.getMax() + " " +
       (System.currentTimeMillis() - start));
   }
 }

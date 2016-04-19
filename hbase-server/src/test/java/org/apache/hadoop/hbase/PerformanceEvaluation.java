@@ -49,19 +49,24 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.BufferedMutator;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Consistency;
+import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.Increment;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
+import org.apache.hadoop.hbase.client.RowMutations;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.filter.BinaryComparator;
 import org.apache.hadoop.hbase.filter.CompareFilter;
+import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
 import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.filter.FilterAllFilter;
 import org.apache.hadoop.hbase.filter.FilterList;
@@ -165,7 +170,17 @@ public class PerformanceEvaluation extends Configured implements Tool {
       "Run scan test (read every row)");
     addCommandDescriptor(FilteredScanTest.class, "filterScan",
       "Run scan test using a filter to find a specific row based on it's value " +
-        "(make sure to use --rows=20)");
+      "(make sure to use --rows=20)");
+    addCommandDescriptor(IncrementTest.class, "increment",
+      "Increment on each row; clients overlap on keyspace so some concurrent operations");
+    addCommandDescriptor(AppendTest.class, "append",
+      "Append on each row; clients overlap on keyspace so some concurrent operations");
+    addCommandDescriptor(CheckAndMutateTest.class, "checkAndMutate",
+      "CheckAndMutate on each row; clients overlap on keyspace so some concurrent operations");
+    addCommandDescriptor(CheckAndPutTest.class, "checkAndPut",
+      "CheckAndPut on each row; clients overlap on keyspace so some concurrent operations");
+    addCommandDescriptor(CheckAndDeleteTest.class, "checkAndDelete",
+      "CheckAndDelete on each row; clients overlap on keyspace so some concurrent operations");
   }
 
   /**
@@ -974,8 +989,8 @@ public class PerformanceEvaluation extends Configured implements Tool {
 //    protected Table table;
 
     private String testName;
-    private Histogram latency;
-    private Histogram valueSize;
+    private Histogram latencyHistogram;
+    private Histogram valueSizeHistogram;
     private RandomDistribution.Zipf zipf;
 
     /**
@@ -1026,7 +1041,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
 
     void updateValueSize(final int valueSize) {
       if (!isRandomValueSize()) return;
-      this.valueSize.update(valueSize);
+      this.valueSizeHistogram.update(valueSize);
     }
 
     String generateStatus(final int sr, final int i, final int lr) {
@@ -1045,8 +1060,8 @@ public class PerformanceEvaluation extends Configured implements Tool {
     /**
      * Populated by testTakedown. Only implemented by RandomReadTest at the moment.
      */
-    public Histogram getLatency() {
-      return latency;
+    public Histogram getLatencyHistogram() {
+      return latencyHistogram;
     }
 
     void testSetup() throws IOException {
@@ -1054,16 +1069,28 @@ public class PerformanceEvaluation extends Configured implements Tool {
         this.connection = ConnectionFactory.createConnection(conf);
       }
       onStartup();
-      latency = YammerHistogramUtils.newHistogram(new UniformReservoir(1024 * 500));
-      valueSize = YammerHistogramUtils.newHistogram(new UniformReservoir(1024 * 500));
+      latencyHistogram = YammerHistogramUtils.newHistogram(new UniformReservoir(1024 * 500));
+      valueSizeHistogram = YammerHistogramUtils.newHistogram(new UniformReservoir(1024 * 500));
     }
 
     abstract void onStartup() throws IOException;
 
     void testTakedown() throws IOException {
-      reportLatency();
-      reportValueSize();
       onTakedown();
+      // Print all stats for this thread continuously.
+      // Synchronize on Test.class so different threads don't intermingle the
+      // output. We can't use 'this' here because each thread has its own instance of Test class.
+      synchronized (Test.class) {
+        status.setStatus("Test : " + testName + ", Thread : " + Thread.currentThread().getName());
+        status.setStatus("Latency (us) : " + YammerHistogramUtils.getHistogramReport(
+            latencyHistogram));
+        status.setStatus("Num measures (latency) : " + latencyHistogram.getCount());
+        status.setStatus(YammerHistogramUtils.getPrettyHistogramReport(latencyHistogram));
+        status.setStatus("ValueSize (bytes) : "
+            + YammerHistogramUtils.getHistogramReport(valueSizeHistogram));
+        status.setStatus("Num measures (ValueSize): " + valueSizeHistogram.getCount());
+        status.setStatus(YammerHistogramUtils.getPrettyHistogramReport(valueSizeHistogram));
+      }
       if (!opts.oneCon) {
         connection.close();
       }
@@ -1089,15 +1116,24 @@ public class PerformanceEvaluation extends Configured implements Tool {
       return (System.nanoTime() - startTime) / 1000000;
     }
 
+    int getStartRow() {
+      return opts.startRow;
+    }
+
+    int getLastRow() {
+      return getStartRow() + opts.perClientRunRows;
+    }
+
     /**
      * Provides an extension point for tests that don't want a per row invocation.
      */
     void testTimed() throws IOException, InterruptedException {
-      int lastRow = opts.startRow + opts.perClientRunRows;
+      int startRow = getStartRow();
+      int lastRow = getLastRow();
       // Report on completion of 1/10th of total.
       for (int ii = 0; ii < opts.cycles; ii++) {
         if (opts.cycles > 1) LOG.info("Cycle=" + ii + " of " + opts.cycles);
-        for (int i = opts.startRow; i < lastRow; i++) {
+        for (int i = startRow; i < lastRow; i++) {
           if (i % everyN != 0) continue;
           long startTime = System.nanoTime();
           TraceScope scope = Trace.startSpan("test row", traceSampler);
@@ -1106,58 +1142,28 @@ public class PerformanceEvaluation extends Configured implements Tool {
           } finally {
             scope.close();
           }
-          if ( (i - opts.startRow) > opts.measureAfter) {
-            latency.update((System.nanoTime() - startTime) / 1000);
+          if ( (i - startRow) > opts.measureAfter) {
+            latencyHistogram.update((System.nanoTime() - startTime) / 1000);
             if (status != null && i > 0 && (i % getReportingPeriod()) == 0) {
-              status.setStatus(generateStatus(opts.startRow, i, lastRow));
+              status.setStatus(generateStatus(startRow, i, lastRow));
             }
           }
         }
       }
-    }
-    /**
-     * report percentiles of latency
-     * @throws IOException
-     */
-    private void reportLatency() throws IOException {
-      status.setStatus(testName + " latency log (microseconds), on " +
-          latency.getCount() + " measures");
-      reportHistogram(this.latency);
-    }
-
-    private void reportValueSize() throws IOException {
-      status.setStatus(testName + " valueSize after " +
-          valueSize.getCount() + " measures");
-      reportHistogram(this.valueSize);
-    }
-
-    private void reportHistogram(final Histogram h) throws IOException {
-      Snapshot sn = h.getSnapshot();
-      status.setStatus(testName + " Min      = " + sn.getMin());
-      status.setStatus(testName + " Avg      = " + sn.getMean());
-      status.setStatus(testName + " StdDev   = " + sn.getStdDev());
-      status.setStatus(testName + " 50th     = " + sn.getMedian());
-      status.setStatus(testName + " 75th     = " + sn.get75thPercentile());
-      status.setStatus(testName + " 95th     = " + sn.get95thPercentile());
-      status.setStatus(testName + " 99th     = " + sn.get99thPercentile());
-      status.setStatus(testName + " 99.9th   = " + sn.get999thPercentile());
-      status.setStatus(testName + " 99.99th  = " + sn.getValue(0.9999));
-      status.setStatus(testName + " 99.999th = " + sn.getValue(0.99999));
-      status.setStatus(testName + " Max      = " + sn.getMax());
     }
 
     /**
      * @return Subset of the histograms' calculation.
      */
     public String getShortLatencyReport() {
-      return YammerHistogramUtils.getShortHistogramReport(this.latency);
+      return YammerHistogramUtils.getShortHistogramReport(this.latencyHistogram);
     }
 
     /**
      * @return Subset of the histograms' calculation.
      */
     public String getShortValueSizeReport() {
-      return YammerHistogramUtils.getShortHistogramReport(this.valueSize);
+      return YammerHistogramUtils.getShortHistogramReport(this.valueSizeHistogram);
     }
 
     /*
@@ -1456,7 +1462,116 @@ public class PerformanceEvaluation extends Configured implements Tool {
       Result r = testScanner.next();
       updateValueSize(r);
     }
+  }
 
+  /**
+   * Base class for operations that are CAS-like; that read a value and then set it based off what
+   * they read. In this category is increment, append, checkAndPut, etc.
+   *
+   * <p>These operations also want some concurrency going on. Usually when these tests run, they
+   * operate in their own part of the key range. In CASTest, we will have them all overlap on the
+   * same key space. We do this with our getStartRow and getLastRow overrides.
+   */
+  static abstract class CASTableTest extends TableTest {
+    private final byte [] qualifier;
+    CASTableTest(Connection con, TestOptions options, Status status) {
+      super(con, options, status);
+      qualifier = Bytes.toBytes(this.getClass().getSimpleName());
+    }
+
+    byte [] getQualifier() {
+      return this.qualifier;
+    }
+
+    @Override
+    int getStartRow() {
+      return 0;
+    }
+
+    @Override
+    int getLastRow() {
+      return opts.perClientRunRows;
+    }
+  }
+
+  static class IncrementTest extends CASTableTest {
+    IncrementTest(Connection con, TestOptions options, Status status) {
+      super(con, options, status);
+    }
+
+    @Override
+    void testRow(final int i) throws IOException {
+      Increment increment = new Increment(format(i));
+      increment.addColumn(FAMILY_NAME, getQualifier(), 1l);
+      updateValueSize(this.table.increment(increment));
+    }
+  }
+
+  static class AppendTest extends CASTableTest {
+    AppendTest(Connection con, TestOptions options, Status status) {
+      super(con, options, status);
+    }
+
+    @Override
+    void testRow(final int i) throws IOException {
+      byte [] bytes = format(i);
+      Append append = new Append(bytes);
+      append.add(FAMILY_NAME, getQualifier(), bytes);
+      updateValueSize(this.table.append(append));
+    }
+  }
+
+  static class CheckAndMutateTest extends CASTableTest {
+    CheckAndMutateTest(Connection con, TestOptions options, Status status) {
+      super(con, options, status);
+    }
+
+    @Override
+    void testRow(final int i) throws IOException {
+      byte [] bytes = format(i);
+      // Put a known value so when we go to check it, it is there.
+      Put put = new Put(bytes);
+      put.addColumn(FAMILY_NAME, getQualifier(), bytes);
+      this.table.put(put);
+      RowMutations mutations = new RowMutations(bytes);
+      mutations.add(put);
+      this.table.checkAndMutate(bytes, FAMILY_NAME, getQualifier(), CompareOp.EQUAL, bytes,
+          mutations);
+    }
+  }
+
+  static class CheckAndPutTest extends CASTableTest {
+    CheckAndPutTest(Connection con, TestOptions options, Status status) {
+      super(con, options, status);
+    }
+
+    @Override
+    void testRow(final int i) throws IOException {
+      byte [] bytes = format(i);
+      // Put a known value so when we go to check it, it is there.
+      Put put = new Put(bytes);
+      put.addColumn(FAMILY_NAME, getQualifier(), bytes);
+      this.table.put(put);
+      this.table.checkAndPut(bytes, FAMILY_NAME, getQualifier(), CompareOp.EQUAL, bytes, put);
+    }
+  }
+
+  static class CheckAndDeleteTest extends CASTableTest {
+    CheckAndDeleteTest(Connection con, TestOptions options, Status status) {
+      super(con, options, status);
+    }
+
+    @Override
+    void testRow(final int i) throws IOException {
+      byte [] bytes = format(i);
+      // Put a known value so when we go to check it, it is there.
+      Put put = new Put(bytes);
+      put.addColumn(FAMILY_NAME, getQualifier(), bytes);
+      this.table.put(put);
+      Delete delete = new Delete(put.getRow());
+      delete.addColumn(FAMILY_NAME, getQualifier());
+      this.table.checkAndDelete(bytes, FAMILY_NAME, getQualifier(), CompareOp.EQUAL, bytes, delete);
+    }
   }
 
   static class SequentialReadTest extends TableTest {
@@ -1644,7 +1759,7 @@ public class PerformanceEvaluation extends Configured implements Tool {
       " (" + calculateMbps((int)(opts.perClientRunRows * opts.sampleRate), totalElapsedTime,
           getAverageValueLength(opts), opts.columns) + ")");
 
-    return new RunResult(totalElapsedTime, t.getLatency());
+    return new RunResult(totalElapsedTime, t.getLatencyHistogram());
   }
 
   private static int getAverageValueLength(final TestOptions opts) {
@@ -1693,56 +1808,61 @@ public class PerformanceEvaluation extends Configured implements Tool {
     System.err.println("Usage: java " + className + " \\");
     System.err.println("  <OPTIONS> [-D<property=value>]* <command> <nclients>");
     System.err.println();
-    System.err.println("Options:");
+    System.err.println("General Options:");
     System.err.println(" nomapred        Run multiple clients using threads " +
       "(rather than use mapreduce)");
-    System.err.println(" rows            Rows each client runs. Default: One million");
-    System.err.println(" size            Total size in GiB. Mutually exclusive with --rows. " +
-      "Default: 1.0.");
+    System.err.println(" oneCon          all the threads share the same connection. Default: False");
     System.err.println(" sampleRate      Execute test on a sample of total " +
       "rows. Only supported by randomRead. Default: 1.0");
+    System.err.println(" period          Report every 'period' rows: " +
+      "Default: opts.perClientRunRows / 10 = " + DEFAULT_OPTS.getPerClientRunRows()/10);
+    System.err.println(" cycles          How many times to cycle the test. Defaults: 1.");
     System.err.println(" traceRate       Enable HTrace spans. Initiate tracing every N rows. " +
       "Default: 0");
+    System.err.println(" latency         Set to report operation latencies. Default: False");
+    System.err.println(" measureAfter    Start to measure the latency once 'measureAfter'" +
+        " rows have been treated. Default: 0");
+    System.err.println(" valueSize       Pass value size to use: Default: "
+        + DEFAULT_OPTS.getValueSize());
+    System.err.println(" valueRandom     Set if we should vary value size between 0 and " +
+        "'valueSize'; set on read for stats on size: Default: Not set.");
+    System.err.println();
+    System.err.println("Table Creation / Write Tests:");
     System.err.println(" table           Alternate table name. Default: 'TestTable'");
-    System.err.println(" multiGet        If >0, when doing RandomRead, perform multiple gets " +
-      "instead of single gets. Default: 0");
+    System.err.println(" rows            Rows each client runs. Default: "
+        + DEFAULT_OPTS.getPerClientRunRows());
+    System.err.println(" size            Total size in GiB. Mutually exclusive with --rows. " +
+      "Default: 1.0.");
     System.err.println(" compress        Compression type to use (GZ, LZO, ...). Default: 'NONE'");
     System.err.println(" flushCommits    Used to determine if the test should flush the table. " +
       "Default: false");
+    System.err.println(" valueZipf       Set if we should vary value size between 0 and " +
+        "'valueSize' in zipf form: Default: Not set.");
     System.err.println(" writeToWAL      Set writeToWAL on puts. Default: True");
     System.err.println(" autoFlush       Set autoFlush on htable. Default: False");
-    System.err.println(" oneCon          all the threads share the same connection. Default: False");
     System.err.println(" presplit        Create presplit table. Recommended for accurate perf " +
       "analysis (see guide).  Default: disabled");
-    System.err.println(" inmemory        Tries to keep the HFiles of the CF " +
-      "inmemory as far as possible. Not guaranteed that reads are always served " +
-      "from memory.  Default: false");
     System.err.println(" usetags         Writes tags along with KVs. Use with HFile V3. " +
       "Default: false");
     System.err.println(" numoftags       Specify the no of tags that would be needed. " +
        "This works only if usetags is true.");
+    System.err.println(" splitPolicy     Specify a custom RegionSplitPolicy for the table.");
+    System.err.println(" columns         Columns to write per row. Default: 1");
+    System.err.println();
+    System.err.println("Read Tests:");
     System.err.println(" filterAll       Helps to filter out all the rows on the server side"
         + " there by not returning any thing back to the client.  Helps to check the server side"
         + " performance.  Uses FilterAllFilter internally. ");
-    System.err.println(" latency         Set to report operation latencies. Default: False");
-    System.err.println(" measureAfter    Start to measure the latency once 'measureAfter'" +
-        " rows have been treated. Default: 0");
-    System.err.println(" bloomFilter      Bloom filter type, one of " + Arrays.toString(BloomType.values()));
-    System.err.println(" valueSize       Pass value size to use: Default: 1024");
-    System.err.println(" valueRandom     Set if we should vary value size between 0 and " +
-        "'valueSize'; set on read for stats on size: Default: Not set.");
-    System.err.println(" valueZipf       Set if we should vary value size between 0 and " +
-        "'valueSize' in zipf form: Default: Not set.");
-    System.err.println(" period          Report every 'period' rows: " +
-      "Default: opts.perClientRunRows / 10");
     System.err.println(" multiGet        Batch gets together into groups of N. Only supported " +
       "by randomRead. Default: disabled");
+    System.err.println(" inmemory        Tries to keep the HFiles of the CF " +
+      "inmemory as far as possible. Not guaranteed that reads are always served " +
+      "from memory.  Default: false");
+    System.err.println(" bloomFilter      Bloom filter type, one of "
+        + Arrays.toString(BloomType.values()));
     System.err.println(" addColumns      Adds columns to scans/gets explicitly. Default: true");
     System.err.println(" replicas        Enable region replica testing. Defaults: 1.");
-    System.err.println(" cycles          How many times to cycle the test. Defaults: 1.");
-    System.err.println(" splitPolicy     Specify a custom RegionSplitPolicy for the table.");
     System.err.println(" randomSleep     Do a random sleep before each get between 0 and entered value. Defaults: 0");
-    System.err.println(" columns         Columns to write per row. Default: 1");
     System.err.println(" caching         Scan caching to use. Default: 30");
     System.err.println();
     System.err.println(" Note: -D properties will be applied to the conf used. ");
@@ -1756,12 +1876,13 @@ public class PerformanceEvaluation extends Configured implements Tool {
     }
     System.err.println();
     System.err.println("Args:");
-    System.err.println(" nclients        Integer. Required. Total number of " +
-      "clients (and HRegionServers)");
-    System.err.println("                 running: 1 <= value <= 500");
+    System.err.println(" nclients        Integer. Required. Total number of clients "
+        + "(and HRegionServers) running. 1 <= value <= 500");
     System.err.println("Examples:");
-    System.err.println(" To run a single evaluation client:");
+    System.err.println(" To run a single client doing the default 1M sequentialWrites:");
     System.err.println(" $ bin/hbase " + className + " sequentialWrite 1");
+    System.err.println(" To run 10 clients doing increments over ten rows:");
+    System.err.println(" $ bin/hbase " + className + " --rows=10 --nomapred increment 10");
   }
 
   /**

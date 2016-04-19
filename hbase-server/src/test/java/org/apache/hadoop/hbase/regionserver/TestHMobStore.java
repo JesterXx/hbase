@@ -18,20 +18,6 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
-import java.io.IOException;
-import java.security.Key;
-import java.security.SecureRandom;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Date;
-import java.util.Iterator;
-import java.util.List;
-import java.util.NavigableSet;
-import java.util.concurrent.ConcurrentSkipListSet;
-
-import javax.crypto.spec.SecretKeySpec;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -59,7 +45,7 @@ import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
-import org.apache.hadoop.hbase.regionserver.compactions.NoLimitCompactionThroughputController;
+import org.apache.hadoop.hbase.regionserver.throttle.NoLimitThroughputController;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
@@ -73,6 +59,19 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
 import org.mockito.Mockito;
+
+import javax.crypto.spec.SecretKeySpec;
+import java.io.IOException;
+import java.security.Key;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.List;
+import java.util.NavigableSet;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 @Category(MediumTests.class)
 public class TestHMobStore {
@@ -179,7 +178,7 @@ public class TestHMobStore {
     KeyValue key3 = new KeyValue(row2, family, qf3, 1, value2);
     KeyValue[] keys = new KeyValue[] { key1, key2, key3 };
     int maxKeyCount = keys.length;
-    StoreFile.Writer mobWriter = store.createWriterInTmp(currentDate, maxKeyCount,
+    StoreFileWriter mobWriter = store.createWriterInTmp(currentDate, maxKeyCount,
         hcd.getCompactionCompression(), region.getRegionInfo().getStartKey());
     mobFilePath = mobWriter.getPath();
 
@@ -468,7 +467,7 @@ public class TestHMobStore {
     this.store.snapshot();
     flushStore(store, id++);
     Assert.assertEquals(storeFilesSize, this.store.getStorefiles().size());
-    Assert.assertEquals(0, ((DefaultMemStore)this.store.memstore).cellSet.size());
+    Assert.assertEquals(0, ((AbstractMemStore)this.store.memstore).getActive().getCellsCount());
   }
 
   /**
@@ -537,7 +536,7 @@ public class TestHMobStore {
     // Trigger major compaction
     this.store.triggerMajorCompaction();
     CompactionContext requestCompaction = this.store.requestCompaction(1, null);
-    this.store.compact(requestCompaction, NoLimitCompactionThroughputController.INSTANCE);
+    this.store.compact(requestCompaction, NoLimitThroughputController.INSTANCE);
     Assert.assertEquals(1, this.store.getStorefiles().size());
 
     //Check encryption after compaction

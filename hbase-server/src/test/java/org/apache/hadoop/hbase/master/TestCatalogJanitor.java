@@ -64,6 +64,8 @@ import org.apache.hadoop.hbase.io.Reference;
 import org.apache.hadoop.hbase.master.CatalogJanitor.SplitParentFirstComparator;
 import org.apache.hadoop.hbase.master.normalizer.RegionNormalizer;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
+import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
+import org.apache.hadoop.hbase.procedure.MasterProcedureManagerHost;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos;
@@ -77,6 +79,7 @@ import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.RegionActionResul
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.ResultOrException;
 import org.apache.hadoop.hbase.quotas.MasterQuotaManager;
 import org.apache.hadoop.hbase.regionserver.HStore;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.MasterTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -239,6 +242,16 @@ public class TestCatalogJanitor {
         final long nonce) throws IOException {
       // no-op
       return -1;
+    }
+
+    @Override
+    public SnapshotManager getSnapshotManager() {
+      return null;
+    }
+
+    @Override
+    public MasterProcedureManagerHost getMasterProcedureManagerHost() {
+      return null;
     }
 
     @Override
@@ -433,6 +446,9 @@ public class TestCatalogJanitor {
         final long nonce) throws IOException {
       return -1;
     }
+    public LoadBalancer getLoadBalancer() {
+      return null;
+    }
 
     @Override
     public long truncateTable(
@@ -499,7 +515,7 @@ public class TestCatalogJanitor {
 
     @Override
     public void dispatchMergingRegions(HRegionInfo region_a, HRegionInfo region_b,
-        boolean forcible) throws IOException {
+        boolean forcible, User user) throws IOException {
     }
 
     @Override

@@ -24,6 +24,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
+import java.util.NavigableMap;
 import java.util.UUID;
 
 import org.apache.commons.logging.Log;
@@ -49,7 +50,7 @@ import com.google.common.annotations.VisibleForTesting;
  *
  * <p>Some Transactional edits (START, COMMIT, ABORT) will not have an
  * associated row.
- * @deprecated use WALKey.  as of 2.0.  Remove in 3.0
+ * @deprecated use WALKey. Deprecated as of 1.0 (HBASE-12522). Remove in 2.0
  */
 @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.REPLICATION)
 @Deprecated
@@ -67,7 +68,7 @@ public class HLogKey extends WALKey implements Writable {
   }
 
   public HLogKey(final byte[] encodedRegionName, final TableName tablename) {
-    super(encodedRegionName, tablename);
+    super(encodedRegionName, tablename, null);
   }
 
   @VisibleForTesting
@@ -75,11 +76,15 @@ public class HLogKey extends WALKey implements Writable {
     super(encodedRegionName, tablename, now);
   }
 
-  public HLogKey(final byte[] encodedRegionName,
-                 final TableName tablename,
-                 final long now,
-                 final MultiVersionConcurrencyControl mvcc) {
-    super(encodedRegionName, tablename, now, mvcc);
+  @VisibleForTesting
+  public HLogKey(final byte[] encodedRegionName, final TableName tablename, final long now,
+      final NavigableMap<byte[], Integer> replicationScope) {
+    super(encodedRegionName, tablename, now, replicationScope);
+  }
+
+  public HLogKey(final byte[] encodedRegionName, final TableName tablename, final long now,
+      final MultiVersionConcurrencyControl mvcc, final NavigableMap<byte[], Integer> scopes) {
+    super(encodedRegionName, tablename, now, mvcc, scopes);
   }
 
   /**
@@ -105,6 +110,35 @@ public class HLogKey extends WALKey implements Writable {
       long nonce,
       MultiVersionConcurrencyControl mvcc) {
     super(encodedRegionName, tablename, logSeqNum, now, clusterIds, nonceGroup, nonce, mvcc);
+  }
+
+  /**
+   * Create the log key for writing to somewhere.
+   * We maintain the tablename mainly for debugging purposes.
+   * A regionName is always a sub-table object.
+   * <p>Used by log splitting and snapshots.
+   *
+   * @param encodedRegionName Encoded name of the region as returned by
+   * <code>HRegionInfo#getEncodedNameAsBytes()</code>.
+   * @param tablename   - name of table
+   * @param logSeqNum   - log sequence number
+   * @param now Time at which this edit was written.
+   * @param clusterIds the clusters that have consumed the change(used in Replication)
+   * @param nonceGroup the noncegroup
+   * @param nonce      the nonce
+   * @param replicationScope the replicationScope of the non-default column families' of the region
+   */
+  public HLogKey(
+      final byte[] encodedRegionName,
+      final TableName tablename,
+      long logSeqNum,
+      final long now,
+      List<UUID> clusterIds,
+      long nonceGroup,
+      long nonce,
+      MultiVersionConcurrencyControl mvcc, NavigableMap<byte[], Integer> replicationScope) {
+    super(encodedRegionName, tablename, logSeqNum, now, clusterIds, nonceGroup, nonce, mvcc,
+        replicationScope);
   }
 
   /**
@@ -166,7 +200,7 @@ public class HLogKey extends WALKey implements Writable {
           this.tablename.getName().length, out,
           compressionContext.tableDict);
     }
-    out.writeLong(this.logSeqNum);
+    out.writeLong(getSequenceId());
     out.writeLong(this.writeTime);
     // Don't need to write the clusters information as we are using protobufs from 0.95
     // Writing only the first clusterId for testing the legacy read
@@ -192,7 +226,7 @@ public class HLogKey extends WALKey implements Writable {
     // encodes the length of encodedRegionName.
     // If < 0 we just read the version and the next vint is the length.
     // @see Bytes#readByteArray(DataInput)
-    setScopes(null); // writable HLogKey does not contain scopes
+    serializeReplicationScope(false); // writable HLogKey does not contain scopes
     int len = WritableUtils.readVInt(in);
     byte[] tablenameBytes = null;
     if (len < 0) {
@@ -213,7 +247,7 @@ public class HLogKey extends WALKey implements Writable {
       tablenameBytes = Compressor.readCompressed(in, compressionContext.tableDict);
     }
 
-    this.logSeqNum = in.readLong();
+    setSequenceId(in.readLong());
     this.writeTime = in.readLong();
 
     this.clusterIds.clear();

@@ -149,6 +149,11 @@ public abstract class AbstractRpcClient implements RpcClient {
     }
   }
 
+  @Override
+  public boolean hasCellBlockSupport() {
+    return this.codec != null;
+  }
+
   /**
    * Encapsulate the ugly casting and RuntimeException conversion in private method.
    * @param conf configuration
@@ -313,7 +318,7 @@ public abstract class AbstractRpcClient implements RpcClient {
     public Message callBlockingMethod(Descriptors.MethodDescriptor md, RpcController controller,
         Message param, Message returnType) throws ServiceException {
       PayloadCarryingRpcController pcrc;
-      if (controller != null) {
+      if (controller != null && controller instanceof PayloadCarryingRpcController) {
         pcrc = (PayloadCarryingRpcController) controller;
         if (!pcrc.hasCallTimeout()) {
           pcrc.setCallTimeout(channelOperationTimeout);

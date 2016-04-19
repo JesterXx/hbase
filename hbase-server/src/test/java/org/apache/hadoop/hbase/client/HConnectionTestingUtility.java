@@ -54,6 +54,11 @@ public class HConnectionTestingUtility {
   throws ZooKeeperConnectionException {
     ConnectionImplementation connection = Mockito.mock(ConnectionImplementation.class);
     Mockito.when(connection.getConfiguration()).thenReturn(conf);
+    Mockito.when(connection.getRpcControllerFactory()).thenReturn(
+      Mockito.mock(RpcControllerFactory.class));
+    // we need a real retrying caller
+    RpcRetryingCallerFactory callerFactory = new RpcRetryingCallerFactory(conf);
+    Mockito.when(connection.getRpcRetryingCallerFactory()).thenReturn(callerFactory);
     return connection;
   }
 
@@ -120,6 +125,7 @@ public class HConnectionTestingUtility {
     Mockito.when(c.getNewRpcRetryingCallerFactory(conf)).thenReturn(
         RpcRetryingCallerFactory.instantiate(conf,
             RetryingCallerInterceptorFactory.NO_OP_INTERCEPTOR, null));
+    Mockito.when(c.getRpcControllerFactory()).thenReturn(Mockito.mock(RpcControllerFactory.class));
     HTableInterface t = Mockito.mock(HTableInterface.class);
     Mockito.when(c.getTable((TableName)Mockito.any())).thenReturn(t);
     ResultScanner rs = Mockito.mock(ResultScanner.class);

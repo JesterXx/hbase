@@ -64,6 +64,7 @@ import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -482,7 +483,7 @@ public final class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public static StoreFile.Writer createRefFileWriter(Configuration conf, FileSystem fs,
+  public static StoreFileWriter createRefFileWriter(Configuration conf, FileSystem fs,
     HColumnDescriptor family, Path basePath, long maxKeyCount, CacheConfig cacheConfig,
     Encryption.Context cryptoContext)
     throws IOException {
@@ -494,7 +495,7 @@ public final class MobUtils {
       .withEncryptionContext(cryptoContext).withCreateTime(EnvironmentEdgeManager.currentTime())
       .build();
     Path tempPath = new Path(basePath, UUID.randomUUID().toString().replaceAll("-", ""));
-    StoreFile.Writer w = new StoreFile.WriterBuilder(conf, cacheConfig, fs).withFilePath(tempPath)
+    StoreFileWriter w = new StoreFileWriter.Builder(conf, cacheConfig, fs).withFilePath(tempPath)
       .withComparator(CellComparator.COMPARATOR).withBloomType(family.getBloomFilterType())
       .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
     return w;
@@ -543,7 +544,7 @@ public final class MobUtils {
    * @return The writer for the del file.
    * @throws IOException
    */
-  public static StoreFile.Writer createDelFileWriter(Configuration conf, FileSystem fs,
+  public static StoreFileWriter createDelFileWriter(Configuration conf, FileSystem fs,
       HColumnDescriptor family, String date, Path basePath, long maxKeyCount,
       Compression.Algorithm compression, byte[] startKey, CacheConfig cacheConfig,
       Encryption.Context cryptoContext)

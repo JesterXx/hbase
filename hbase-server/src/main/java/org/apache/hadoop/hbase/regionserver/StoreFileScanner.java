@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.Cell;
@@ -36,7 +35,7 @@ import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.io.hfile.HFileScanner;
-import org.apache.hadoop.hbase.regionserver.StoreFile.Reader;
+import org.apache.hadoop.hbase.util.Counter;
 
 /**
  * KeyValueScanner adaptor over the Reader.  It also provides hooks into
@@ -45,7 +44,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFile.Reader;
 @InterfaceAudience.LimitedPrivate("Coprocessor")
 public class StoreFileScanner implements KeyValueScanner {
   // the reader it comes from:
-  private final StoreFile.Reader reader;
+  private final StoreFileReader reader;
   private final HFileScanner hfs;
   private Cell cur = null;
   private boolean closed = false;
@@ -60,7 +59,7 @@ public class StoreFileScanner implements KeyValueScanner {
   // if have encountered the next row. Only used for reversed scan
   private boolean stopSkippingKVsIfNextRow = false;
 
-  private static AtomicLong seekCount;
+  private static Counter seekCount;
 
   private ScanQueryMatcher matcher;
 
@@ -70,7 +69,7 @@ public class StoreFileScanner implements KeyValueScanner {
    * Implements a {@link KeyValueScanner} on top of the specified {@link HFileScanner}
    * @param hfs HFile scanner
    */
-  public StoreFileScanner(StoreFile.Reader reader, HFileScanner hfs, boolean useMVCC,
+  public StoreFileScanner(StoreFileReader reader, HFileScanner hfs, boolean useMVCC,
       boolean hasMVCC, long readPt) {
     this.readPt = readPt;
     this.reader = reader;
@@ -117,7 +116,7 @@ public class StoreFileScanner implements KeyValueScanner {
     List<StoreFileScanner> scanners = new ArrayList<StoreFileScanner>(
         files.size());
     for (StoreFile file : files) {
-      StoreFile.Reader r = file.createReader(canUseDrop);
+      StoreFileReader r = file.createReader(canUseDrop);
       r.setReplicaStoreFile(isPrimaryReplica);
       StoreFileScanner scanner = r.getStoreFileScanner(cacheBlocks, usePread,
           isCompaction, readPt);
@@ -164,7 +163,7 @@ public class StoreFileScanner implements KeyValueScanner {
   }
 
   public boolean seek(Cell key) throws IOException {
-    if (seekCount != null) seekCount.incrementAndGet();
+    if (seekCount != null) seekCount.increment();
 
     try {
       try {
@@ -191,7 +190,7 @@ public class StoreFileScanner implements KeyValueScanner {
   }
 
   public boolean reseek(Cell key) throws IOException {
-    if (seekCount != null) seekCount.incrementAndGet();
+    if (seekCount != null) seekCount.increment();
 
     try {
       try {
@@ -384,7 +383,7 @@ public class StoreFileScanner implements KeyValueScanner {
     return true;
   }
 
-  Reader getReader() {
+  StoreFileReader getReader() {
     return reader;
   }
 
@@ -424,7 +423,7 @@ public class StoreFileScanner implements KeyValueScanner {
     return seekCount.get();
   }
   static final void instrument() {
-    seekCount = new AtomicLong();
+    seekCount = new Counter();
   }
 
   @Override
@@ -447,7 +446,7 @@ public class StoreFileScanner implements KeyValueScanner {
         Cell key = originalKey;
         do {
           Cell seekKey = CellUtil.createFirstOnRow(key);
-          if (seekCount != null) seekCount.incrementAndGet();
+          if (seekCount != null) seekCount.increment();
           if (!hfs.seekBefore(seekKey)) {
             this.cur = null;
             return false;
@@ -455,7 +454,7 @@ public class StoreFileScanner implements KeyValueScanner {
           Cell curCell = hfs.getCell();
           Cell firstKeyOfPreviousRow = CellUtil.createFirstOnRow(curCell);
 
-          if (seekCount != null) seekCount.incrementAndGet();
+          if (seekCount != null) seekCount.increment();
           if (!seekAtOrAfter(hfs, firstKeyOfPreviousRow)) {
             this.cur = null;
             return false;

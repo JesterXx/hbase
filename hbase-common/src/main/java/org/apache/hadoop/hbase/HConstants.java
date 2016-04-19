@@ -65,7 +65,9 @@ public final class HConstants {
   public static final byte[] RPC_HEADER = new byte[] { 'H', 'B', 'a', 's' };
   public static final byte RPC_CURRENT_VERSION = 0;
 
-  // HFileBlock constants.
+  // HFileBlock constants. TODO!!!! THESE DEFINES BELONG IN HFILEBLOCK, NOT UP HERE.
+  // Needed down in hbase-common though by encoders but these encoders should not be dealing
+  // in the internals of hfileblocks. Fix encapsulation.
 
   /** The size data structures with minor version is 0 */
   public static final int HFILEBLOCK_HEADER_SIZE_NO_CHECKSUM = MAGIC_LENGTH + 2 * Bytes.SIZEOF_INT
@@ -1012,11 +1014,6 @@ public final class HConstants {
 
   public static final String LOAD_BALANCER_SLOP_KEY = "hbase.regions.slop";
 
-  /**
-   * The byte array represents for NO_NEXT_INDEXED_KEY;
-   * The actual value is irrelevant because this is always compared by reference.
-   */
-  public static final Cell NO_NEXT_INDEXED_KEY = new KeyValue();
   /** delimiter used between portions of a region name */
   public static final int DELIMITER = ',';
 
@@ -1259,6 +1256,11 @@ public final class HConstants {
   public static final String ZK_SERVER_KEYTAB_FILE = "hbase.zookeeper.server.keytab.file";
   public static final String ZK_SERVER_KERBEROS_PRINCIPAL =
       "hbase.zookeeper.server.kerberos.principal";
+
+  /** Config key for hbase temporary directory in hdfs */
+  public static final String TEMPORARY_FS_DIRECTORY_KEY = "hbase.fs.tmp.dir";
+  public static final String DEFAULT_TEMPORARY_HDFS_DIRECTORY = "/user/"
+      + System.getProperty("user.name") + "/hbase-staging";
 
   private HConstants() {
     // Can't be instantiated with this ctor.

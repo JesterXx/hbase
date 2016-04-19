@@ -17,21 +17,18 @@
  */
 package org.apache.hadoop.hbase;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
+import com.google.common.collect.Lists;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.WALProtos.CompactionDescriptor;
@@ -44,7 +41,7 @@ import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionContext;
-import org.apache.hadoop.hbase.regionserver.compactions.CompactionThroughputController;
+import org.apache.hadoop.hbase.regionserver.throttle.ThroughputController;
 import org.apache.hadoop.hbase.regionserver.wal.WALUtil;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
@@ -55,7 +52,8 @@ import org.apache.hadoop.hbase.wal.WAL;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
-import com.google.common.collect.Lists;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Test for the case where a regionserver going down has enough cycles to do damage to regions
@@ -122,7 +120,7 @@ public class TestIOFencing {
 
     @Override
     public boolean compact(CompactionContext compaction, Store store,
-        CompactionThroughputController throughputController) throws IOException {
+        ThroughputController throughputController) throws IOException {
       try {
         return super.compact(compaction, store, throughputController);
       } finally {
@@ -132,7 +130,7 @@ public class TestIOFencing {
 
     @Override
     public boolean compact(CompactionContext compaction, Store store,
-        CompactionThroughputController throughputController, User user) throws IOException {
+        ThroughputController throughputController, User user) throws IOException {
       try {
         return super.compact(compaction, store, throughputController, user);
       } finally {
@@ -207,6 +205,9 @@ public class TestIOFencing {
       }
       super.completeCompaction(compactedFiles);
     }
+
+    @Override public void finalizeFlush() {
+    }
   }
 
   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
@@ -280,7 +281,8 @@ public class TestIOFencing {
       CompactionDescriptor compactionDescriptor = ProtobufUtil.toCompactionDescriptor(oldHri,
         FAMILY, Lists.newArrayList(new Path("/a")), Lists.newArrayList(new Path("/b")),
         new Path("store_dir"));
-      WALUtil.writeCompactionMarker(compactingRegion.getWAL(), table.getTableDescriptor(),
+      WALUtil.writeCompactionMarker(compactingRegion.getWAL(),
+          ((HRegion)compactingRegion).getReplicationScope(),
         oldHri, compactionDescriptor, compactingRegion.getMVCC());
 
       // Wait till flush has happened, otherwise there won't be multiple store files

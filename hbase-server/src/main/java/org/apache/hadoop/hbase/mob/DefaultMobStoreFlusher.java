@@ -41,7 +41,8 @@ import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.MemStoreSnapshot;
 import org.apache.hadoop.hbase.regionserver.ScannerContext;
 import org.apache.hadoop.hbase.regionserver.Store;
-import org.apache.hadoop.hbase.regionserver.StoreFile;
+import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
+import org.apache.hadoop.hbase.regionserver.throttle.ThroughputController;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.util.StringUtils;
 
@@ -96,7 +97,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
    */
   @Override
   public List<Path> flushSnapshot(MemStoreSnapshot snapshot, long cacheFlushId,
-      MonitoredTask status) throws IOException {
+      MonitoredTask status, ThroughputController throughputController) throws IOException {
     ArrayList<Path> result = new ArrayList<Path>();
     int cellsCount = snapshot.getCellsCount();
     if (cellsCount == 0) return result; // don't flush if there are no entries
@@ -107,7 +108,7 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
     if (scanner == null) {
       return result; // NULL scanner returned from coprocessor hooks means skip normal processing
     }
-    StoreFile.Writer writer;
+    StoreFileWriter writer;
     try {
       // TODO: We can fail in the below block before we complete adding this flush to
       // list of store files. Add cleanup of anything put on filesystem if we fail.
@@ -154,13 +155,13 @@ public class DefaultMobStoreFlusher extends DefaultStoreFlusher {
    * @throws IOException
    */
   protected void performMobFlush(MemStoreSnapshot snapshot, long cacheFlushId,
-      InternalScanner scanner, StoreFile.Writer writer, MonitoredTask status) throws IOException {
-    StoreFile.Writer mobFileWriter = null;
+      InternalScanner scanner, StoreFileWriter writer, MonitoredTask status) throws IOException {
+    StoreFileWriter mobFileWriter = null;
     int compactionKVMax = conf.getInt(HConstants.COMPACTION_KV_MAX,
         HConstants.COMPACTION_KV_MAX_DEFAULT);
     long mobCount = 0;
     long mobSize = 0;
-    long time = snapshot.getTimeRangeTracker().getMaximumTimestamp();
+    long time = snapshot.getTimeRangeTracker().getMax();
     mobFileWriter = mobStore.createWriterInTmp(new Date(time), snapshot.getCellsCount(),
         store.getFamily().getCompression(), store.getRegionInfo().getStartKey());
     // the target path is {tableName}/.mob/{cfName}/mobFiles

@@ -47,8 +47,8 @@ public final class ByteBufferUtils {
   public final static int VALUE_MASK = 0x7f;
   public final static int NEXT_BIT_SHIFT = 7;
   public final static int NEXT_BIT_MASK = 1 << 7;
-  private static final boolean UNSAFE_AVAIL = UnsafeAccess.isAvailable();
-  private static final boolean UNSAFE_UNALIGNED = UnsafeAccess.unaligned();
+  private static final boolean UNSAFE_AVAIL = UnsafeAvailChecker.isAvailable();
+  private static final boolean UNSAFE_UNALIGNED = UnsafeAvailChecker.unaligned();
 
   private ByteBufferUtils() {
   }
@@ -150,7 +150,7 @@ public final class ByteBufferUtils {
    }
 
   public static byte toByte(ByteBuffer buffer, int offset) {
-    if (UnsafeAccess.isAvailable()) {
+    if (UNSAFE_AVAIL) {
       return UnsafeAccess.toByte(buffer, offset);
     } else {
       return buffer.get(offset);
@@ -202,7 +202,7 @@ public final class ByteBufferUtils {
   }
 
   public static int putByte(ByteBuffer buffer, int offset, byte b) {
-    if (UnsafeAccess.isAvailable()) {
+    if (UNSAFE_AVAIL) {
       return UnsafeAccess.putByte(buffer, offset, b);
     } else {
       buffer.put(offset, b);
@@ -369,7 +369,7 @@ public final class ByteBufferUtils {
    * @param out destination buffer
    */
   public static void copyFromBufferToBuffer(ByteBuffer in, ByteBuffer out) {
-    if (UnsafeAccess.isAvailable()) {
+    if (UNSAFE_AVAIL) {
       int length = in.remaining();
       UnsafeAccess.copy(in, in.position(), out, out.position(), length);
       out.position(out.position() + length);
@@ -579,6 +579,22 @@ public final class ByteBufferUtils {
     return compareTo(buf1, o1, l1, buf2, o2, l2) == 0;
   }
 
+  /**
+   * @param buf
+   *          ByteBuffer to hash
+   * @param offset
+   *          offset to start from
+   * @param length
+   *          length to hash
+   */
+  public static int hashCode(ByteBuffer buf, int offset, int length) {
+    int hash = 1;
+    for (int i = offset; i < offset + length; i++) {
+      hash = (31 * hash) + (int) toByte(buf, i);
+    }
+    return hash;
+  }
+
   public static int compareTo(ByteBuffer buf1, int o1, int l1, ByteBuffer buf2, int o2, int l2) {
     if (UNSAFE_UNALIGNED) {
       long offset1Adj, offset2Adj;
@@ -762,6 +778,19 @@ public final class ByteBufferUtils {
       return UnsafeAccess.toShort(buffer, offset);
     } else {
       return buffer.getShort(offset);
+    }
+  }
+
+  /**
+   * Reads an int value at the given buffer's current position. Also advances the buffer's position
+   */
+  public static int toInt(ByteBuffer buffer) {
+    if (UNSAFE_UNALIGNED) {
+      int i = UnsafeAccess.toInt(buffer, buffer.position());
+      buffer.position(buffer.position() + Bytes.SIZEOF_INT);
+      return i;
+    } else {
+      return buffer.getInt();
     }
   }
 

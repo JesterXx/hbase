@@ -18,6 +18,13 @@
  */
 package org.apache.hadoop.hbase.master;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.Service;
+
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.lang.reflect.Constructor;
@@ -77,6 +84,7 @@ import org.apache.hadoop.hbase.TableNotDisabledException;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.UnknownRegionException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.RegionReplicaUtil;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.TableState;
@@ -134,7 +142,9 @@ import org.apache.hadoop.hbase.regionserver.RegionCoprocessorHost;
 import org.apache.hadoop.hbase.regionserver.RegionSplitPolicy;
 import org.apache.hadoop.hbase.regionserver.compactions.ExploringCompactionPolicy;
 import org.apache.hadoop.hbase.regionserver.compactions.FIFOCompactionPolicy;
+import org.apache.hadoop.hbase.replication.master.TableCFsUpdater;
 import org.apache.hadoop.hbase.replication.regionserver.Replication;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.util.Addressing;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -155,6 +165,7 @@ import org.apache.hadoop.hbase.zookeeper.MasterAddressTracker;
 import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
 import org.apache.hadoop.hbase.zookeeper.RegionNormalizerTracker;
 import org.apache.hadoop.hbase.zookeeper.RegionServerTracker;
+import org.apache.hadoop.hbase.zookeeper.SplitOrMergeTracker;
 import org.apache.hadoop.hbase.zookeeper.ZKClusterId;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
@@ -162,11 +173,6 @@ import org.apache.zookeeper.KeeperException;
 import org.mortbay.jetty.Connector;
 import org.mortbay.jetty.nio.SelectChannelConnector;
 import org.mortbay.jetty.servlet.Context;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Maps;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.Service;
 
 /**
  * HMaster is the "master server" for HBase. An HBase cluster has one active
@@ -253,6 +259,9 @@ public class HMaster extends HRegionServer implements MasterServices {
   // Tracker for load balancer state
   LoadBalancerTracker loadBalancerTracker;
 
+  // Tracker for split and merge state
+  SplitOrMergeTracker splitOrMergeTracker;
+
   // Tracker for region normalizer state
   private RegionNormalizerTracker regionNormalizerTracker;
 
@@ -326,7 +335,7 @@ public class HMaster extends HRegionServer implements MasterServices {
   // monitor for snapshot of hbase tables
   SnapshotManager snapshotManager;
   // monitor for distributed procedures
-  MasterProcedureManagerHost mpmHost;
+  private MasterProcedureManagerHost mpmHost;
 
   // it is assigned after 'initialized' guard set to true, so should be volatile
   private volatile MasterQuotaManager quotaManager;
@@ -336,7 +345,7 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   // handle table states
   private TableStateManager tableStateManager;
-  
+
   private long splitPlanCount;
   private long mergePlanCount;
 
@@ -576,10 +585,16 @@ public class HMaster extends HRegionServer implements MasterServices {
     this.balancer = LoadBalancerFactory.getLoadBalancer(conf);
     this.normalizer = RegionNormalizerFactory.getRegionNormalizer(conf);
     this.normalizer.setMasterServices(this);
+    this.normalizer.setMasterRpcServices((MasterRpcServices)rpcServices);
     this.loadBalancerTracker = new LoadBalancerTracker(zooKeeper, this);
     this.loadBalancerTracker.start();
+
     this.regionNormalizerTracker = new RegionNormalizerTracker(zooKeeper, this);
     this.regionNormalizerTracker.start();
+
+    this.splitOrMergeTracker = new SplitOrMergeTracker(zooKeeper, conf, this);
+    this.splitOrMergeTracker.start();
+
     this.assignmentManager = new AssignmentManager(this, serverManager,
       this.balancer, this.service, this.metricsMaster,
       this.tableLockManager, tableStateManager);
@@ -661,6 +676,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     // publish cluster ID
     status.setStatus("Publishing Cluster ID in ZooKeeper");
     ZKClusterId.setClusterId(this.zooKeeper, fileSystemManager.getClusterId());
+
     this.serverManager = createServerManager(this, this);
 
     // Invalidate all write locks held previously
@@ -669,6 +685,13 @@ public class HMaster extends HRegionServer implements MasterServices {
 
     status.setStatus("Initializing ZK system trackers");
     initializeZKBasedSystemTrackers();
+
+    // This is for backwards compatibility
+    // See HBASE-11393
+    status.setStatus("Update TableCFs node in ZNode");
+    TableCFsUpdater tableCFsUpdater = new TableCFsUpdater(zooKeeper,
+            conf, this.clusterConnection);
+    tableCFsUpdater.update();
 
     // initialize master side coprocessors before we start handling requests
     status.setStatus("Initializing master coprocessors");
@@ -838,7 +861,6 @@ public class HMaster extends HRegionServer implements MasterServices {
 
     zombieDetector.interrupt();
   }
-
   /**
    * Create a {@link ServerManager} instance.
    */
@@ -1375,21 +1397,24 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   @Override
   public void dispatchMergingRegions(final HRegionInfo region_a,
-      final HRegionInfo region_b, final boolean forcible) throws IOException {
+      final HRegionInfo region_b, final boolean forcible, final User user) throws IOException {
     checkInitialized();
     this.service.submit(new DispatchMergingRegionHandler(this,
-      this.catalogJanitorChore, region_a, region_b, forcible));
+      this.catalogJanitorChore, region_a, region_b, forcible, user));
   }
 
   void move(final byte[] encodedRegionName,
       final byte[] destServerName) throws HBaseIOException {
     RegionState regionState = assignmentManager.getRegionStates().
       getRegionState(Bytes.toString(encodedRegionName));
-    if (regionState == null) {
+
+    HRegionInfo hri;
+    if (regionState != null) {
+      hri = regionState.getRegion();
+    } else {
       throw new UnknownRegionException(Bytes.toStringBinary(encodedRegionName));
     }
 
-    HRegionInfo hri = regionState.getRegion();
     ServerName dest;
     if (destServerName == null || destServerName.length == 0) {
       LOG.info("Passed destination servername is null/empty so " +
@@ -1402,7 +1427,12 @@ public class HMaster extends HRegionServer implements MasterServices {
         return;
       }
     } else {
-      dest = ServerName.valueOf(Bytes.toString(destServerName));
+      ServerName candidate = ServerName.valueOf(Bytes.toString(destServerName));
+      dest = balancer.randomAssignment(hri, Lists.newArrayList(candidate));
+      if (dest == null) {
+        LOG.debug("Unable to determine a plan to assign " + hri);
+        return;
+      }
       if (dest.equals(serverName) && balancer instanceof BaseLoadBalancer
           && !((BaseLoadBalancer)balancer).shouldBeOnMaster(hri)) {
         // To avoid unnecessary region moving later by balancer. Don't put user
@@ -1465,7 +1495,6 @@ public class HMaster extends HRegionServer implements MasterServices {
     HRegionInfo[] newRegions = ModifyRegionUtils.createHRegionInfos(hTableDescriptor, splitKeys);
     checkInitialized();
     sanityCheckTableDescriptor(hTableDescriptor);
-
     if (cpHost != null) {
       cpHost.preCreateTable(hTableDescriptor, newRegions);
     }
@@ -2158,6 +2187,10 @@ public class HMaster extends HRegionServer implements MasterServices {
     return procedureStore != null ? procedureStore.getActiveLogs().size() : 0;
   }
 
+  public WALProcedureStore getWalProcedureStore() {
+    return procedureStore;
+  }
+
   public int getRegionServerInfoPort(final ServerName sn) {
     RegionServerInfo info = this.regionServerTracker.getRegionServerInfo(sn);
     if (info == null || info.getInfoPort() == 0) {
@@ -2357,7 +2390,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     }
     return regionStates.getAverageLoad();
   }
-  
+
   /*
    * @return the count of region split plans executed
    */
@@ -2427,11 +2460,17 @@ public class HMaster extends HRegionServer implements MasterServices {
   }
 
   /**
-   * Exposed for TESTING!
    * @return the underlying snapshot manager
    */
-  public SnapshotManager getSnapshotManagerForTesting() {
+  public SnapshotManager getSnapshotManager() {
     return this.snapshotManager;
+  }
+
+  /**
+   * @return the underlying MasterProcedureManagerHost
+   */
+  public MasterProcedureManagerHost getMasterProcedureManagerHost() {
+    return mpmHost;
   }
 
   @Override
@@ -2778,6 +2817,20 @@ public class HMaster extends HRegionServer implements MasterServices {
     return null == regionNormalizerTracker? false: regionNormalizerTracker.isNormalizerOn();
   }
 
+
+  /**
+   * Queries the state of the {@link SplitOrMergeTracker}. If it is not initialized,
+   * false is returned. If switchType is illegal, false will return.
+   * @param switchType see {@link org.apache.hadoop.hbase.client.Admin.MasterSwitchType}
+   * @return The state of the switch
+   */
+  public boolean isSplitOrMergeEnabled(Admin.MasterSwitchType switchType) {
+    if (null == splitOrMergeTracker) {
+      return false;
+    }
+    return splitOrMergeTracker.isSplitOrMergeEnabled(switchType);
+  }
+
   /**
    * Fetch the configured {@link LoadBalancer} class name. If none is set, a default is returned.
    *
@@ -2793,5 +2846,14 @@ public class HMaster extends HRegionServer implements MasterServices {
    */
   public RegionNormalizerTracker getRegionNormalizerTracker() {
     return regionNormalizerTracker;
+  }
+
+  public SplitOrMergeTracker getSplitOrMergeTracker() {
+    return splitOrMergeTracker;
+  }
+
+  @Override
+  public LoadBalancer getLoadBalancer() {
+    return balancer;
   }
 }

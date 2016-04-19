@@ -34,6 +34,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.NavigableMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -92,8 +93,9 @@ import org.mockito.stubbing.Answer;
 public class TestImportExport {
   private static final Log LOG = LogFactory.getLog(TestImportExport.class);
   private static final HBaseTestingUtility UTIL = new HBaseTestingUtility();
-  private static final byte[] ROW1 = Bytes.toBytes("row1");
-  private static final byte[] ROW2 = Bytes.toBytes("row2");
+  private static final byte[] ROW1 = Bytes.toBytesBinary("\\x32row1");
+  private static final byte[] ROW2 = Bytes.toBytesBinary("\\x32row2");
+  private static final byte[] ROW3 = Bytes.toBytesBinary("\\x32row3");
   private static final String FAMILYA_STRING = "a";
   private static final String FAMILYB_STRING = "b";
   private static final byte[] FAMILYA = Bytes.toBytes(FAMILYA_STRING);
@@ -180,9 +182,17 @@ public class TestImportExport {
       p.addColumn(FAMILYA, QUAL, now + 1, QUAL);
       p.addColumn(FAMILYA, QUAL, now + 2, QUAL);
       t.put(p);
+      p = new Put(ROW3);
+      p.addColumn(FAMILYA, QUAL, now, QUAL);
+      p.addColumn(FAMILYA, QUAL, now + 1, QUAL);
+      p.addColumn(FAMILYA, QUAL, now + 2, QUAL);
+      t.put(p);
     }
 
       String[] args = new String[] {
+          // Only export row1 & row2.
+          "-D" + TableInputFormat.SCAN_ROW_START + "=\\x32row1",
+          "-D" + TableInputFormat.SCAN_ROW_STOP + "=\\x32row3",
           EXPORT_TABLE,
           FQ_OUTPUT_DIR,
           "1000", // max number of key versions per key to export
@@ -206,6 +216,9 @@ public class TestImportExport {
         g.setMaxVersions();
         r = t.get(g);
         assertEquals(3, r.size());
+        g = new Get(ROW3);
+        r = t.get(g);
+        assertEquals(0, r.size());
       }
   }
 
@@ -656,9 +669,9 @@ public class TestImportExport {
       Table importTable = UTIL.createTable(TableName.valueOf(importTableName), FAMILYA, 3);
 
       // Register the wal listener for the import table
-      TableWALActionListener walListener = new TableWALActionListener(importTableName);
       HRegionInfo region = UTIL.getHBaseCluster().getRegionServerThreads().get(0).getRegionServer()
           .getOnlineRegions(importTable.getName()).get(0).getRegionInfo();
+      TableWALActionListener walListener = new TableWALActionListener(region);
       WAL wal = UTIL.getMiniHBaseCluster().getRegionServer(0).getWAL(region);
       wal.registerWALActionsListener(walListener);
 
@@ -678,7 +691,7 @@ public class TestImportExport {
       region = UTIL.getHBaseCluster().getRegionServerThreads().get(0).getRegionServer()
           .getOnlineRegions(importTable.getName()).get(0).getRegionInfo();
       wal = UTIL.getMiniHBaseCluster().getRegionServer(0).getWAL(region);
-      walListener = new TableWALActionListener(importTableName);
+      walListener = new TableWALActionListener(region);
       wal.registerWALActionsListener(walListener);
       args = new String[] { importTableName, FQ_OUTPUT_DIR };
       assertTrue(runImport(args));
@@ -695,16 +708,17 @@ public class TestImportExport {
    */
   private static class TableWALActionListener extends WALActionsListener.Base {
 
-    private String tableName;
+    private HRegionInfo regionInfo;
     private boolean isVisited = false;
 
-    public TableWALActionListener(String tableName) {
-      this.tableName = tableName;
+    public TableWALActionListener(HRegionInfo region) {
+      this.regionInfo = region;
     }
 
     @Override
-    public void visitLogEntryBeforeWrite(HTableDescriptor htd, WALKey logKey, WALEdit logEdit) {
-      if (tableName.equalsIgnoreCase(htd.getNameAsString()) && (!logEdit.isMetaEdit())) {
+    public void visitLogEntryBeforeWrite(WALKey logKey, WALEdit logEdit) {
+      if (logKey.getTablename().getNameAsString().equalsIgnoreCase(
+          this.regionInfo.getTable().getNameAsString()) && (!logEdit.isMetaEdit())) {
         isVisited = true;
       }
     }

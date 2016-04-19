@@ -57,7 +57,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -67,9 +66,8 @@ import javax.security.sasl.SaslServer;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.CallQueueTooBigException;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseIOException;
@@ -78,13 +76,16 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.Server;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.Operation;
 import org.apache.hadoop.hbase.client.VersionInfoUtil;
 import org.apache.hadoop.hbase.codec.Codec;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
 import org.apache.hadoop.hbase.exceptions.RegionMovedException;
-import org.apache.hadoop.hbase.io.ByteBufferOutputStream;
 import org.apache.hadoop.hbase.io.BoundedByteBufferPool;
+import org.apache.hadoop.hbase.io.ByteBufferInputStream;
+import org.apache.hadoop.hbase.io.ByteBufferOutputStream;
 import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
 import org.apache.hadoop.hbase.monitoring.TaskMonitor;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
@@ -100,16 +101,17 @@ import org.apache.hadoop.hbase.security.AccessDeniedException;
 import org.apache.hadoop.hbase.security.AuthMethod;
 import org.apache.hadoop.hbase.security.HBasePolicyProvider;
 import org.apache.hadoop.hbase.security.HBaseSaslRpcServer;
-import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.HBaseSaslRpcServer.SaslDigestCallbackHandler;
 import org.apache.hadoop.hbase.security.HBaseSaslRpcServer.SaslGssCallbackHandler;
 import org.apache.hadoop.hbase.security.SaslStatus;
 import org.apache.hadoop.hbase.security.SaslUtil;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.security.token.AuthenticationTokenSecretManager;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Counter;
 import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.io.BytesWritable;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Writable;
@@ -125,12 +127,13 @@ import org.apache.hadoop.security.token.SecretManager;
 import org.apache.hadoop.security.token.SecretManager.InvalidToken;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.util.StringUtils;
-import org.codehaus.jackson.map.ObjectMapper;
 import org.apache.htrace.TraceInfo;
+import org.codehaus.jackson.map.ObjectMapper;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.BlockingService;
 import com.google.protobuf.CodedInputStream;
+import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors.MethodDescriptor;
 import com.google.protobuf.Message;
 import com.google.protobuf.ServiceException;
@@ -185,13 +188,6 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
    */
   private static final int DEFAULT_MAX_CALLQUEUE_SIZE = 1024 * 1024 * 1024;
 
-  private static final String WARN_DELAYED_CALLS = "hbase.ipc.warn.delayedrpc.number";
-
-  private static final int DEFAULT_WARN_DELAYED_CALLS = 1000;
-
-  private final int warnDelayedCalls;
-
-  private AtomicInteger delayedCalls;
   private final IPCUtil ipcUtil;
 
   private static final String AUTH_FAILED_FOR = "Auth failed for ";
@@ -264,15 +260,18 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
 
   protected HBaseRPCErrorHandler errorHandler = null;
 
+  static final String MAX_REQUEST_SIZE = "hbase.ipc.max.request.size";
   private static final String WARN_RESPONSE_TIME = "hbase.ipc.warn.response.time";
   private static final String WARN_RESPONSE_SIZE = "hbase.ipc.warn.response.size";
 
   /** Default value for above params */
+  private static final int DEFAULT_MAX_REQUEST_SIZE = DEFAULT_MAX_CALLQUEUE_SIZE / 4; // 256M
   private static final int DEFAULT_WARN_RESPONSE_TIME = 10000; // milliseconds
   private static final int DEFAULT_WARN_RESPONSE_SIZE = 100 * 1024 * 1024;
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
+  private final int maxRequestSize;
   private final int warnResponseTime;
   private final int warnResponseSize;
   private final Server server;
@@ -290,7 +289,9 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
    * Datastructure that holds all necessary to a method invocation and then afterward, carries
    * the result.
    */
-  class Call implements RpcCallContext {
+  @InterfaceAudience.LimitedPrivate({HBaseInterfaceAudience.COPROC, HBaseInterfaceAudience.PHOENIX})
+  @InterfaceStability.Evolving
+  public class Call implements RpcCallContext {
     protected int id;                             // the client's call id
     protected BlockingService service;
     protected MethodDescriptor md;
@@ -305,10 +306,8 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
      * Chain of buffers to send as response.
      */
     protected BufferChain response;
-    protected boolean delayResponse;
     protected Responder responder;
-    protected boolean delayReturnValue;           // if the return value should be
-                                                  // set at call completion
+
     protected long size;                          // size of current call
     protected boolean isError;
     protected TraceInfo tinfo;
@@ -336,7 +335,6 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
       this.connection = connection;
       this.timestamp = System.currentTimeMillis();
       this.response = null;
-      this.delayResponse = false;
       this.responder = responder;
       this.isError = false;
       this.size = size;
@@ -371,6 +369,14 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
 
     protected RequestHeader getHeader() {
       return this.header;
+    }
+
+    public boolean hasPriority() {
+      return this.header.hasPriority();
+    }
+
+    public int getPriority() {
+      return this.header.getPriority();
     }
 
     /*
@@ -437,14 +443,10 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
         }
         Message header = headerBuilder.build();
 
-        // Organize the response as a set of bytebuffers rather than collect it all together inside
-        // one big byte array; save on allocations.
-        ByteBuffer bbHeader = IPCUtil.getDelimitedMessageAsByteBuffer(header);
-        ByteBuffer bbResult = IPCUtil.getDelimitedMessageAsByteBuffer(result);
-        int totalSize = bbHeader.capacity() + (bbResult == null? 0: bbResult.limit()) +
-          (this.cellBlock == null? 0: this.cellBlock.limit());
-        ByteBuffer bbTotalSize = ByteBuffer.wrap(Bytes.toBytes(totalSize));
-        bc = new BufferChain(bbTotalSize, bbHeader, bbResult, this.cellBlock);
+        byte[] b = createHeaderAndMessageBytes(result, header);
+
+        bc = new BufferChain(ByteBuffer.wrap(b), this.cellBlock);
+
         if (connection.useWrap) {
           bc = wrapWithSasl(bc);
         }
@@ -462,6 +464,44 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
           LOG.warn("Exception while running the Rpc Callback.", e);
         }
       }
+    }
+
+    private byte[] createHeaderAndMessageBytes(Message result, Message header)
+        throws IOException {
+      // Organize the response as a set of bytebuffers rather than collect it all together inside
+      // one big byte array; save on allocations.
+      int headerSerializedSize = 0, resultSerializedSize = 0, headerVintSize = 0,
+          resultVintSize = 0;
+      if (header != null) {
+        headerSerializedSize = header.getSerializedSize();
+        headerVintSize = CodedOutputStream.computeRawVarint32Size(headerSerializedSize);
+      }
+      if (result != null) {
+        resultSerializedSize = result.getSerializedSize();
+        resultVintSize = CodedOutputStream.computeRawVarint32Size(resultSerializedSize);
+      }
+      // calculate the total size
+      int totalSize = headerSerializedSize + headerVintSize
+          + (resultSerializedSize + resultVintSize)
+          + (this.cellBlock == null ? 0 : this.cellBlock.limit());
+      // The byte[] should also hold the totalSize of the header, message and the cellblock
+      byte[] b = new byte[headerSerializedSize + headerVintSize + resultSerializedSize
+          + resultVintSize + Bytes.SIZEOF_INT];
+      // The RpcClient expects the int to be in a format that code be decoded by
+      // the DataInputStream#readInt(). Hence going with the Bytes.toBytes(int)
+      // form of writing int.
+      Bytes.putInt(b, 0, totalSize);
+      CodedOutputStream cos = CodedOutputStream.newInstance(b, Bytes.SIZEOF_INT,
+          b.length - Bytes.SIZEOF_INT);
+      if (header != null) {
+        cos.writeMessageNoTag(header);
+      }
+      if (result != null) {
+        cos.writeMessageNoTag(result);
+      }
+      cos.flush();
+      cos.checkNoSpaceLeft();
+      return b;
     }
 
     private BufferChain wrapWithSasl(BufferChain bc)
@@ -487,51 +527,6 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     }
 
     @Override
-    public synchronized void endDelay(Object result) throws IOException {
-      assert this.delayResponse;
-      assert this.delayReturnValue || result == null;
-      this.delayResponse = false;
-      delayedCalls.decrementAndGet();
-      if (this.delayReturnValue) {
-        this.setResponse(result, null, null, null);
-      }
-      this.responder.doRespond(this);
-    }
-
-    @Override
-    public synchronized void endDelay() throws IOException {
-      this.endDelay(null);
-    }
-
-    @Override
-    public synchronized void startDelay(boolean delayReturnValue) {
-      assert !this.delayResponse;
-      this.delayResponse = true;
-      this.delayReturnValue = delayReturnValue;
-      int numDelayed = delayedCalls.incrementAndGet();
-      if (numDelayed > warnDelayedCalls) {
-        LOG.warn("Too many delayed calls: limit " + warnDelayedCalls + " current " + numDelayed);
-      }
-    }
-
-    @Override
-    public synchronized void endDelayThrowing(Throwable t) throws IOException {
-      this.setResponse(null, null, t, StringUtils.stringifyException(t));
-      this.delayResponse = false;
-      this.sendResponseIfReady();
-    }
-
-    @Override
-    public synchronized boolean isDelayed() {
-      return this.delayResponse;
-    }
-
-    @Override
-    public synchronized boolean isReturnValueDelayed() {
-      return this.delayReturnValue;
-    }
-
-    @Override
     public boolean isClientCellBlockSupported() {
       return this.connection != null && this.connection.codec != null;
     }
@@ -549,10 +544,12 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
       return this.size;
     }
 
+    @Override
     public long getResponseCellSize() {
       return responseCellSize;
     }
 
+    @Override
     public void incrementResponseCellSize(long cellSize) {
       responseCellSize += cellSize;
     }
@@ -567,15 +564,8 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
       responseBlockSize += blockSize;
     }
 
-    /**
-     * If we have a response, and delay is not set, then respond
-     * immediately.  Otherwise, do not respond to client.  This is
-     * called by the RPC code in the context of the Handler thread.
-     */
     public synchronized void sendResponseIfReady() throws IOException {
-      if (!this.delayResponse) {
-        this.responder.doRespond(this);
-      }
+      this.responder.doRespond(this);
     }
 
     public UserGroupInformation getRemoteUser() {
@@ -648,7 +638,8 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
       readPool = Executors.newFixedThreadPool(readThreads,
         new ThreadFactoryBuilder().setNameFormat(
           "RpcServer.reader=%d,bindAddress=" + bindAddress.getHostName() +
-          ",port=" + port).setDaemon(true).build());
+          ",port=" + port).setDaemon(true)
+        .setUncaughtExceptionHandler(Threads.LOGGING_EXCEPTION_HANDLER).build());
       for (int i = 0; i < readThreads; ++i) {
         Reader reader = new Reader();
         readers[i] = reader;
@@ -925,7 +916,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
         throw ieo;
       } catch (Exception e) {
         if (LOG.isDebugEnabled()) {
-          LOG.debug(getName() + ": Caught exception while reading:" + e.getMessage());
+          LOG.debug(getName() + ": Caught exception while reading:", e);
         }
         count = -1; //so that the (count < 0) block is executed
       }
@@ -971,6 +962,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     Responder() throws IOException {
       this.setName("RpcServer.responder");
       this.setDaemon(true);
+      this.setUncaughtExceptionHandler(Threads.LOGGING_EXCEPTION_HANDLER);
       writeSelector = Selector.open(); // create a selector
     }
 
@@ -1237,13 +1229,6 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     }
   }
 
-  @SuppressWarnings("serial")
-  public static class CallQueueTooBigException extends IOException {
-    CallQueueTooBigException() {
-      super();
-    }
-  }
-
   /** Reads calls from a connection and queues them for handling. */
   @edu.umd.cs.findbugs.annotations.SuppressWarnings(
       value="VO_VOLATILE_INCREMENT",
@@ -1267,6 +1252,7 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     protected String hostAddress;
     protected int remotePort;
     ConnectionHeader connectionHeader;
+
     /**
      * Codec the client asked use.
      */
@@ -1395,17 +1381,18 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
       return authorizedUgi;
     }
 
-    private void saslReadAndProcess(byte[] saslToken) throws IOException,
+    private void saslReadAndProcess(ByteBuffer saslToken) throws IOException,
         InterruptedException {
       if (saslContextEstablished) {
         if (LOG.isTraceEnabled())
-          LOG.trace("Have read input token of size " + saslToken.length
+          LOG.trace("Have read input token of size " + saslToken.limit()
               + " for processing by saslServer.unwrap()");
 
         if (!useWrap) {
           processOneRpc(saslToken);
         } else {
-          byte [] plaintextData = saslServer.unwrap(saslToken, 0, saslToken.length);
+          byte[] b = saslToken.array();
+          byte [] plaintextData = saslServer.unwrap(b, saslToken.position(), saslToken.limit());
           processUnwrappedData(plaintextData);
         }
       } else {
@@ -1454,10 +1441,10 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
             }
           }
           if (LOG.isDebugEnabled()) {
-            LOG.debug("Have read input token of size " + saslToken.length
+            LOG.debug("Have read input token of size " + saslToken.limit()
                 + " for processing by saslServer.evaluateResponse()");
           }
-          replyToken = saslServer.evaluateResponse(saslToken);
+          replyToken = saslServer.evaluateResponse(saslToken.array());
         } catch (IOException e) {
           IOException sendToClient = e;
           Throwable cause = e;
@@ -1650,9 +1637,16 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
           }
         }
         if (dataLength < 0) { // A data length of zero is legal.
-          throw new IllegalArgumentException("Unexpected data length "
+          throw new DoNotRetryIOException("Unexpected data length "
               + dataLength + "!! from " + getHostAddress());
         }
+
+        if (dataLength > maxRequestSize) {
+          throw new DoNotRetryIOException("RPC data length of " + dataLength + " received from "
+              + getHostAddress() + " is greater than max allowed " + maxRequestSize + ". Set \""
+              + MAX_REQUEST_SIZE + "\" on server to override this limit (not recommended)");
+        }
+
         data = ByteBuffer.allocate(dataLength);
 
         // Increment the rpc count. This counter will be decreased when we write
@@ -1682,9 +1676,9 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
         }
 
         if (useSasl) {
-          saslReadAndProcess(data.array());
+          saslReadAndProcess(data);
         } else {
-          processOneRpc(data.array());
+          processOneRpc(data);
         }
 
       } finally {
@@ -1713,8 +1707,9 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     }
 
     // Reads the connection header following version
-    private void processConnectionHeader(byte[] buf) throws IOException {
-      this.connectionHeader = ConnectionHeader.parseFrom(buf);
+    private void processConnectionHeader(ByteBuffer buf) throws IOException {
+      this.connectionHeader = ConnectionHeader.parseFrom(
+        new ByteBufferInputStream(buf));
       String serviceName = connectionHeader.getServiceName();
       if (serviceName == null) throw new EmptyServiceNameException();
       this.service = getService(services, serviceName);
@@ -1828,13 +1823,14 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
         if (unwrappedData.remaining() == 0) {
           unwrappedDataLengthBuffer.clear();
           unwrappedData.flip();
-          processOneRpc(unwrappedData.array());
+          processOneRpc(unwrappedData);
           unwrappedData = null;
         }
       }
     }
 
-    private void processOneRpc(byte[] buf) throws IOException, InterruptedException {
+
+    private void processOneRpc(ByteBuffer buf) throws IOException, InterruptedException {
       if (connectionHeaderRead) {
         processRequest(buf);
       } else {
@@ -1856,16 +1852,16 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
      * @throws IOException
      * @throws InterruptedException
      */
-    protected void processRequest(byte[] buf) throws IOException, InterruptedException {
-      long totalRequestSize = buf.length;
+    protected void processRequest(ByteBuffer buf) throws IOException, InterruptedException {
+      long totalRequestSize = buf.limit();
       int offset = 0;
       // Here we read in the header.  We avoid having pb
       // do its default 4k allocation for CodedInputStream.  We force it to use backing array.
-      CodedInputStream cis = CodedInputStream.newInstance(buf, offset, buf.length);
+      CodedInputStream cis = CodedInputStream.newInstance(buf.array(), offset, buf.limit());
       int headerSize = cis.readRawVarint32();
       offset = cis.getTotalBytesRead();
       Message.Builder builder = RequestHeader.newBuilder();
-      ProtobufUtil.mergeFrom(builder, buf, offset, headerSize);
+      ProtobufUtil.mergeFrom(builder, cis, headerSize);
       RequestHeader header = (RequestHeader) builder.build();
       offset += headerSize;
       int id = header.getCallId();
@@ -1896,19 +1892,18 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
           md = this.service.getDescriptorForType().findMethodByName(header.getMethodName());
           if (md == null) throw new UnsupportedOperationException(header.getMethodName());
           builder = this.service.getRequestPrototype(md).newBuilderForType();
-          // To read the varint, I need an inputstream; might as well be a CIS.
-          cis = CodedInputStream.newInstance(buf, offset, buf.length);
+          cis.resetSizeCounter();
           int paramSize = cis.readRawVarint32();
           offset += cis.getTotalBytesRead();
           if (builder != null) {
-            ProtobufUtil.mergeFrom(builder, buf, offset, paramSize);
+            ProtobufUtil.mergeFrom(builder, cis, paramSize);
             param = builder.build();
           }
           offset += paramSize;
         }
         if (header.hasCellBlockMeta()) {
-          cellScanner = ipcUtil.createCellScanner(this.codec, this.compressionCodec,
-            buf, offset, buf.length);
+          buf.position(offset);
+          cellScanner = ipcUtil.createCellScannerReusingBuffers(this.codec, this.compressionCodec, buf);
         }
       } catch (Throwable t) {
         InetSocketAddress address = getListenerAddress();
@@ -1942,7 +1937,18 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
           : null;
       Call call = new Call(id, this.service, md, header, param, cellScanner, this, responder,
               totalRequestSize, traceInfo, this.addr);
-      scheduler.dispatch(new CallRunner(RpcServer.this, call));
+
+      if (!scheduler.dispatch(new CallRunner(RpcServer.this, call))) {
+        callQueueSize.add(-1 * call.getSize());
+
+        ByteArrayOutputStream responseBuffer = new ByteArrayOutputStream();
+        metrics.exception(CALL_QUEUE_TOO_BIG_EXCEPTION);
+        InetSocketAddress address = getListenerAddress();
+        setupResponse(responseBuffer, call, CALL_QUEUE_TOO_BIG_EXCEPTION,
+            "Call queue is full on " + (address != null ? address : "(channel closed)") +
+                ", too many items queued ?");
+        responder.doRespond(call);
+      }
     }
 
     private boolean authorizeConnection() throws IOException {
@@ -1975,11 +1981,21 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
       data = null;
       if (!channel.isOpen())
         return;
-      try {socket.shutdownOutput();} catch(Exception ignored) {} // FindBugs DE_MIGHT_IGNORE
+      try {socket.shutdownOutput();} catch(Exception ignored) {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Ignored exception", ignored);
+        }
+      }
       if (channel.isOpen()) {
         try {channel.close();} catch(Exception ignored) {}
       }
-      try {socket.close();} catch(Exception ignored) {}
+      try {
+        socket.close();
+      } catch(Exception ignored) {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Ignored exception", ignored);
+        }
+      }
     }
 
     private UserGroupInformation createUser(ConnectionHeader head) {
@@ -2074,6 +2090,8 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     this.warnResponseTime = conf.getInt(WARN_RESPONSE_TIME, DEFAULT_WARN_RESPONSE_TIME);
     this.warnResponseSize = conf.getInt(WARN_RESPONSE_SIZE, DEFAULT_WARN_RESPONSE_SIZE);
 
+    this.maxRequestSize = conf.getInt(MAX_REQUEST_SIZE, DEFAULT_MAX_REQUEST_SIZE);
+
     // Start the listener here and let it bind to the port
     listener = new Listener(name);
     this.port = listener.getAddress().getPort();
@@ -2082,8 +2100,6 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
     this.tcpNoDelay = conf.getBoolean("hbase.ipc.server.tcpnodelay", true);
     this.tcpKeepAlive = conf.getBoolean("hbase.ipc.server.tcpkeepalive", true);
 
-    this.warnDelayedCalls = conf.getInt(WARN_DELAYED_CALLS, DEFAULT_WARN_DELAYED_CALLS);
-    this.delayedCalls = new AtomicInteger(0);
     this.ipcUtil = new IPCUtil(conf);
 
 
@@ -2104,6 +2120,9 @@ public class RpcServer implements RpcServerInterface, ConfigurationObserver {
   @Override
   public void onConfigurationChange(Configuration newConf) {
     initReconfigurable(newConf);
+    if (scheduler instanceof ConfigurationObserver) {
+      ((ConfigurationObserver)scheduler).onConfigurationChange(newConf);
+    }
   }
 
   private void initReconfigurable(Configuration confToLoad) {

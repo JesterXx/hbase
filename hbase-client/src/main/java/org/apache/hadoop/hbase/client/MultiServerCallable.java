@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CellScannable;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
@@ -31,7 +30,6 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.ipc.PayloadCarryingRpcController;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.RequestConverter;
@@ -51,21 +49,19 @@ import com.google.protobuf.ServiceException;
  * {@link RegionServerCallable} that goes against multiple regions.
  * @param <R>
  */
-class MultiServerCallable<R> extends RegionServerCallable<MultiResponse> implements Cancellable {
+class MultiServerCallable<R> extends PayloadCarryingServerCallable<MultiResponse> {
   private final MultiAction<R> multiAction;
   private final boolean cellBlock;
-  private final PayloadCarryingRpcController controller;
 
   MultiServerCallable(final ClusterConnection connection, final TableName tableName,
       final ServerName location, RpcControllerFactory rpcFactory, final MultiAction<R> multi) {
-    super(connection, tableName, null);
+    super(connection, tableName, null, rpcFactory);
     this.multiAction = multi;
     // RegionServerCallable has HRegionLocation field, but this is a multi-region request.
     // Using region info from parent HRegionLocation would be a mistake for this class; so
     // we will store the server here, and throw if someone tries to obtain location/regioninfo.
     this.location = new HRegionLocation(null, location);
     this.cellBlock = isCellBlock();
-    controller = rpcFactory.newController();
   }
 
   @Override
@@ -134,16 +130,6 @@ class MultiServerCallable<R> extends RegionServerCallable<MultiResponse> impleme
     return ResponseConverter.getResults(requestProto, responseProto, controller.cellScanner());
   }
 
-  @Override
-  public void cancel() {
-    controller.startCancel();
-  }
-
-  @Override
-  public boolean isCancelled() {
-    return controller.isCanceled();
-  }
-
   /**
    * @return True if we should send data in cellblocks.  This is an expensive call.  Cache the
    * result if you can rather than call each time.
@@ -152,11 +138,8 @@ class MultiServerCallable<R> extends RegionServerCallable<MultiResponse> impleme
     // This is not exact -- the configuration could have changed on us after connection was set up
     // but it will do for now.
     HConnection connection = getConnection();
-    if (connection == null) return true; // Default is to do cellblocks.
-    Configuration configuration = connection.getConfiguration();
-    if (configuration == null) return true;
-    String codec = configuration.get(HConstants.RPC_CODEC_CONF_KEY, "");
-    return codec != null && codec.length() > 0;
+    if (!(connection instanceof ClusterConnection)) return true; // Default is to do cellblocks.
+    return ((ClusterConnection) connection).hasCellBlockSupport();
   }
 
   @Override

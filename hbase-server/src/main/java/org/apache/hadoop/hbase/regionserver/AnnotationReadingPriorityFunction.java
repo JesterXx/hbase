@@ -35,7 +35,6 @@ import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoReque
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetStoreFileRequest;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.SplitRegionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.GetRequest;
-import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MultiRequest;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutateRequest;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.ScanRequest;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier;
@@ -44,7 +43,6 @@ import org.apache.hadoop.hbase.protobuf.generated.RPCProtos.RequestHeader;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.Message;
 import com.google.protobuf.TextFormat;
-import org.apache.hadoop.hbase.security.Superusers;
 import org.apache.hadoop.hbase.security.User;
 
 /**
@@ -177,19 +175,6 @@ public class AnnotationReadingPriorityFunction implements PriorityFunction {
     if (priorityByAnnotation >= 0) {
       return priorityByAnnotation;
     }
-
-    // all requests executed by super users have high QoS
-    try {
-      if (Superusers.isSuperUser(user)) {
-        return HConstants.ADMIN_QOS;
-      }
-    } catch (IllegalStateException ex) {
-      // Not good throwing an exception out of here, a runtime anyways.  Let the query go into the
-      // server and have it throw the exception if still an issue.  Just mark it normal priority.
-      if (LOG.isTraceEnabled()) LOG.trace("Marking normal priority after getting exception=" + ex);
-      return HConstants.NORMAL_QOS;
-    }
-
     return getBasePriority(header, param);
   }
 
@@ -217,10 +202,10 @@ public class AnnotationReadingPriorityFunction implements PriorityFunction {
     if (param == null) {
       return HConstants.NORMAL_QOS;
     }
-    if (param instanceof MultiRequest) {
-      // The multi call has its priority set in the header.  All calls should work this way but
-      // only this one has been converted so far.  No priority == NORMAL_QOS.
-      return header.hasPriority()? header.getPriority(): HConstants.NORMAL_QOS;
+
+    // Trust the client-set priorities if set
+    if (header.hasPriority()) {
+      return header.getPriority();
     }
 
     String cls = param.getClass().getName();

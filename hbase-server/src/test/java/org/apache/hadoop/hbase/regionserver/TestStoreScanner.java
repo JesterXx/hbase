@@ -20,6 +20,7 @@
 package org.apache.hadoop.hbase.regionserver;
 
 import static org.apache.hadoop.hbase.regionserver.KeyValueScanFixture.scanFixture;
+import static org.junit.Assert.*;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -27,38 +28,143 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import junit.framework.TestCase;
-
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.CategoryBasedTimeout;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeepDeletedCells;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueTestUtil;
+import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdge;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManagerTestHelper;
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.rules.TestName;
+import org.junit.rules.TestRule;
 
 // Can't be small as it plays with EnvironmentEdgeManager
 @Category({RegionServerTests.class, MediumTests.class})
-public class TestStoreScanner extends TestCase {
+public class TestStoreScanner {
+  private static final Log LOG = LogFactory.getLog(TestStoreScanner.class);
+  @Rule public TestName name = new TestName();
+  @Rule public final TestRule timeout = CategoryBasedTimeout.builder().withTimeout(this.getClass()).
+      withLookingForStuckThread(true).build();
   private static final String CF_STR = "cf";
-  final byte [] CF = Bytes.toBytes(CF_STR);
+  private static final byte [] CF = Bytes.toBytes(CF_STR);
   static Configuration CONF = HBaseConfiguration.create();
   private ScanInfo scanInfo = new ScanInfo(CONF, CF, 0, Integer.MAX_VALUE,
       Long.MAX_VALUE, KeepDeletedCells.FALSE, 0, CellComparator.COMPARATOR);
   private ScanType scanType = ScanType.USER_SCAN;
 
-  public void setUp() throws Exception {
-    super.setUp();
-  }
+  /**
+   * From here on down, we have a bunch of defines and specific CELL_GRID of Cells. The
+   * CELL_GRID then has a Scanner that can fake out 'block' transitions. All this elaborate
+   * setup is for tests that ensure we don't overread, and that the
+   * {@link StoreScanner#optimize(org.apache.hadoop.hbase.regionserver.ScanQueryMatcher.MatchCode,
+   * Cell)} is not overly enthusiastic.
+   */
+  private static final byte [] ZERO = new byte [] {'0'};
+  private static final byte [] ZERO_POINT_ZERO = new byte [] {'0', '.', '0'};
+  private static final byte [] ONE = new byte [] {'1'};
+  private static final byte [] TWO = new byte [] {'2'};
+  private static final byte [] TWO_POINT_TWO = new byte [] {'2', '.', '2'};
+  private static final byte [] THREE = new byte [] {'3'};
+  private static final byte [] FOUR = new byte [] {'4'};
+  private static final byte [] FIVE = new byte [] {'5'};
+  private static final byte [] VALUE = new byte [] {'v'};
+  private static final int CELL_GRID_BLOCK2_BOUNDARY = 4;
+  private static final int CELL_GRID_BLOCK3_BOUNDARY = 11;
+  private static final int CELL_GRID_BLOCK4_BOUNDARY = 15;
+  private static final int CELL_GRID_BLOCK5_BOUNDARY = 19;
+
+  /**
+   * Five rows by four columns distinguished by column qualifier (column qualifier is one of the
+   * four rows... ONE, TWO, etc.). Exceptions are a weird row after TWO; it is TWO_POINT_TWO.
+   * And then row FOUR has five columns finishing w/ row FIVE having a single column.
+   * We will use this to test scan does the right thing as it
+   * we do Gets, StoreScanner#optimize, and what we do on (faked) block boundaries.
+   */
+  private static final Cell [] CELL_GRID = new Cell [] {
+    CellUtil.createCell(ONE, CF, ONE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(ONE, CF, TWO, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(ONE, CF, THREE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(ONE, CF, FOUR, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    // Offset 4 CELL_GRID_BLOCK2_BOUNDARY
+    CellUtil.createCell(TWO, CF, ONE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(TWO, CF, TWO, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(TWO, CF, THREE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(TWO, CF, FOUR, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(TWO_POINT_TWO, CF, ZERO, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(TWO_POINT_TWO, CF, ZERO_POINT_ZERO, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(TWO_POINT_TWO, CF, FIVE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    // Offset 11! CELL_GRID_BLOCK3_BOUNDARY
+    CellUtil.createCell(THREE, CF, ONE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(THREE, CF, TWO, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(THREE, CF, THREE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(THREE, CF, FOUR, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    // Offset 15 CELL_GRID_BLOCK4_BOUNDARY
+    CellUtil.createCell(FOUR, CF, ONE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(FOUR, CF, TWO, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(FOUR, CF, THREE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(FOUR, CF, FOUR, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    // Offset 19 CELL_GRID_BLOCK5_BOUNDARY
+    CellUtil.createCell(FOUR, CF, FIVE, 1L, KeyValue.Type.Put.getCode(), VALUE),
+    CellUtil.createCell(FIVE, CF, ZERO, 1L, KeyValue.Type.Put.getCode(), VALUE),
+  };
+
+  /**
+   * A StoreScanner for our CELL_GRID above. Fakes the block transitions. Does counts of
+   * calls to optimize and counts of when optimize actually did an optimize.
+   */
+  private static class CellGridStoreScanner extends StoreScanner {
+    // Count of how often optimize is called and of how often it does an optimize.
+    final AtomicInteger count = new AtomicInteger(0);
+    final AtomicInteger optimization = new AtomicInteger(0);
+
+    CellGridStoreScanner(final Scan scan, ScanInfo scanInfo, ScanType scanType)
+    throws IOException {
+      super(scan, scanInfo, scanType, scan.getFamilyMap().get(CF),
+        Arrays.<KeyValueScanner>asList(
+          new KeyValueScanner[] {new KeyValueScanFixture(CellComparator.COMPARATOR, CELL_GRID)}));
+    }
+
+    protected ScanQueryMatcher.MatchCode optimize(ScanQueryMatcher.MatchCode qcode, Cell cell) {
+      count.incrementAndGet();
+      ScanQueryMatcher.MatchCode after = super.optimize(qcode, cell);
+      LOG.info("Cell=" + cell + ", nextIndex=" + CellUtil.toString(getNextIndexedKey(), false) +
+          ", before=" + qcode + ", after=" + after);
+      if (qcode != after) {
+        optimization.incrementAndGet();
+      }
+      return after;
+    };
+
+    @Override
+    public Cell getNextIndexedKey() {
+      // Fake block boundaries by having index of next block change as we go through scan.
+      return count.get() > CELL_GRID_BLOCK4_BOUNDARY?
+          CellUtil.createFirstOnRow(CELL_GRID[CELL_GRID_BLOCK5_BOUNDARY]):
+            count.get() > CELL_GRID_BLOCK3_BOUNDARY?
+                CellUtil.createFirstOnRow(CELL_GRID[CELL_GRID_BLOCK4_BOUNDARY]):
+                  count.get() > CELL_GRID_BLOCK2_BOUNDARY?
+                      CellUtil.createFirstOnRow(CELL_GRID[CELL_GRID_BLOCK3_BOUNDARY]):
+                        CellUtil.createFirstOnRow(CELL_GRID[CELL_GRID_BLOCK2_BOUNDARY]);
+    }
+  };
 
   /*
    * Test utility for building a NavigableSet for scanners.
@@ -74,6 +180,146 @@ public class TestStoreScanner extends TestCase {
     return cols;
   }
 
+  @Test
+  public void testFullRowGetDoesNotOverreadWhenRowInsideOneBlock() throws IOException {
+    // Do a Get against row two. Row two is inside a block that starts with row TWO but ends with
+    // row TWO_POINT_TWO. We should read one block only.
+    Get get = new Get(TWO);
+    Scan scan = new Scan(get);
+    CellGridStoreScanner scanner = new CellGridStoreScanner(scan, this.scanInfo, this.scanType);
+    try {
+      List<Cell> results = new ArrayList<Cell>();
+      while (scanner.next(results)) {
+        continue;
+      }
+      // Should be four results of column 1 (though there are 5 rows in the CELL_GRID -- the
+      // TWO_POINT_TWO row does not have a a column ONE.
+      Assert.assertEquals(4, results.size());
+      // We should have gone the optimize route 5 times totally... an INCLUDE for the four cells
+      // in the row plus the DONE on the end.
+      Assert.assertEquals(5, scanner.count.get());
+      // For a full row Get, there should be no opportunity for scanner optimization.
+      Assert.assertEquals(0, scanner.optimization.get());
+    } finally {
+      scanner.close();
+    }
+  }
+
+  @Test
+  public void testFullRowSpansBlocks() throws IOException {
+    // Do a Get against row FOUR. It spans two blocks.
+    Get get = new Get(FOUR);
+    Scan scan = new Scan(get);
+    CellGridStoreScanner scanner = new CellGridStoreScanner(scan, this.scanInfo, this.scanType);
+    try {
+      List<Cell> results = new ArrayList<Cell>();
+      while (scanner.next(results)) {
+        continue;
+      }
+      // Should be four results of column 1 (though there are 5 rows in the CELL_GRID -- the
+      // TWO_POINT_TWO row does not have a a column ONE.
+      Assert.assertEquals(5, results.size());
+      // We should have gone the optimize route 6 times totally... an INCLUDE for the five cells
+      // in the row plus the DONE on the end.
+      Assert.assertEquals(6, scanner.count.get());
+      // For a full row Get, there should be no opportunity for scanner optimization.
+      Assert.assertEquals(0, scanner.optimization.get());
+    } finally {
+      scanner.close();
+    }
+  }
+
+  /**
+   * Test optimize in StoreScanner. Test that we skip to the next 'block' when we it makes sense
+   * reading the block 'index'.
+   * @throws IOException
+   */
+  @Test
+  public void testOptimize() throws IOException {
+    Scan scan = new Scan();
+    // A scan that just gets the first qualifier on each row of the CELL_GRID
+    scan.addColumn(CF, ONE);
+    CellGridStoreScanner scanner = new CellGridStoreScanner(scan, this.scanInfo, this.scanType);
+    try {
+      List<Cell> results = new ArrayList<Cell>();
+      while (scanner.next(results)) {
+        continue;
+      }
+      // Should be four results of column 1 (though there are 5 rows in the CELL_GRID -- the
+      // TWO_POINT_TWO row does not have a a column ONE.
+      Assert.assertEquals(4, results.size());
+      for (Cell cell: results) {
+        assertTrue(Bytes.equals(ONE, 0, ONE.length,
+            cell.getQualifierArray(), cell.getQualifierOffset(), cell.getQualifierLength()));
+      }
+      Assert.assertTrue("Optimize should do some optimizations", scanner.optimization.get() > 0);
+    } finally {
+      scanner.close();
+    }
+  }
+
+  /**
+   * Ensure the optimize Scan method in StoreScanner does not get in the way of a Get doing minimum
+   * work... seeking to start of block and then SKIPPING until we find the wanted Cell.
+   * This 'simple' scenario mimics case of all Cells fitting inside a single HFileBlock.
+   * See HBASE-15392. This test is a little cryptic. Takes a bit of staring to figure what it up to.
+   * @throws IOException
+   */
+  @Test
+  public void testOptimizeAndGet() throws IOException {
+    // First test a Get of two columns in the row R2. Every Get is a Scan. Get columns named
+    // R2 and R3.
+    Get get = new Get(TWO);
+    get.addColumn(CF, TWO);
+    get.addColumn(CF, THREE);
+    Scan scan = new Scan(get);
+    CellGridStoreScanner scanner = new CellGridStoreScanner(scan, this.scanInfo, this.scanType);
+    try {
+      List<Cell> results = new ArrayList<Cell>();
+      // For a Get there should be no more next's after the first call.
+      Assert.assertEquals(false, scanner.next(results));
+      // Should be one result only.
+      Assert.assertEquals(2, results.size());
+      // And we should have gone through optimize twice only.
+      Assert.assertEquals("First qcode is SEEK_NEXT_COL and second INCLUDE_AND_SEEK_NEXT_ROW",
+        3, scanner.count.get());
+    } finally {
+      scanner.close();
+    }
+  }
+
+  /**
+   * Ensure that optimize does not cause the Get to do more seeking than required. Optimize
+   * (see HBASE-15392) was causing us to seek all Cells in a block when a Get Scan if the next block
+   * index/start key was a different row to the current one. A bug. We'd call next too often
+   * because we had to exhaust all Cells in the current row making us load the next block just to
+   * discard what we read there. This test is a little cryptic. Takes a bit of staring to figure
+   * what it up to.
+   * @throws IOException
+   */
+  @Test
+  public void testOptimizeAndGetWithFakedNextBlockIndexStart() throws IOException {
+    // First test a Get of second column in the row R2. Every Get is a Scan. Second column has a
+    // qualifier of R2.
+    Get get = new Get(THREE);
+    get.addColumn(CF, TWO);
+    Scan scan = new Scan(get);
+    CellGridStoreScanner scanner = new CellGridStoreScanner(scan, this.scanInfo, this.scanType);
+    try {
+      List<Cell> results = new ArrayList<Cell>();
+      // For a Get there should be no more next's after the first call.
+      Assert.assertEquals(false, scanner.next(results));
+      // Should be one result only.
+      Assert.assertEquals(1, results.size());
+      // And we should have gone through optimize twice only.
+      Assert.assertEquals("First qcode is SEEK_NEXT_COL and second INCLUDE_AND_SEEK_NEXT_ROW",
+        2, scanner.count.get());
+    } finally {
+      scanner.close();
+    }
+  }
+
+  @Test
   public void testScanTimeRange() throws IOException {
     String r1 = "R1";
     // returns only 1 of these 2 even though same timestamp
@@ -91,42 +337,48 @@ public class TestStoreScanner extends TestCase {
     Scan scanSpec = new Scan(Bytes.toBytes(r1));
     scanSpec.setTimeRange(0, 6);
     scanSpec.setMaxVersions();
-    StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
-        getCols("a"), scanners);
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(5, results.size());
-    assertEquals(kvs[kvs.length - 1], results.get(0));
+    List<Cell> results = null;
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(5, results.size());
+      Assert.assertEquals(kvs[kvs.length - 1], results.get(0));
+    }
     // Scan limited TimeRange
     scanSpec = new Scan(Bytes.toBytes(r1));
     scanSpec.setTimeRange(1, 3);
     scanSpec.setMaxVersions();
-    scan = new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"),
-        scanners);
-    results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(2, results.size());
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(2, results.size());
+    }
     // Another range.
     scanSpec = new Scan(Bytes.toBytes(r1));
     scanSpec.setTimeRange(5, 10);
     scanSpec.setMaxVersions();
-    scan = new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"),
-        scanners);
-    results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(1, results.size());
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(1, results.size());
+    }
     // See how TimeRange and Versions interact.
     // Another range.
     scanSpec = new Scan(Bytes.toBytes(r1));
     scanSpec.setTimeRange(0, 10);
     scanSpec.setMaxVersions(3);
-    scan = new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"),
-        scanners);
-    results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(3, results.size());
+    try (StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"),
+        scanners)) {
+      results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(3, results.size());
+    }
   }
 
+  @Test
   public void testScanSameTimestamp() throws IOException {
     // returns only 1 of these 2 even though same timestamp
     KeyValue [] kvs = new KeyValue[] {
@@ -140,13 +392,13 @@ public class TestStoreScanner extends TestCase {
 
     Scan scanSpec = new Scan(Bytes.toBytes("R1"));
     // this only uses maxVersions (default=1) and TimeRange (default=all)
-    StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
-        getCols("a"), scanners);
-
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(1, results.size());
-    assertEquals(kvs[0], results.get(0));
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[0], results.get(0));
+    }
   }
 
   /*
@@ -156,6 +408,7 @@ public class TestStoreScanner extends TestCase {
    * TODO this comment makes no sense above. Appears to do the right thing.
    * @throws IOException
    */
+  @Test
   public void testWontNextToNext() throws IOException {
     // build the scan file:
     KeyValue [] kvs = new KeyValue[] {
@@ -167,27 +420,27 @@ public class TestStoreScanner extends TestCase {
 
     Scan scanSpec = new Scan(Bytes.toBytes("R1"));
     // this only uses maxVersions (default=1) and TimeRange (default=all)
-    StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
-        getCols("a"), scanners);
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      scan.next(results);
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[0], results.get(0));
+      // should be ok...
+      // now scan _next_ again.
+      results.clear();
+      scan.next(results);
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[2], results.get(0));
 
-    List<Cell> results = new ArrayList<Cell>();
-    scan.next(results);
-    assertEquals(1, results.size());
-    assertEquals(kvs[0], results.get(0));
-    // should be ok...
-    // now scan _next_ again.
-    results.clear();
-    scan.next(results);
-    assertEquals(1, results.size());
-    assertEquals(kvs[2], results.get(0));
-
-    results.clear();
-    scan.next(results);
-    assertEquals(0, results.size());
-
+      results.clear();
+      scan.next(results);
+      Assert.assertEquals(0, results.size());
+    }
   }
 
 
+  @Test
   public void testDeleteVersionSameTimestamp() throws IOException {
     KeyValue [] kvs = new KeyValue [] {
         KeyValueTestUtil.create("R1", "cf", "a", 1, KeyValue.Type.Put, "dont-care"),
@@ -195,18 +448,19 @@ public class TestStoreScanner extends TestCase {
     };
     List<KeyValueScanner> scanners = scanFixture(kvs);
     Scan scanSpec = new Scan(Bytes.toBytes("R1"));
-    StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
-        getCols("a"), scanners);
-
-    List<Cell> results = new ArrayList<Cell>();
-    assertFalse(scan.next(results));
-    assertEquals(0, results.size());
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertFalse(scan.next(results));
+      Assert.assertEquals(0, results.size());
+    }
   }
 
   /*
    * Test the case where there is a delete row 'in front of' the next row, the scanner
    * will move to the next row.
    */
+  @Test
   public void testDeletedRowThenGoodRow() throws IOException {
     KeyValue [] kvs = new KeyValue [] {
         KeyValueTestUtil.create("R1", "cf", "a", 1, KeyValue.Type.Put, "dont-care"),
@@ -215,18 +469,18 @@ public class TestStoreScanner extends TestCase {
     };
     List<KeyValueScanner> scanners = scanFixture(kvs);
     Scan scanSpec = new Scan(Bytes.toBytes("R1"));
-    StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
-        getCols("a"), scanners);
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(0, results.size());
 
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(0, results.size());
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[2], results.get(0));
 
-    assertEquals(true, scan.next(results));
-    assertEquals(1, results.size());
-    assertEquals(kvs[2], results.get(0));
-
-    assertEquals(false, scan.next(results));
+      Assert.assertEquals(false, scan.next(results));
+    }
   }
 
   public void testDeleteVersionMaskingMultiplePuts() throws IOException {
@@ -242,15 +496,16 @@ public class TestStoreScanner extends TestCase {
     };
     List<KeyValueScanner> scanners = scanFixture(kvs1, kvs2);
 
-    StoreScanner scan = new StoreScanner(new Scan(Bytes.toBytes("R1")),
-        scanInfo, scanType, getCols("a"), scanners);
-    List<Cell> results = new ArrayList<Cell>();
-    // the two put at ts=now will be masked by the 1 delete, and
-    // since the scan default returns 1 version we'll return the newest
-    // key, which is kvs[2], now-100.
-    assertEquals(true, scan.next(results));
-    assertEquals(1, results.size());
-    assertEquals(kvs2[1], results.get(0));
+    try (StoreScanner scan = new StoreScanner(new Scan(Bytes.toBytes("R1")), scanInfo, scanType,
+        getCols("a"), scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      // the two put at ts=now will be masked by the 1 delete, and
+      // since the scan default returns 1 version we'll return the newest
+      // key, which is kvs[2], now-100.
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs2[1], results.get(0));
+    }
   }
   public void testDeleteVersionsMixedAndMultipleVersionReturn() throws IOException {
     long now = System.currentTimeMillis();
@@ -267,15 +522,17 @@ public class TestStoreScanner extends TestCase {
     List<KeyValueScanner> scanners = scanFixture(kvs1, kvs2);
 
     Scan scanSpec = new Scan(Bytes.toBytes("R1")).setMaxVersions(2);
-    StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
-        getCols("a"), scanners);
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(2, results.size());
-    assertEquals(kvs2[1], results.get(0));
-    assertEquals(kvs2[0], results.get(1));
+    try (StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
+        getCols("a"), scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(2, results.size());
+      Assert.assertEquals(kvs2[1], results.get(0));
+      Assert.assertEquals(kvs2[0], results.get(1));
+    }
   }
 
+  @Test
   public void testWildCardOneVersionScan() throws IOException {
     KeyValue [] kvs = new KeyValue [] {
         KeyValueTestUtil.create("R1", "cf", "a", 2, KeyValue.Type.Put, "dont-care"),
@@ -283,15 +540,17 @@ public class TestStoreScanner extends TestCase {
         KeyValueTestUtil.create("R1", "cf", "a", 1, KeyValue.Type.DeleteColumn, "dont-care"),
     };
     List<KeyValueScanner> scanners = scanFixture(kvs);
-    StoreScanner scan = new StoreScanner(new Scan(Bytes.toBytes("R1")),
-        scanInfo, scanType, null, scanners);
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(2, results.size());
-    assertEquals(kvs[0], results.get(0));
-    assertEquals(kvs[1], results.get(1));
+    try (StoreScanner scan =
+        new StoreScanner(new Scan(Bytes.toBytes("R1")), scanInfo, scanType, null, scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(2, results.size());
+      Assert.assertEquals(kvs[0], results.get(0));
+      Assert.assertEquals(kvs[1], results.get(1));
+    }
   }
 
+  @Test
   public void testWildCardScannerUnderDeletes() throws IOException {
     KeyValue [] kvs = new KeyValue [] {
         KeyValueTestUtil.create("R1", "cf", "a", 2, KeyValue.Type.Put, "dont-care"), // inc
@@ -312,18 +571,20 @@ public class TestStoreScanner extends TestCase {
 
     };
     List<KeyValueScanner> scanners = scanFixture(kvs);
-    StoreScanner scan = new StoreScanner(new Scan().setMaxVersions(2),
-        scanInfo, scanType, null, scanners);
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(5, results.size());
-    assertEquals(kvs[0], results.get(0));
-    assertEquals(kvs[2], results.get(1));
-    assertEquals(kvs[3], results.get(2));
-    assertEquals(kvs[6], results.get(3));
-    assertEquals(kvs[7], results.get(4));
+    try (StoreScanner scan = new StoreScanner(new Scan().setMaxVersions(2),
+        scanInfo, scanType, null, scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(5, results.size());
+      Assert.assertEquals(kvs[0], results.get(0));
+      Assert.assertEquals(kvs[2], results.get(1));
+      Assert.assertEquals(kvs[3], results.get(2));
+      Assert.assertEquals(kvs[6], results.get(3));
+      Assert.assertEquals(kvs[7], results.get(4));
+    }
   }
 
+  @Test
   public void testDeleteFamily() throws IOException {
     KeyValue [] kvs = new KeyValue[] {
         KeyValueTestUtil.create("R1", "cf", "a", 100, KeyValue.Type.DeleteFamily, "dont-care"),
@@ -340,19 +601,21 @@ public class TestStoreScanner extends TestCase {
         KeyValueTestUtil.create("R2", "cf", "a", 11, KeyValue.Type.Put, "dont-care"),
     };
     List<KeyValueScanner> scanners = scanFixture(kvs);
-    StoreScanner scan = new StoreScanner(
-        new Scan().setMaxVersions(Integer.MAX_VALUE), scanInfo, scanType, null,
-        scanners);
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(0, results.size());
-    assertEquals(true, scan.next(results));
-    assertEquals(1, results.size());
-    assertEquals(kvs[kvs.length-1], results.get(0));
+    try (StoreScanner scan =
+        new StoreScanner(new Scan().setMaxVersions(Integer.MAX_VALUE), scanInfo, scanType, null,
+            scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(0, results.size());
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[kvs.length-1], results.get(0));
 
-    assertEquals(false, scan.next(results));
+      Assert.assertEquals(false, scan.next(results));
+    }
   }
 
+  @Test
   public void testDeleteColumn() throws IOException {
     KeyValue [] kvs = new KeyValue[] {
         KeyValueTestUtil.create("R1", "cf", "a", 10, KeyValue.Type.DeleteColumn, "dont-care"),
@@ -361,12 +624,13 @@ public class TestStoreScanner extends TestCase {
         KeyValueTestUtil.create("R1", "cf", "b", 5, KeyValue.Type.Put, "dont-care")
     };
     List<KeyValueScanner> scanners = scanFixture(kvs);
-    StoreScanner scan = new StoreScanner(new Scan(), scanInfo, scanType, null,
-        scanners);
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(1, results.size());
-    assertEquals(kvs[3], results.get(0));
+    try (StoreScanner scan = new StoreScanner(new Scan(), scanInfo, scanType, null,
+        scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[3], results.get(0));
+    }
   }
 
   private static final  KeyValue [] kvs = new KeyValue[] {
@@ -382,30 +646,32 @@ public class TestStoreScanner extends TestCase {
         KeyValueTestUtil.create("R2", "cf", "a", 11, KeyValue.Type.Put, "dont-care"),
     };
 
+  @Test
   public void testSkipColumn() throws IOException {
     List<KeyValueScanner> scanners = scanFixture(kvs);
-    StoreScanner scan = new StoreScanner(new Scan(), scanInfo, scanType,
-        getCols("a", "d"), scanners);
+    try (StoreScanner scan =
+        new StoreScanner(new Scan(), scanInfo, scanType, getCols("a", "d"), scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(2, results.size());
+      Assert.assertEquals(kvs[0], results.get(0));
+      Assert.assertEquals(kvs[3], results.get(1));
+      results.clear();
 
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scan.next(results));
-    assertEquals(2, results.size());
-    assertEquals(kvs[0], results.get(0));
-    assertEquals(kvs[3], results.get(1));
-    results.clear();
+      Assert.assertEquals(true, scan.next(results));
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[kvs.length-1], results.get(0));
 
-    assertEquals(true, scan.next(results));
-    assertEquals(1, results.size());
-    assertEquals(kvs[kvs.length-1], results.get(0));
-
-    results.clear();
-    assertEquals(false, scan.next(results));
+      results.clear();
+      Assert.assertEquals(false, scan.next(results));
+    }
   }
 
   /*
    * Test expiration of KeyValues in combination with a configured TTL for
    * a column family (as should be triggered in a major compaction).
    */
+  @Test
   public void testWildCardTtlScan() throws IOException {
     long now = System.currentTimeMillis();
     KeyValue [] kvs = new KeyValue[] {
@@ -424,41 +690,41 @@ public class TestStoreScanner extends TestCase {
     ScanInfo scanInfo = new ScanInfo(CONF, CF, 0, 1, 500, KeepDeletedCells.FALSE, 0,
         CellComparator.COMPARATOR);
     ScanType scanType = ScanType.USER_SCAN;
-    StoreScanner scanner =
-      new StoreScanner(scan, scanInfo, scanType,
-          null, scanners);
+    try (StoreScanner scanner = new StoreScanner(scan, scanInfo, scanType, null, scanners)) {
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scanner.next(results));
+      Assert.assertEquals(2, results.size());
+      Assert.assertEquals(kvs[1], results.get(0));
+      Assert.assertEquals(kvs[2], results.get(1));
+      results.clear();
 
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scanner.next(results));
-    assertEquals(2, results.size());
-    assertEquals(kvs[1], results.get(0));
-    assertEquals(kvs[2], results.get(1));
-    results.clear();
+      Assert.assertEquals(true, scanner.next(results));
+      Assert.assertEquals(3, results.size());
+      Assert.assertEquals(kvs[4], results.get(0));
+      Assert.assertEquals(kvs[5], results.get(1));
+      Assert.assertEquals(kvs[6], results.get(2));
+      results.clear();
 
-    assertEquals(true, scanner.next(results));
-    assertEquals(3, results.size());
-    assertEquals(kvs[4], results.get(0));
-    assertEquals(kvs[5], results.get(1));
-    assertEquals(kvs[6], results.get(2));
-    results.clear();
-
-    assertEquals(false, scanner.next(results));
+      Assert.assertEquals(false, scanner.next(results));
+    }
   }
 
+  @Test
   public void testScannerReseekDoesntNPE() throws Exception {
     List<KeyValueScanner> scanners = scanFixture(kvs);
-    StoreScanner scan = new StoreScanner(new Scan(), scanInfo, scanType,
-        getCols("a", "d"), scanners);
+    try (StoreScanner scan =
+        new StoreScanner(new Scan(), scanInfo, scanType, getCols("a", "d"), scanners)) {
 
-    // Previously a updateReaders twice in a row would cause an NPE.  In test this would also
-    // normally cause an NPE because scan.store is null.  So as long as we get through these
-    // two calls we are good and the bug was quashed.
+      // Previously a updateReaders twice in a row would cause an NPE.  In test this would also
+      // normally cause an NPE because scan.store is null.  So as long as we get through these
+      // two calls we are good and the bug was quashed.
 
-    scan.updateReaders(new ArrayList<StoreFile>());
+      scan.updateReaders(new ArrayList<StoreFile>());
 
-    scan.updateReaders(new ArrayList<StoreFile>());
+      scan.updateReaders(new ArrayList<StoreFile>());
 
-    scan.peek();
+      scan.peek();
+    }
   }
 
 
@@ -472,14 +738,16 @@ public class TestStoreScanner extends TestCase {
     };
     List<KeyValueScanner> scanners = scanFixture(kvs);
     Scan scanSpec = new Scan(Bytes.toBytes("R1"));
-    StoreScanner scan = new StoreScanner(scanSpec, scanInfo, scanType,
-        getCols("a"), scanners);
-    assertNull(scan.peek());
+    try (StoreScanner scan =
+        new StoreScanner(scanSpec, scanInfo, scanType, getCols("a"), scanners)) {
+      Assert.assertNull(scan.peek());
+    }
   }
 
   /**
    * Ensure that expired delete family markers don't override valid puts
    */
+  @Test
   public void testExpiredDeleteFamily() throws Exception {
     long now = System.currentTimeMillis();
     KeyValue [] kvs = new KeyValue[] {
@@ -495,18 +763,20 @@ public class TestStoreScanner extends TestCase {
     ScanInfo scanInfo = new ScanInfo(CONF, CF, 0, 1, 500, KeepDeletedCells.FALSE, 0,
         CellComparator.COMPARATOR);
     ScanType scanType = ScanType.USER_SCAN;
-    StoreScanner scanner =
-        new StoreScanner(scan, scanInfo, scanType, null, scanners);
+    try (StoreScanner scanner =
+        new StoreScanner(scan, scanInfo, scanType, null, scanners)) {
 
-    List<Cell> results = new ArrayList<Cell>();
-    assertEquals(true, scanner.next(results));
-    assertEquals(1, results.size());
-    assertEquals(kvs[1], results.get(0));
-    results.clear();
+      List<Cell> results = new ArrayList<Cell>();
+      Assert.assertEquals(true, scanner.next(results));
+      Assert.assertEquals(1, results.size());
+      Assert.assertEquals(kvs[1], results.get(0));
+      results.clear();
 
-    assertEquals(false, scanner.next(results));
+      Assert.assertEquals(false, scanner.next(results));
+    }
   }
 
+  @Test
   public void testDeleteMarkerLongevity() throws Exception {
     try {
       final long now = System.currentTimeMillis();
@@ -558,26 +828,24 @@ public class TestStoreScanner extends TestCase {
         KeepDeletedCells.FALSE /* keepDeletedCells */,
         200, /* timeToPurgeDeletes */
         CellComparator.COMPARATOR);
-      StoreScanner scanner =
+      try (StoreScanner scanner =
         new StoreScanner(scan, scanInfo,
           ScanType.COMPACT_DROP_DELETES, null, scanners,
-          HConstants.OLDEST_TIMESTAMP);
-      List<Cell> results = new ArrayList<Cell>();
-      results = new ArrayList<Cell>();
-      assertEquals(true, scanner.next(results));
-      assertEquals(kvs[0], results.get(0));
-      assertEquals(kvs[2], results.get(1));
-      assertEquals(kvs[3], results.get(2));
-      assertEquals(kvs[5], results.get(3));
-      assertEquals(kvs[9], results.get(4));
-      assertEquals(kvs[14], results.get(5));
-      assertEquals(kvs[15], results.get(6));
-      assertEquals(7, results.size());
-      scanner.close();
-    }finally{
-    EnvironmentEdgeManagerTestHelper.reset();
+          HConstants.OLDEST_TIMESTAMP)) {
+        List<Cell> results = new ArrayList<Cell>();
+        results = new ArrayList<Cell>();
+        Assert.assertEquals(true, scanner.next(results));
+        Assert.assertEquals(kvs[0], results.get(0));
+        Assert.assertEquals(kvs[2], results.get(1));
+        Assert.assertEquals(kvs[3], results.get(2));
+        Assert.assertEquals(kvs[5], results.get(3));
+        Assert.assertEquals(kvs[9], results.get(4));
+        Assert.assertEquals(kvs[14], results.get(5));
+        Assert.assertEquals(kvs[15], results.get(6));
+        Assert.assertEquals(7, results.size());
+      }
+    } finally {
+      EnvironmentEdgeManagerTestHelper.reset();
     }
   }
-
 }
-

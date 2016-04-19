@@ -561,6 +561,17 @@
       <artifactId>bcprov-jdk16</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.owasp.esapi</groupId>
+      <artifactId>esapi</artifactId>
+      <version>2.1.0</version>
+      <exclusions>
+        <exclusion>
+          <artifactId>xercesImpl</artifactId>
+          <groupId>xerces</groupId>
+        </exclusion>
+      </exclusions>
+    </dependency>
   </dependencies>
   <profiles>
     <!-- Needs to make the profile in apache parent pom -->
@@ -858,7 +869,6 @@
                       <include>DummyRegionServerEndpoint.proto</include>
                       <include>TestProcedure.proto</include>
                       <include>test.proto</include>
-                      <include>test_delayed_rpc.proto</include>
                       <include>test_rpc_service.proto</include>
                     </includes>
                   </source>

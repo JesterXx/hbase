@@ -43,8 +43,24 @@ public class TestMetricsRegion {
       "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_storeFileCount",
       102, agg);
     HELPER.assertGauge(
+      "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_maxStoreFileAge",
+      2, agg);
+    HELPER.assertGauge(
+      "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_minStoreFileAge",
+      2, agg);
+    HELPER.assertGauge(
+      "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_avgStoreFileAge",
+      2, agg);
+    HELPER.assertGauge(
+      "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_numReferenceFiles",
+      2, agg);
+    HELPER.assertGauge(
       "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_memstoreSize",
       103, agg);
+    HELPER.assertCounter(
+      "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_" +
+        "filteredReadRequestCount",
+      107, agg);
     HELPER.assertCounter(
       "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_replicaid", 
       0, agg);
@@ -62,6 +78,10 @@ public class TestMetricsRegion {
     HELPER.assertGauge(
       "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_memstoreSize",
       103, agg);
+    HELPER.assertCounter(
+      "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_" +
+        "filteredReadRequestCount",
+      107, agg);
     HELPER.assertCounter(
       "namespace_TestNS_table_MetricsRegionWrapperStub_region_DEADBEEF001_metric_replicaid", 
       1, agg);

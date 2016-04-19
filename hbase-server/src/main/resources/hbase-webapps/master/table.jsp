@@ -24,6 +24,7 @@
   import="java.util.Map"
   import="java.util.Set"
   import="java.util.Collection"
+  import="org.owasp.esapi.ESAPI"
   import="org.apache.hadoop.conf.Configuration"
   import="org.apache.hadoop.hbase.client.HTable"
   import="org.apache.hadoop.hbase.client.Admin"
@@ -42,7 +43,8 @@
   import="org.apache.hadoop.hbase.TableName"
   import="org.apache.hadoop.hbase.HColumnDescriptor"
   import="org.apache.hadoop.hbase.client.RegionReplicaUtil"
-  import="org.apache.hadoop.hbase.HBaseConfiguration" %>
+  import="org.apache.hadoop.hbase.HBaseConfiguration"
+  import="org.apache.hadoop.hbase.TableNotFoundException"%>
 <%
   HMaster master = (HMaster)getServletContext().getAttribute(HMaster.MASTER);
   Configuration conf = master.getConfiguration();
@@ -74,7 +76,7 @@
     <% if ( !readOnly && action != null ) { %>
         <title>HBase Master: <%= master.getServerName() %></title>
     <% } else { %>
-        <title>Table: <%= fqtn %></title>
+        <title>Table: <%= ESAPI.encoder().encodeForHTML(fqtn) %></title>
     <% } %>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="">
@@ -111,6 +113,7 @@
             <ul class="nav navbar-nav">
                 <li><a href="/master-status">Home</a></li>
                 <li><a href="/tablesDetailed.jsp">Table Details</a></li>
+                <li><a href="/procedures.jsp">Procedures</a></li>
                 <li><a href="/logs/">Local Logs</a></li>
                 <li><a href="/logLevel">Log Level</a></li>
                 <li><a href="/dump">Debug Dump</a></li>
@@ -124,6 +127,7 @@
 </div>
 <%
 if ( fqtn != null ) {
+  try {
   table = (HTable) master.getConnection().getTable(TableName.valueOf(fqtn));
   if (table.getTableDescriptor().getRegionReplication() > 1) {
     tableHeader = "<h2>Table Regions</h2><table class=\"table table-striped\" style=\"table-layout: fixed; word-wrap: break-word;\"><tr><th style=\"width:22%\">Name</th><th>Region Server</th><th style=\"width:22%\">Start Key</th><th style=\"width:22%\">End Key</th><th>Locality</th><th>Requests</th><th>ReplicaID</th></tr>";
@@ -168,7 +172,7 @@ if ( fqtn != null ) {
 <div class="container-fluid content">
     <div class="row inner_header">
         <div class="page-header">
-            <h1>Table <small><%= fqtn %></small></h1>
+            <h1>Table <small><%= ESAPI.encoder().encodeForHTML(fqtn) %></small></h1>
         </div>
     </div>
     <div class="row">
@@ -422,7 +426,29 @@ Actions:
 </div>
 </div>
 <% }
-} else { // handle the case for fqtn is null with error message + redirect
+  } catch(TableNotFoundException e) { %>
+  <div class="container-fluid content">
+    <div class="row inner_header">
+      <div class="page-header">
+        <h1>Table not found</h1>
+       </div>
+    </div>
+    <p><hr><p>
+    <p>Go <a href="javascript:history.back()">Back</a>
+  </div> <%
+  } catch(IllegalArgumentException e) { %>
+  <div class="container-fluid content">
+    <div class="row inner_header">
+      <div class="page-header">
+        <h1>Table qualifier must not be empty</h1>
+      </div>
+    </div>
+    <p><hr><p>
+    <p>Go <a href="javascript:history.back()">Back</a>
+  </div> <%
+  }
+}
+  else { // handle the case for fqtn is null with error message + redirect
 %>
 <div class="container-fluid content">
     <div class="row inner_header">

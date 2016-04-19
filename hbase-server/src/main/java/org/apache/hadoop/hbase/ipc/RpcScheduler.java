@@ -31,8 +31,13 @@ import java.net.InetSocketAddress;
 @InterfaceStability.Evolving
 public abstract class RpcScheduler {
 
+  public static final String IPC_SERVER_MAX_CALLQUEUE_LENGTH =
+      "hbase.ipc.server.max.callqueue.length";
+  public static final String IPC_SERVER_PRIORITY_MAX_CALLQUEUE_LENGTH =
+      "hbase.ipc.server.priority.max.callqueue.length";
+
   /** Exposes runtime information of a {@code RpcServer} that a {@code RpcScheduler} may need. */
-  static abstract class Context {
+  public static abstract class Context {
     public abstract InetSocketAddress getListenerAddress();
   }
 
@@ -58,7 +63,7 @@ public abstract class RpcScheduler {
    *
    * @param task the request to be dispatched
    */
-  public abstract void dispatch(CallRunner task) throws IOException, InterruptedException;
+  public abstract boolean dispatch(CallRunner task) throws IOException, InterruptedException;
 
   /** Retrieves length of the general queue for metrics. */
   public abstract int getGeneralQueueLength();
@@ -71,4 +76,17 @@ public abstract class RpcScheduler {
 
   /** Retrieves the number of active handler. */
   public abstract int getActiveRpcHandlerCount();
+
+  /**
+   * If CoDel-based RPC executors are used, retrieves the number of Calls that were dropped
+   * from general queue because RPC executor is under high load; returns 0 otherwise.
+   */
+  public abstract long getNumGeneralCallsDropped();
+
+  /**
+   * If CoDel-based RPC executors are used, retrieves the number of Calls that were
+   * picked from the tail of the queue (indicating adaptive LIFO mode, when
+   * in the period of overloade we serve last requests first); returns 0 otherwise.
+   */
+  public abstract long getNumLifoModeSwitches();
 }

@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.spark
 
 import java.net.InetSocketAddress
 import java.util
+import java.util.UUID
 import javax.management.openmbean.KeyAlreadyExistsException
 
 import org.apache.hadoop.hbase.fs.HFileSystem
@@ -27,8 +28,9 @@ import org.apache.hadoop.hbase.io.compress.Compression
 import org.apache.hadoop.hbase.io.compress.Compression.Algorithm
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding
 import org.apache.hadoop.hbase.io.hfile.{CacheConfig, HFileContextBuilder, HFileWriterImpl}
-import org.apache.hadoop.hbase.regionserver.{HStore, StoreFile, BloomType}
+import org.apache.hadoop.hbase.regionserver.{HStore, StoreFile, StoreFileWriter, BloomType}
 import org.apache.hadoop.hbase.util.Bytes
+import org.apache.hadoop.mapred.JobConf
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.RDD
@@ -228,7 +230,7 @@ class HBaseContext(@transient sc: SparkContext,
         }))
   }
 
-  def applyCreds[T] (configBroadcast: Broadcast[SerializableWritable[Configuration]]){
+  def applyCreds[T] (){
     credentials = SparkHadoopUtil.get.getCurrentUserCredentials()
 
     logDebug("appliedCredentials:" + appliedCredentials + ",credentials:" + credentials)
@@ -440,10 +442,14 @@ class HBaseContext(@transient sc: SparkContext,
     TableMapReduceUtil.initTableMapperJob(tableName, scan,
       classOf[IdentityTableMapper], null, null, job)
 
-    sc.newAPIHadoopRDD(job.getConfiguration,
+    val jconf = new JobConf(job.getConfiguration)
+    SparkHadoopUtil.get.addCredentials(jconf)
+    new NewHBaseRDD(sc,
       classOf[TableInputFormat],
       classOf[ImmutableBytesWritable],
-      classOf[Result]).map(f)
+      classOf[Result],
+      job.getConfiguration,
+      this).map(f)
   }
 
   /**
@@ -474,7 +480,7 @@ class HBaseContext(@transient sc: SparkContext,
 
     val config = getConf(configBroadcast)
 
-    applyCreds(configBroadcast)
+    applyCreds
     // specify that this is a proxy user
     val connection = ConnectionFactory.createConnection(config)
     f(it, connection)
@@ -514,7 +520,7 @@ class HBaseContext(@transient sc: SparkContext,
                                          Iterator[U]): Iterator[U] = {
 
     val config = getConf(configBroadcast)
-    applyCreds(configBroadcast)
+    applyCreds
 
     val connection = ConnectionFactory.createConnection(config)
     val res = mp(it, connection)
@@ -675,7 +681,7 @@ class HBaseContext(@transient sc: SparkContext,
         //This will only roll if we have at least one column family file that is
         //bigger then maxSize and we have finished a given row key
         if (rollOverRequested && Bytes.compareTo(previousRow, keyFamilyQualifier.rowKey) != 0) {
-          rollWriters(writerMap,
+          rollWriters(fs, writerMap,
             regionSplitPartitioner,
             previousRow,
             compactionExclude)
@@ -685,7 +691,7 @@ class HBaseContext(@transient sc: SparkContext,
         previousRow = keyFamilyQualifier.rowKey
       }
       //We have finished all the data so lets close up the writers
-      rollWriters(writerMap,
+      rollWriters(fs, writerMap,
         regionSplitPartitioner,
         previousRow,
         compactionExclude)
@@ -825,7 +831,7 @@ class HBaseContext(@transient sc: SparkContext,
             //This will only roll if we have at least one column family file that is
             //bigger then maxSize and we have finished a given row key
             if (rollOverRequested) {
-              rollWriters(writerMap,
+              rollWriters(fs, writerMap,
                 regionSplitPartitioner,
                 previousRow,
                 compactionExclude)
@@ -839,7 +845,7 @@ class HBaseContext(@transient sc: SparkContext,
       //If there is no writer for a given column family then
       //it will get created here.
       //We have finished all the data so lets close up the writers
-      rollWriters(writerMap,
+      rollWriters(fs, writerMap,
         regionSplitPartitioner,
         previousRow,
         compactionExclude)
@@ -884,17 +890,15 @@ class HBaseContext(@transient sc: SparkContext,
       valueOf(familyOptions.dataBlockEncoding))
     val hFileContext = contextBuilder.build()
 
-    if (null == favoredNodes) {
-      new WriterLength(0, new StoreFile.WriterBuilder(conf, new CacheConfig(tempConf), fs)
-        .withOutputDir(familydir).withBloomType(BloomType.valueOf(familyOptions.bloomType))
-        .withComparator(CellComparator.COMPARATOR).withFileContext(hFileContext).build())
-    } else {
-      new WriterLength(0,
-        new StoreFile.WriterBuilder(conf, new CacheConfig(tempConf), new HFileSystem(fs))
-          .withOutputDir(familydir).withBloomType(BloomType.valueOf(familyOptions.bloomType))
-          .withComparator(CellComparator.COMPARATOR).withFileContext(hFileContext)
-          .withFavoredNodes(favoredNodes).build())
-    }
+    //Add a '_' to the file name because this is a unfinished file.  A rename will happen
+    // to remove the '_' when the file is closed.
+    new WriterLength(0,
+      new StoreFileWriter.Builder(conf, new CacheConfig(tempConf), new HFileSystem(fs))
+        .withBloomType(BloomType.valueOf(familyOptions.bloomType))
+        .withComparator(CellComparator.COMPARATOR).withFileContext(hFileContext)
+        .withFilePath(new Path(familydir, "_" + UUID.randomUUID.toString.replaceAll("-", "")))
+        .withFavoredNodes(favoredNodes).build())
+
   }
 
   /**
@@ -1008,13 +1012,15 @@ class HBaseContext(@transient sc: SparkContext,
 
   /**
    * This will roll all Writers
+   * @param fs                     Hadoop FileSystem object
    * @param writerMap              HashMap that contains all the writers
    * @param regionSplitPartitioner The partitioner with knowledge of how the
    *                               Region's are split by row key
    * @param previousRow            The last row to fill the HFile ending range metadata
    * @param compactionExclude      The exclude compaction metadata flag for the HFile
    */
-  private def rollWriters(writerMap:mutable.HashMap[ByteArrayWrapper, WriterLength],
+  private def rollWriters(fs:FileSystem,
+                          writerMap:mutable.HashMap[ByteArrayWrapper, WriterLength],
                   regionSplitPartitioner: BulkLoadPartitioner,
                   previousRow: Array[Byte],
                   compactionExclude: Boolean): Unit = {
@@ -1022,7 +1028,7 @@ class HBaseContext(@transient sc: SparkContext,
       if (wl.writer != null) {
         logDebug("Writer=" + wl.writer.getPath +
           (if (wl.written == 0) "" else ", wrote=" + wl.written))
-        closeHFileWriter(wl.writer,
+        closeHFileWriter(fs, wl.writer,
           regionSplitPartitioner,
           previousRow,
           compactionExclude)
@@ -1034,16 +1040,18 @@ class HBaseContext(@transient sc: SparkContext,
 
   /**
    * Function to close an HFile
+   * @param fs                     Hadoop FileSystem object
    * @param w                      HFile Writer
    * @param regionSplitPartitioner The partitioner with knowledge of how the
    *                               Region's are split by row key
    * @param previousRow            The last row to fill the HFile ending range metadata
    * @param compactionExclude      The exclude compaction metadata flag for the HFile
    */
-  private def closeHFileWriter(w: StoreFile.Writer,
-            regionSplitPartitioner: BulkLoadPartitioner,
-            previousRow: Array[Byte],
-            compactionExclude: Boolean): Unit = {
+  private def closeHFileWriter(fs:FileSystem,
+                               w: StoreFileWriter,
+                               regionSplitPartitioner: BulkLoadPartitioner,
+                               previousRow: Array[Byte],
+                               compactionExclude: Boolean): Unit = {
     if (w != null) {
       w.appendFileInfo(StoreFile.BULKLOAD_TIME_KEY,
         Bytes.toBytes(System.currentTimeMillis()))
@@ -1055,17 +1063,29 @@ class HBaseContext(@transient sc: SparkContext,
         Bytes.toBytes(compactionExclude))
       w.appendTrackedTimestampsToMetadata()
       w.close()
+
+      val srcPath = w.getPath
+
+      //In the new path you will see that we are using substring.  This is to
+      // remove the '_' character in front of the HFile name.  '_' is a character
+      // that will tell HBase that this file shouldn't be included in the bulk load
+      // This feature is to protect for unfinished HFiles being submitted to HBase
+      val newPath = new Path(w.getPath.getParent, w.getPath.getName.substring(1))
+      if (!fs.rename(srcPath, newPath)) {
+        throw new IOException("Unable to rename '" + srcPath +
+          "' to " + newPath)
+      }
     }
   }
 
   /**
-   * This is a wrapper class around StoreFile.Writer.  The reason for the
+   * This is a wrapper class around StoreFileWriter.  The reason for the
    * wrapper is to keep the length of the file along side the writer
    *
    * @param written The writer to be wrapped
    * @param writer  The number of bytes written to the writer
    */
-  class WriterLength(var written:Long, val writer:StoreFile.Writer)
+  class WriterLength(var written:Long, val writer:StoreFileWriter)
 }
 
 object LatestHBaseContextCache {

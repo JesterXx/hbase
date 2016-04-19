@@ -66,15 +66,24 @@ public class BalancedQueueRpcExecutor extends RpcExecutor {
 
   protected void initializeQueues(final int numQueues,
       final Class<? extends BlockingQueue> queueClass, Object... initargs) {
+    if (initargs.length > 0) {
+      currentQueueLimit = (int) initargs[0];
+      initargs[0] = Math.max((int) initargs[0], DEFAULT_CALL_QUEUE_SIZE_HARD_LIMIT);
+    }
     for (int i = 0; i < numQueues; ++i) {
       queues.add((BlockingQueue<CallRunner>) ReflectionUtils.newInstance(queueClass, initargs));
     }
   }
 
   @Override
-  public void dispatch(final CallRunner callTask) throws InterruptedException {
+  public boolean dispatch(final CallRunner callTask) throws InterruptedException {
     int queueIndex = balancer.getNextQueue();
-    queues.get(queueIndex).put(callTask);
+    BlockingQueue<CallRunner> queue = queues.get(queueIndex);
+    // that means we can overflow by at most <num reader> size (5), that's ok
+    if (queue.size() >= currentQueueLimit) {
+      return false;
+    }
+    return queue.offer(callTask);
   }
 
   @Override

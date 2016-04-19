@@ -66,8 +66,13 @@ class MetricsRegionServerWrapperImpl
   private volatile long numStoreFiles = 0;
   private volatile long memstoreSize = 0;
   private volatile long storeFileSize = 0;
+  private volatile long maxStoreFileAge = 0;
+  private volatile long minStoreFileAge = 0;
+  private volatile long avgStoreFileAge = 0;
+  private volatile long numReferenceFiles = 0;
   private volatile double requestsPerSecond = 0.0;
   private volatile long readRequestsCount = 0;
+  private volatile long filteredReadRequestsCount = 0;
   private volatile long writeRequestsCount = 0;
   private volatile long checkAndMutateChecksFailed = 0;
   private volatile long checkAndMutateChecksPassed = 0;
@@ -99,6 +104,7 @@ class MetricsRegionServerWrapperImpl
   private volatile long mobFileCacheEvictedCount = 0;
   private volatile long mobFileCacheCount = 0;
   private volatile long blockedRequestsCount = 0L;
+  private volatile long averageRegionSize = 0L;
 
   private CacheStats cacheStats;
   private ScheduledExecutorService executor;
@@ -389,6 +395,26 @@ class MetricsRegionServerWrapperImpl
   }
 
   @Override
+  public long getMaxStoreFileAge() {
+    return maxStoreFileAge;
+  }
+
+  @Override
+  public long getMinStoreFileAge() {
+    return minStoreFileAge;
+  }
+
+  @Override
+  public long getAvgStoreFileAge() {
+    return avgStoreFileAge;
+  }
+
+  @Override
+  public long getNumReferenceFiles() {
+    return numReferenceFiles;
+  }
+
+  @Override
   public long getMemstoreSize() {
     return memstoreSize;
   }
@@ -408,8 +434,33 @@ class MetricsRegionServerWrapperImpl
   }
 
   @Override
+  public long getFilteredReadRequestsCount() {
+    return filteredReadRequestsCount;
+  }
+
+  @Override
   public long getWriteRequestsCount() {
     return writeRequestsCount;
+  }
+
+  @Override
+  public long getRpcGetRequestsCount() {
+    return regionServer.rpcServices.rpcGetRequestCount.get();
+  }
+
+  @Override
+  public long getRpcScanRequestsCount() {
+    return regionServer.rpcServices.rpcScanRequestCount.get();
+  }
+
+  @Override
+  public long getRpcMultiRequestsCount() {
+    return regionServer.rpcServices.rpcMultiRequestCount.get();
+  }
+
+  @Override
+  public long getRpcMutateRequestsCount() {
+    return regionServer.rpcServices.rpcMutateRequestCount.get();
   }
 
   @Override
@@ -588,7 +639,11 @@ class MetricsRegionServerWrapperImpl
             new HDFSBlocksDistribution();
 
         long tempNumStores = 0, tempNumStoreFiles = 0, tempMemstoreSize = 0, tempStoreFileSize = 0;
-        long tempReadRequestsCount = 0, tempWriteRequestsCount = 0;
+        long tempMaxStoreFileAge = 0, tempNumReferenceFiles = 0;
+        long avgAgeNumerator = 0, numHFiles = 0;
+        long tempMinStoreFileAge = Long.MAX_VALUE;
+        long tempReadRequestsCount = 0, tempFilteredReadRequestsCount = 0,
+          tempWriteRequestsCount = 0;
         long tempCheckAndMutateChecksFailed = 0;
         long tempCheckAndMutateChecksPassed = 0;
         long tempStorefileIndexSize = 0;
@@ -614,11 +669,12 @@ class MetricsRegionServerWrapperImpl
         long tempMobScanCellsCount = 0;
         long tempMobScanCellsSize = 0;
         long tempBlockedRequestsCount = 0;
-
+        int regionCount = 0;
         for (Region r : regionServer.getOnlineRegionsLocalContext()) {
           tempNumMutationsWithoutWAL += r.getNumMutationsWithoutWAL();
           tempDataInMemoryWithoutWAL += r.getDataInMemoryWithoutWAL();
           tempReadRequestsCount += r.getReadRequestsCount();
+          tempFilteredReadRequestsCount += r.getFilteredReadRequestsCount();
           tempWriteRequestsCount += r.getWriteRequestsCount();
           tempCheckAndMutateChecksFailed += r.getCheckAndMutateChecksFailed();
           tempCheckAndMutateChecksPassed += r.getCheckAndMutateChecksPassed();
@@ -629,6 +685,20 @@ class MetricsRegionServerWrapperImpl
             tempNumStoreFiles += store.getStorefilesCount();
             tempMemstoreSize += store.getMemStoreSize();
             tempStoreFileSize += store.getStorefilesSize();
+
+            long storeMaxStoreFileAge = store.getMaxStoreFileAge();
+            tempMaxStoreFileAge = (storeMaxStoreFileAge > tempMaxStoreFileAge) ?
+              storeMaxStoreFileAge : tempMaxStoreFileAge;
+
+            long storeMinStoreFileAge = store.getMinStoreFileAge();
+            tempMinStoreFileAge = (storeMinStoreFileAge < tempMinStoreFileAge) ?
+              storeMinStoreFileAge : tempMinStoreFileAge;
+
+            long storeHFiles = store.getNumHFiles();
+            avgAgeNumerator += store.getAvgStoreFileAge() * storeHFiles;
+            numHFiles += storeHFiles;
+            tempNumReferenceFiles += store.getNumReferenceFiles();
+
             tempStorefileIndexSize += store.getStorefilesIndexSize();
             tempTotalStaticBloomSize += store.getTotalStaticBloomSize();
             tempTotalStaticIndexSize += store.getTotalStaticIndexSize();
@@ -657,6 +727,7 @@ class MetricsRegionServerWrapperImpl
           if (r.getRegionInfo().getReplicaId() != HRegionInfo.DEFAULT_REPLICA_ID) {
             hdfsBlocksDistributionSecondaryRegions.add(distro);
           }
+          regionCount++;
         }
         float localityIndex = hdfsBlocksDistribution.getBlockLocalityIndex(
             regionServer.getServerName().getHostname());
@@ -695,7 +766,21 @@ class MetricsRegionServerWrapperImpl
         numStoreFiles = tempNumStoreFiles;
         memstoreSize = tempMemstoreSize;
         storeFileSize = tempStoreFileSize;
+        maxStoreFileAge = tempMaxStoreFileAge;
+        if (regionCount > 0) {
+          averageRegionSize = (memstoreSize + storeFileSize) / regionCount;
+        }
+        if (tempMinStoreFileAge != Long.MAX_VALUE) {
+          minStoreFileAge = tempMinStoreFileAge;
+        }
+
+        if (numHFiles != 0) {
+          avgStoreFileAge = avgAgeNumerator / numHFiles;
+        }
+
+        numReferenceFiles= tempNumReferenceFiles;
         readRequestsCount = tempReadRequestsCount;
+        filteredReadRequestsCount = tempFilteredReadRequestsCount;
         writeRequestsCount = tempWriteRequestsCount;
         checkAndMutateChecksFailed = tempCheckAndMutateChecksFailed;
         checkAndMutateChecksPassed = tempCheckAndMutateChecksPassed;
@@ -747,5 +832,169 @@ class MetricsRegionServerWrapperImpl
   @Override
   public long getBlockedRequestsCount() {
     return blockedRequestsCount;
+  }
+
+  @Override
+  public long getAverageRegionSize() {
+    return averageRegionSize;
+  }
+
+  public long getDataMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getDataMissCount();
+  }
+
+  @Override
+  public long getLeafIndexMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getLeafIndexMissCount();
+  }
+
+  @Override
+  public long getBloomChunkMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getBloomChunkMissCount();
+  }
+
+  @Override
+  public long getMetaMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getMetaMissCount();
+  }
+
+  @Override
+  public long getRootIndexMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getRootIndexMissCount();
+  }
+
+  @Override
+  public long getIntermediateIndexMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getIntermediateIndexMissCount();
+  }
+
+  @Override
+  public long getFileInfoMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getFileInfoMissCount();
+  }
+
+  @Override
+  public long getGeneralBloomMetaMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getGeneralBloomMetaMissCount();
+  }
+
+  @Override
+  public long getDeleteFamilyBloomMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getDeleteFamilyBloomMissCount();
+  }
+
+  @Override
+  public long getTrailerMissCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getTrailerMissCount();
+  }
+
+  @Override
+  public long getDataHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getDataHitCount();
+  }
+
+  @Override
+  public long getLeafIndexHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getLeafIndexHitCount();
+  }
+
+  @Override
+  public long getBloomChunkHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getBloomChunkHitCount();
+  }
+
+  @Override
+  public long getMetaHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getMetaHitCount();
+  }
+
+  @Override
+  public long getRootIndexHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getRootIndexHitCount();
+  }
+
+  @Override
+  public long getIntermediateIndexHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getIntermediateIndexHitCount();
+  }
+
+  @Override
+  public long getFileInfoHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getFileInfoHitCount();
+  }
+
+  @Override
+  public long getGeneralBloomMetaHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getGeneralBloomMetaHitCount();
+  }
+
+  @Override
+  public long getDeleteFamilyBloomHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getDeleteFamilyBloomHitCount();
+  }
+
+  @Override
+  public long getTrailerHitCount() {
+    if (this.cacheStats == null) {
+      return 0;
+    }
+    return cacheStats.getTrailerHitCount();
   }
 }

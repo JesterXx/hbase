@@ -25,6 +25,7 @@ import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 
+
 /**
  * ReplicationPeer manages enabled / disabled state for the peer.
  */
@@ -69,5 +70,7 @@ public interface ReplicationPeer {
    * @return the replicable (table, cf-list) map
    */
   public Map<TableName, List<String>> getTableCFs();
+
+  void trackPeerConfigChanges(ReplicationPeerConfigListener listener);
 
 }

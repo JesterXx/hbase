@@ -71,6 +71,26 @@ public class MetricsRegionServerWrapperStub implements MetricsRegionServerWrappe
   }
 
   @Override
+  public long getMaxStoreFileAge() {
+    return 2;
+  }
+
+  @Override
+  public long getMinStoreFileAge() {
+    return 2;
+  }
+
+  @Override
+  public long getAvgStoreFileAge() {
+    return 2;
+  }
+
+  @Override
+  public long getNumReferenceFiles() {
+    return 2;
+  }
+
+  @Override
   public double getRequestsPerSecond() {
     return 0;
   }
@@ -86,8 +106,33 @@ public class MetricsRegionServerWrapperStub implements MetricsRegionServerWrappe
   }
 
   @Override
+  public long getFilteredReadRequestsCount() {
+    return 1997;
+  }
+
+  @Override
   public long getWriteRequestsCount() {
     return 707;
+  }
+
+  @Override
+  public long getRpcGetRequestsCount() {
+    return 521;
+  }
+
+  @Override
+  public long getRpcScanRequestsCount() {
+    return 101;
+  }
+
+  @Override
+  public long getRpcMultiRequestsCount() {
+    return 486;
+  }
+
+  @Override
+  public long getRpcMutateRequestsCount() {
+    return 606;
   }
 
   @Override
@@ -286,6 +331,106 @@ public class MetricsRegionServerWrapperStub implements MetricsRegionServerWrappe
   }
 
   @Override
+  public long getDataMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getLeafIndexMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getBloomChunkMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getMetaMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getRootIndexMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getIntermediateIndexMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getFileInfoMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getGeneralBloomMetaMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getDeleteFamilyBloomMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getTrailerMissCount() {
+    return 0;
+  }
+
+  @Override
+  public long getDataHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getLeafIndexHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getBloomChunkHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getMetaHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getRootIndexHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getIntermediateIndexHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getFileInfoHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getGeneralBloomMetaHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getDeleteFamilyBloomHitCount() {
+    return 0;
+  }
+
+  @Override
+  public long getTrailerHitCount() {
+    return 0;
+  }
+
+  @Override
   public int getSplitQueueSize() {
     return 0;
   }
@@ -358,5 +503,10 @@ public class MetricsRegionServerWrapperStub implements MetricsRegionServerWrappe
   @Override
   public double getMobFileCacheHitPercent() {
     return 50;
+  }
+
+  @Override
+  public long getAverageRegionSize() {
+    return 10000000;
   }
 }

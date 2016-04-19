@@ -39,6 +39,7 @@ import org.apache.hadoop.hbase.wal.WAL.Reader;
 import org.apache.hadoop.hbase.wal.WALProvider.Writer;
 import org.apache.hadoop.hbase.util.CancelableProgressable;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
+import org.apache.hadoop.hbase.util.LeaseNotRecoveredException;
 
 // imports for things that haven't moved from regionserver.wal yet.
 import org.apache.hadoop.hbase.regionserver.wal.MetricsWAL;
@@ -75,7 +76,8 @@ public class WALFactory {
   static enum Providers {
     defaultProvider(DefaultWALProvider.class),
     filesystem(DefaultWALProvider.class),
-    multiwal(RegionGroupingProvider.class);
+    multiwal(RegionGroupingProvider.class),
+    asyncfs(AsyncFSWALProvider.class);
 
     Class<? extends WALProvider> clazz;
     Providers(Class<? extends WALProvider> clazz) {
@@ -125,35 +127,43 @@ public class WALFactory {
     factoryId = SINGLETON_ID;
   }
 
-  /**
-   * instantiate a provider from a config property.
-   * requires conf to have already been set (as well as anything the provider might need to read).
-   */
-  WALProvider getProvider(final String key, final String defaultValue,
-      final List<WALActionsListener> listeners, final String providerId) throws IOException {
-    Class<? extends WALProvider> clazz;
+  Class<? extends WALProvider> getProviderClass(String key, String defaultValue) {
     try {
-      clazz = Providers.valueOf(conf.get(key, defaultValue)).clazz;
+      return Providers.valueOf(conf.get(key, defaultValue)).clazz;
     } catch (IllegalArgumentException exception) {
       // Fall back to them specifying a class name
       // Note that the passed default class shouldn't actually be used, since the above only fails
       // when there is a config value present.
-      clazz = conf.getClass(key, DefaultWALProvider.class, WALProvider.class);
+      return conf.getClass(key, DefaultWALProvider.class, WALProvider.class);
     }
+  }
+
+  WALProvider createProvider(Class<? extends WALProvider> clazz,
+      List<WALActionsListener> listeners, String providerId) throws IOException {
     LOG.info("Instantiating WALProvider of type " + clazz);
     try {
       final WALProvider result = clazz.newInstance();
       result.init(this, conf, listeners, providerId);
       return result;
     } catch (InstantiationException exception) {
-      LOG.error("couldn't set up WALProvider, check config key " + key);
+      LOG.error("couldn't set up WALProvider, the configured class is " + clazz);
       LOG.debug("Exception details for failure to load WALProvider.", exception);
       throw new IOException("couldn't set up WALProvider", exception);
     } catch (IllegalAccessException exception) {
-      LOG.error("couldn't set up WALProvider, check config key " + key);
+      LOG.error("couldn't set up WALProvider, the configured class is " + clazz);
       LOG.debug("Exception details for failure to load WALProvider.", exception);
       throw new IOException("couldn't set up WALProvider", exception);
     }
+  }
+
+  /**
+   * instantiate a provider from a config property.
+   * requires conf to have already been set (as well as anything the provider might need to read).
+   */
+  WALProvider getProvider(final String key, final String defaultValue,
+      final List<WALActionsListener> listeners, final String providerId) throws IOException {
+    Class<? extends WALProvider> clazz = getProviderClass(key, defaultValue);
+    return createProvider(clazz, listeners, providerId);
   }
 
   /**
@@ -334,8 +344,10 @@ public class WALFactory {
                 throw iioe;
               }
             }
+            throw new LeaseNotRecoveredException(e);
+          } else {
+            throw e;
           }
-          throw e;
         }
       }
     } catch (IOException ie) {
@@ -347,9 +359,10 @@ public class WALFactory {
 
   /**
    * Create a writer for the WAL.
+   * <p>
    * should be package-private. public only for tests and
    * {@link org.apache.hadoop.hbase.regionserver.wal.Compressor}
-   * @return A WAL writer.  Close when done with it.
+   * @return A WAL writer. Close when done with it.
    * @throws IOException
    */
   public Writer createWALWriter(final FileSystem fs, final Path path) throws IOException {

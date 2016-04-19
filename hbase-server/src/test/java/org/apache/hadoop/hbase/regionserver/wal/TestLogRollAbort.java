@@ -19,6 +19,9 @@ package org.apache.hadoop.hbase.regionserver.wal;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.NavigableMap;
+import java.util.TreeMap;
+
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.regionserver.MultiVersionConcurrencyControl;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
@@ -62,11 +65,11 @@ import org.junit.experimental.categories.Category;
  */
 @Category({RegionServerTests.class, MediumTests.class})
 public class TestLogRollAbort {
-  private static final Log LOG = LogFactory.getLog(TestLogRolling.class);
+  private static final Log LOG = LogFactory.getLog(AbstractTestLogRolling.class);
   private static MiniDFSCluster dfsCluster;
   private static Admin admin;
   private static MiniHBaseCluster cluster;
-  private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
+  protected final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
 
   /* For the split-then-roll test */
   private static final Path HBASEDIR = new Path("/hbase");
@@ -199,12 +202,17 @@ public class TestLogRollAbort {
         kvs.add(new KeyValue(Bytes.toBytes(i), tableName.getName(), tableName.getName()));
         HTableDescriptor htd = new HTableDescriptor(tableName);
         htd.addFamily(new HColumnDescriptor("column"));
-        log.append(htd, regioninfo, new WALKey(regioninfo.getEncodedNameAsBytes(), tableName,
-            System.currentTimeMillis(), mvcc), kvs, true);
+        NavigableMap<byte[], Integer> scopes = new TreeMap<byte[], Integer>(
+            Bytes.BYTES_COMPARATOR);
+        for(byte[] fam : htd.getFamiliesKeys()) {
+          scopes.put(fam, 0);
+        }
+        log.append(regioninfo, new WALKey(regioninfo.getEncodedNameAsBytes(), tableName,
+            System.currentTimeMillis(), mvcc, scopes), kvs, true);
       }
       // Send the data to HDFS datanodes and close the HDFS writer
       log.sync();
-      ((FSHLog) log).replaceWriter(((FSHLog)log).getOldPath(), null, null, null);
+      ((AbstractFSWAL<?>) log).replaceWriter(((FSHLog)log).getOldPath(), null, null);
 
       /* code taken from MasterFileSystem.getLogDirs(), which is called from MasterFileSystem.splitLog()
        * handles RS shutdowns (as observed by the splitting process)

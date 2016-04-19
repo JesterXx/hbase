@@ -18,6 +18,9 @@
 
 package org.apache.hadoop.hbase.snapshot;
 
+import com.google.protobuf.CodedInputStream;
+import com.google.protobuf.InvalidProtocolBufferException;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -30,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -41,6 +43,7 @@ import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableDescriptor;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionSnare;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
@@ -68,7 +71,9 @@ import org.apache.hadoop.hbase.util.Threads;
 public final class SnapshotManifest {
   private static final Log LOG = LogFactory.getLog(SnapshotManifest.class);
 
-  private static final String DATA_MANIFEST_NAME = "data.manifest";
+  public static final String SNAPSHOT_MANIFEST_SIZE_LIMIT_CONF_KEY = "snapshot.manifest.size.limit";
+
+  public static final String DATA_MANIFEST_NAME = "data.manifest";
 
   private List<SnapshotRegionManifest> regionManifests;
   private SnapshotDescription desc;
@@ -78,6 +83,7 @@ public final class SnapshotManifest {
   private final Configuration conf;
   private final Path workingDir;
   private final FileSystem fs;
+  private int manifestSizeLimit;
 
   private SnapshotManifest(final Configuration conf, final FileSystem fs,
       final Path workingDir, final SnapshotDescription desc,
@@ -87,6 +93,8 @@ public final class SnapshotManifest {
     this.workingDir = workingDir;
     this.conf = conf;
     this.fs = fs;
+
+    this.manifestSizeLimit = conf.getInt(SNAPSHOT_MANIFEST_SIZE_LIMIT_CONF_KEY, 64 * 1024 * 1024);
   }
 
   /**
@@ -353,7 +361,7 @@ public final class SnapshotManifest {
       case SnapshotManifestV2.DESCRIPTOR_VERSION: {
         SnapshotDataManifest dataManifest = readDataManifest();
         if (dataManifest != null) {
-          htd = HTableDescriptor.convert(dataManifest.getTableSchema());
+          htd = ProtobufUtil.convertToHTableDesc(dataManifest.getTableSchema());
           regionManifests = dataManifest.getRegionManifestsList();
         } else {
           // Compatibility, load the v1 regions
@@ -363,6 +371,9 @@ public final class SnapshotManifest {
           try {
             v1Regions = SnapshotManifestV1.loadRegionManifests(conf, tpool, fs, workingDir, desc);
             v2Regions = SnapshotManifestV2.loadRegionManifests(conf, tpool, fs, workingDir, desc);
+          } catch (InvalidProtocolBufferException e) {
+            throw new CorruptedSnapshotException("unable to parse region manifest " +
+                e.getMessage(), e);
           } finally {
             tpool.shutdown();
           }
@@ -458,7 +469,7 @@ public final class SnapshotManifest {
     }
 
     SnapshotDataManifest.Builder dataManifestBuilder = SnapshotDataManifest.newBuilder();
-    dataManifestBuilder.setTableSchema(htd.convert());
+    dataManifestBuilder.setTableSchema(ProtobufUtil.convertToTableSchema(htd));
 
     if (v1Regions != null && v1Regions.size() > 0) {
       dataManifestBuilder.addAllRegionManifests(v1Regions);
@@ -512,9 +523,13 @@ public final class SnapshotManifest {
     FSDataInputStream in = null;
     try {
       in = fs.open(new Path(workingDir, DATA_MANIFEST_NAME));
-      return SnapshotDataManifest.parseFrom(in);
+      CodedInputStream cin = CodedInputStream.newInstance(in);
+      cin.setSizeLimit(manifestSizeLimit);
+      return SnapshotDataManifest.parseFrom(cin);
     } catch (FileNotFoundException e) {
       return null;
+    } catch (InvalidProtocolBufferException e) {
+      throw new CorruptedSnapshotException("unable to parse data manifest " + e.getMessage(), e);
     } finally {
       if (in != null) in.close();
     }

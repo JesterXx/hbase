@@ -38,6 +38,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -81,12 +82,14 @@ public class TestBulkLoad {
 
   @ClassRule
   public static TemporaryFolder testFolder = new TemporaryFolder();
+  private static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private final WAL log = mock(WAL.class);
   private final Configuration conf = HBaseConfiguration.create();
   private final Random random = new Random();
   private final byte[] randomBytes = new byte[100];
   private final byte[] family1 = Bytes.toBytes("family1");
   private final byte[] family2 = Bytes.toBytes("family2");
+
   @Rule
   public TestName name = new TestName();
 
@@ -105,12 +108,12 @@ public class TestBulkLoad {
     storeFileName = (new Path(storeFileName)).getName();
     List<String> storeFileNames = new ArrayList<String>();
     storeFileNames.add(storeFileName);
-    when(log.append(any(HTableDescriptor.class), any(HRegionInfo.class), any(WALKey.class),
+    when(log.append(any(HRegionInfo.class), any(WALKey.class),
             argThat(bulkLogWalEdit(WALEdit.BULK_LOAD, tableName.toBytes(),
                     familyName, storeFileNames)),
             any(boolean.class))).thenAnswer(new Answer() {
       public Object answer(InvocationOnMock invocation) {
-        WALKey walKey = invocation.getArgumentAt(2, WALKey.class);
+        WALKey walKey = invocation.getArgumentAt(1, WALKey.class);
         MultiVersionConcurrencyControl mvcc = walKey.getMvcc();
         if (mvcc != null) {
           MultiVersionConcurrencyControl.WriteEntry we = mvcc.begin();
@@ -132,11 +135,11 @@ public class TestBulkLoad {
 
   @Test
   public void shouldBulkLoadSingleFamilyHLog() throws IOException {
-    when(log.append(any(HTableDescriptor.class), any(HRegionInfo.class),
+    when(log.append(any(HRegionInfo.class),
             any(WALKey.class), argThat(bulkLogWalEditType(WALEdit.BULK_LOAD)),
             any(boolean.class))).thenAnswer(new Answer() {
       public Object answer(InvocationOnMock invocation) {
-        WALKey walKey = invocation.getArgumentAt(2, WALKey.class);
+        WALKey walKey = invocation.getArgumentAt(1, WALKey.class);
         MultiVersionConcurrencyControl mvcc = walKey.getMvcc();
         if (mvcc != null) {
           MultiVersionConcurrencyControl.WriteEntry we = mvcc.begin();
@@ -151,11 +154,11 @@ public class TestBulkLoad {
 
   @Test
   public void shouldBulkLoadManyFamilyHLog() throws IOException {
-    when(log.append(any(HTableDescriptor.class), any(HRegionInfo.class),
+    when(log.append(any(HRegionInfo.class),
             any(WALKey.class), argThat(bulkLogWalEditType(WALEdit.BULK_LOAD)),
             any(boolean.class))).thenAnswer(new Answer() {
               public Object answer(InvocationOnMock invocation) {
-                WALKey walKey = invocation.getArgumentAt(2, WALKey.class);
+                WALKey walKey = invocation.getArgumentAt(1, WALKey.class);
                 MultiVersionConcurrencyControl mvcc = walKey.getMvcc();
                 if (mvcc != null) {
                   MultiVersionConcurrencyControl.WriteEntry we = mvcc.begin();
@@ -171,11 +174,11 @@ public class TestBulkLoad {
 
   @Test
   public void shouldBulkLoadManyFamilyHLogEvenWhenTableNameNamespaceSpecified() throws IOException {
-    when(log.append(any(HTableDescriptor.class), any(HRegionInfo.class),
+    when(log.append(any(HRegionInfo.class),
             any(WALKey.class), argThat(bulkLogWalEditType(WALEdit.BULK_LOAD)),
             any(boolean.class))).thenAnswer(new Answer() {
       public Object answer(InvocationOnMock invocation) {
-        WALKey walKey = invocation.getArgumentAt(2, WALKey.class);
+        WALKey walKey = invocation.getArgumentAt(1, WALKey.class);
         MultiVersionConcurrencyControl mvcc = walKey.getMvcc();
         if (mvcc != null) {
           MultiVersionConcurrencyControl.WriteEntry we = mvcc.begin();
@@ -216,13 +219,18 @@ public class TestBulkLoad {
   }
 
   private Pair<byte[], String> withMissingHFileForFamily(byte[] family) {
-    return new Pair<byte[], String>(family, "/tmp/does_not_exist");
+    return new Pair<byte[], String>(family, getNotExistFilePath());
+  }
+
+  private String getNotExistFilePath() {
+    Path path = new Path(TEST_UTIL.getDataTestDir(), "does_not_exist");
+    return path.toUri().getPath();
   }
 
   private Pair<byte[], String> withInvalidColumnFamilyButProperHFileLocation(byte[] family)
       throws IOException {
     createHFileForFamilies(family);
-    return new Pair<byte[], String>(new byte[]{0x00, 0x01, 0x02}, "/tmp/does_not_exist");
+    return new Pair<byte[], String>(new byte[]{0x00, 0x01, 0x02}, getNotExistFilePath());
   }
 
 

@@ -60,6 +60,10 @@ public class TestMetricsRegionServer {
     HELPER.assertGauge("regionServerStartTime", 100, serverSource);
     HELPER.assertGauge("regionCount", 101, serverSource);
     HELPER.assertGauge("storeCount", 2, serverSource);
+    HELPER.assertGauge("maxStoreFileAge", 2, serverSource);
+    HELPER.assertGauge("minStoreFileAge", 2, serverSource);
+    HELPER.assertGauge("avgStoreFileAge", 2, serverSource);
+    HELPER.assertGauge("numReferenceFiles", 2, serverSource);
     HELPER.assertGauge("hlogFileCount", 10, serverSource);
     HELPER.assertGauge("hlogFileSize", 1024000, serverSource);
     HELPER.assertGauge("storeFileCount", 300, serverSource);
@@ -67,6 +71,7 @@ public class TestMetricsRegionServer {
     HELPER.assertGauge("storeFileSize", 1900, serverSource);
     HELPER.assertCounter("totalRequestCount", 899, serverSource);
     HELPER.assertCounter("readRequestCount", 997, serverSource);
+    HELPER.assertCounter("filteredReadRequestCount", 1997, serverSource);
     HELPER.assertCounter("writeRequestCount", 707, serverSource);
     HELPER.assertCounter("checkMutateFailedCount", 401, serverSource);
     HELPER.assertCounter("checkMutatePassedCount", 405, serverSource);
@@ -132,6 +137,70 @@ public class TestMetricsRegionServer {
     HELPER.assertCounter("slowGetCount", 14, serverSource);
     HELPER.assertCounter("slowIncrementCount", 15, serverSource);
     HELPER.assertCounter("slowPutCount", 16, serverSource);
+  }
+
+  String FLUSH_TIME = "flushTime";
+  String FLUSH_TIME_DESC = "Histogram for the time in millis for memstore flush";
+  String FLUSH_MEMSTORE_SIZE = "flushMemstoreSize";
+  String FLUSH_MEMSTORE_SIZE_DESC = "Histogram for number of bytes in the memstore for a flush";
+  String FLUSH_FILE_SIZE = "flushFileSize";
+  String FLUSH_FILE_SIZE_DESC = "Histogram for number of bytes in the resulting file for a flush";
+  String FLUSHED_OUTPUT_BYTES = "flushedOutputBytes";
+  String FLUSHED_OUTPUT_BYTES_DESC = "Total number of bytes written from flush";
+  String FLUSHED_MEMSTORE_BYTES = "flushedMemstoreBytes";
+  String FLUSHED_MEMSTORE_BYTES_DESC = "Total number of bytes of cells in memstore from flush";
+
+  @Test
+  public void testFlush() {
+    rsm.updateFlush(1, 2, 3);
+    HELPER.assertCounter("flushTime_num_ops", 1, serverSource);
+    HELPER.assertCounter("flushMemstoreSize_num_ops", 1, serverSource);
+    HELPER.assertCounter("flushOutputSize_num_ops", 1, serverSource);
+    HELPER.assertCounter("flushedMemstoreBytes", 2, serverSource);
+    HELPER.assertCounter("flushedOutputBytes", 3, serverSource);
+
+    rsm.updateFlush(10, 20, 30);
+    HELPER.assertCounter("flushTimeNumOps", 2, serverSource);
+    HELPER.assertCounter("flushMemstoreSize_num_ops", 2, serverSource);
+    HELPER.assertCounter("flushOutputSize_num_ops", 2, serverSource);
+    HELPER.assertCounter("flushedMemstoreBytes", 22, serverSource);
+    HELPER.assertCounter("flushedOutputBytes", 33, serverSource);
+  }
+
+  @Test
+  public void testCompaction() {
+    rsm.updateCompaction(false, 1, 2, 3, 4, 5);
+    HELPER.assertCounter("compactionTime_num_ops", 1, serverSource);
+    HELPER.assertCounter("compactionInputFileCount_num_ops", 1, serverSource);
+    HELPER.assertCounter("compactionInputSize_num_ops", 1, serverSource);
+    HELPER.assertCounter("compactionOutputFileCount_num_ops", 1, serverSource);
+    HELPER.assertCounter("compactedInputBytes", 4, serverSource);
+    HELPER.assertCounter("compactedoutputBytes", 5, serverSource);
+
+    rsm.updateCompaction(false, 10, 20, 30, 40, 50);
+    HELPER.assertCounter("compactionTime_num_ops", 2, serverSource);
+    HELPER.assertCounter("compactionInputFileCount_num_ops", 2, serverSource);
+    HELPER.assertCounter("compactionInputSize_num_ops", 2, serverSource);
+    HELPER.assertCounter("compactionOutputFileCount_num_ops", 2, serverSource);
+    HELPER.assertCounter("compactedInputBytes", 44, serverSource);
+    HELPER.assertCounter("compactedoutputBytes", 55, serverSource);
+
+    // do major compaction
+    rsm.updateCompaction(true, 100, 200, 300, 400, 500);
+
+    HELPER.assertCounter("compactionTime_num_ops", 3, serverSource);
+    HELPER.assertCounter("compactionInputFileCount_num_ops", 3, serverSource);
+    HELPER.assertCounter("compactionInputSize_num_ops", 3, serverSource);
+    HELPER.assertCounter("compactionOutputFileCount_num_ops", 3, serverSource);
+    HELPER.assertCounter("compactedInputBytes", 444, serverSource);
+    HELPER.assertCounter("compactedoutputBytes", 555, serverSource);
+
+    HELPER.assertCounter("majorCompactionTime_num_ops", 1, serverSource);
+    HELPER.assertCounter("majorCompactionInputFileCount_num_ops", 1, serverSource);
+    HELPER.assertCounter("majorCompactionInputSize_num_ops", 1, serverSource);
+    HELPER.assertCounter("majorCompactionOutputFileCount_num_ops", 1, serverSource);
+    HELPER.assertCounter("majorCompactedInputBytes", 400, serverSource);
+    HELPER.assertCounter("majorCompactedoutputBytes", 500, serverSource);
   }
 }
 

@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A very simple {@code }RpcScheduler} that serves incoming requests in order.
@@ -31,14 +32,14 @@ import java.util.concurrent.TimeUnit;
  * This can be used for HMaster, where no prioritization is needed.
  */
 public class FifoRpcScheduler extends RpcScheduler {
-
   private final int handlerCount;
   private final int maxQueueLength;
+  private final AtomicInteger queueSize = new AtomicInteger(0);
   private ThreadPoolExecutor executor;
 
   public FifoRpcScheduler(Configuration conf, int handlerCount) {
     this.handlerCount = handlerCount;
-    this.maxQueueLength = conf.getInt("hbase.ipc.server.max.callqueue.length",
+    this.maxQueueLength = conf.getInt(RpcScheduler.IPC_SERVER_MAX_CALLQUEUE_LENGTH,
         handlerCount * RpcServer.DEFAULT_MAX_CALLQUEUE_LENGTH_PER_HANDLER);
   }
 
@@ -65,14 +66,22 @@ public class FifoRpcScheduler extends RpcScheduler {
   }
 
   @Override
-  public void dispatch(final CallRunner task) throws IOException, InterruptedException {
+  public boolean dispatch(final CallRunner task) throws IOException, InterruptedException {
+    // Executors provide no offer, so make our own.
+    int queued = queueSize.getAndIncrement();
+    if (maxQueueLength > 0 && queued >= maxQueueLength) {
+      queueSize.decrementAndGet();
+      return false;
+    }
     executor.submit(new Runnable() {
       @Override
       public void run() {
         task.setStatus(RpcServer.getStatus());
         task.run();
+        queueSize.decrementAndGet();
       }
     });
+    return true;
   }
 
   @Override
@@ -93,5 +102,15 @@ public class FifoRpcScheduler extends RpcScheduler {
   @Override
   public int getActiveRpcHandlerCount() {
     return executor.getActiveCount();
+  }
+
+  @Override
+  public long getNumGeneralCallsDropped() {
+    return 0;
+  }
+
+  @Override
+  public long getNumLifoModeSwitches() {
+    return 0;
   }
 }

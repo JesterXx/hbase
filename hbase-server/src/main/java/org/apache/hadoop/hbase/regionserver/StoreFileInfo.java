@@ -97,6 +97,9 @@ public class StoreFileInfo {
 
   private RegionCoprocessorHost coprocessorHost;
 
+  // timestamp on when the file was created, is 0 and ignored for reference or link files
+  private long createdTimestamp;
+
   /**
    * Create a Store File Info
    * @param conf the {@link Configuration} to use
@@ -132,6 +135,7 @@ public class StoreFileInfo {
               " reference to " + referencePath);
     } else if (isHFile(p)) {
       // HFile
+      this.createdTimestamp = fs.getFileStatus(initialPath).getModificationTime();
       this.reference = null;
       this.link = null;
     } else {
@@ -182,6 +186,7 @@ public class StoreFileInfo {
     this.fs = fs;
     this.conf = conf;
     this.initialPath = fileStatus.getPath();
+    this.createdTimestamp = fileStatus.getModificationTime();
     this.reference = reference;
     this.link = null;
   }
@@ -228,7 +233,7 @@ public class StoreFileInfo {
    * @param cacheConf The cache configuration and block cache reference.
    * @return The StoreFile.Reader for the file
    */
-  public StoreFile.Reader open(final FileSystem fs,
+  public StoreFileReader open(final FileSystem fs,
       final CacheConfig cacheConf, final boolean canUseDropBehind) throws IOException {
     FSDataInputStreamWrapper in;
     FileStatus status;
@@ -252,7 +257,7 @@ public class StoreFileInfo {
     long length = status.getLen();
     hdfsBlocksDistribution = computeHDFSBlocksDistribution(fs);
 
-    StoreFile.Reader reader = null;
+    StoreFileReader reader = null;
     if (this.coprocessorHost != null) {
       reader = this.coprocessorHost.preStoreFileReaderOpen(fs, this.getPath(), in, length,
         cacheConf, reference);
@@ -262,7 +267,7 @@ public class StoreFileInfo {
         reader = new HalfStoreFileReader(fs, this.getPath(), in, length, cacheConf, reference,
           conf);
       } else {
-        reader = new StoreFile.Reader(fs, status.getPath(), in, length, cacheConf, conf);
+        reader = new StoreFileReader(fs, status.getPath(), in, length, cacheConf, conf);
       }
     }
     if (this.coprocessorHost != null) {
@@ -417,6 +422,13 @@ public class StoreFileInfo {
   public static boolean isReference(final String name) {
     Matcher m = REF_NAME_PATTERN.matcher(name);
     return m.matches() && m.groupCount() > 1;
+  }
+
+  /**
+   * @return timestamp when this file was created (as returned by filesystem)
+   */
+  public long getCreatedTimestamp() {
+    return createdTimestamp;
   }
 
   /*

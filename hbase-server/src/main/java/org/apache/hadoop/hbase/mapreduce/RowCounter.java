@@ -118,10 +118,7 @@ public class RowCounter extends Configured implements Tool {
         }
         startKey = startEnd[0];
         endKey = startEnd[1];
-      }
-      if (startTime < endTime) {
-        printUsage("--endtime=" + endTime + " needs to be greater than --starttime=" + startTime);
-        return null;
+        continue;
       }
       if (args[i].startsWith(startTimeArgKey)) {
         startTime = Long.parseLong(args[i].substring(startTimeArgKey.length()));
@@ -136,11 +133,13 @@ public class RowCounter extends Configured implements Tool {
             Long.parseLong(args[i].substring(expectedCountArg.length())));
         continue;
       }
-      else {
-        // if no switch, assume column names
-        sb.append(args[i]);
-        sb.append(" ");
-      }
+      // if no switch, assume column names
+      sb.append(args[i]);
+      sb.append(" ");
+    }
+    if (endTime < startTime) {
+      printUsage("--endtime=" + endTime + " needs to be greater than --starttime=" + startTime);
+      return null;
     }
 
     Job job = Job.getInstance(conf, conf.get(JOB_NAME_CONF_KEY, NAME + "_" + tableName));
@@ -148,10 +147,10 @@ public class RowCounter extends Configured implements Tool {
     Scan scan = new Scan();
     scan.setCacheBlocks(false);
     if (startKey != null && !startKey.equals("")) {
-      scan.setStartRow(Bytes.toBytes(startKey));
+      scan.setStartRow(Bytes.toBytesBinary(startKey));
     }
     if (endKey != null && !endKey.equals("")) {
-      scan.setStopRow(Bytes.toBytes(endKey));
+      scan.setStopRow(Bytes.toBytesBinary(endKey));
     }
     if (sb.length() > 0) {
       for (String columnName : sb.toString().trim().split(" ")) {
