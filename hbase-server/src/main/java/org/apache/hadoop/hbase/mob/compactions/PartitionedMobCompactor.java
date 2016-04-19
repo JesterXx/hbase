@@ -19,6 +19,7 @@
 package org.apache.hadoop.hbase.mob.compactions;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -410,7 +411,11 @@ public class PartitionedMobCompactor extends MobCompactor {
     Path refFilePath = null;
     long mobCells = 0;
     try {
-      writer = MobUtils.createWriter(rss, regionInfo.getEncodedName(), conf, fs,
+      InetSocketAddress[] favoredNodes = null;
+      if (rss != null && regionInfo.getEncodedName() != null) {
+        favoredNodes = rss.getFavoredNodesForRegion(regionInfo.getEncodedName());
+      }
+      writer = MobUtils.createWriter(favoredNodes, conf, fs,
         column, partition.getPartitionId().getDate(), tempPath, Long.MAX_VALUE,
         column.getCompactionCompression(), partition.getPartitionId().getStartKey(),
         compactionCacheConfig, cryptoContext);
@@ -518,8 +523,8 @@ public class PartitionedMobCompactor extends MobCompactor {
    * @param startKey The start key of the region where the mob file comes from.
    * @throws IOException
    */
-  private void closeMobFileWriter(Writer writer, long maxSeqId, long mobCellsCount, byte[] startKey)
-    throws IOException {
+  private void closeMobFileWriter(StoreFileWriter writer, long maxSeqId, long mobCellsCount,
+    byte[] startKey) throws IOException {
     if (writer != null) {
       writer.appendMetadata(maxSeqId, false, mobCellsCount, startKey);
       try {

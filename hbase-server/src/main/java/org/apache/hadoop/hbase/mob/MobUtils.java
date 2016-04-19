@@ -62,7 +62,6 @@ import org.apache.hadoop.hbase.io.hfile.HFileContext;
 import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HStore;
-import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -445,8 +444,7 @@ public final class MobUtils {
 
   /**
    * Creates a writer for the mob file in temp directory.
-   * @param rss The current region server services.
-   * @param regionEncodedName The encoded name of the current region.
+   * @param favoredNodes The favored nodes.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -460,14 +458,14 @@ public final class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public static StoreFile.Writer createWriter(RegionServerServices rss, String regionEncodedName,
+  public static StoreFileWriter createWriter(InetSocketAddress[] favoredNodes,
     Configuration conf, FileSystem fs, HColumnDescriptor family, String date, Path basePath,
     long maxKeyCount, Compression.Algorithm compression, String startKey, CacheConfig cacheConfig,
     Encryption.Context cryptoContext)
       throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID().toString()
         .replaceAll("-", ""));
-    return createWriter(rss, regionEncodedName, conf, fs, family, mobFileName, basePath,
+    return createWriter(favoredNodes, conf, fs, family, mobFileName, basePath,
       maxKeyCount, compression, cacheConfig, cryptoContext);
   }
 
@@ -503,8 +501,7 @@ public final class MobUtils {
 
   /**
    * Creates a writer for the mob file in temp directory.
-   * @param rss The current region server services.
-   * @param regionEncodedName The encoded name of the current region.
+   * @param favoredNodes The favored nodes.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -518,14 +515,14 @@ public final class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public static StoreFile.Writer createWriter(RegionServerServices rss, String regionEncodedName,
+  public static StoreFileWriter createWriter(InetSocketAddress[] favoredNodes,
     Configuration conf, FileSystem fs, HColumnDescriptor family, String date, Path basePath,
     long maxKeyCount, Compression.Algorithm compression, byte[] startKey, CacheConfig cacheConfig,
     Encryption.Context cryptoContext)
       throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID().toString()
         .replaceAll("-", ""));
-    return createWriter(rss, regionEncodedName, conf, fs, family, mobFileName, basePath,
+    return createWriter(favoredNodes, conf, fs, family, mobFileName, basePath,
       maxKeyCount, compression, cacheConfig, cryptoContext);
   }
 
@@ -552,14 +549,13 @@ public final class MobUtils {
     String suffix = UUID
       .randomUUID().toString().replaceAll("-", "") + "_del";
     MobFileName mobFileName = MobFileName.create(startKey, date, suffix);
-    return createWriter(null, null, conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
+    return createWriter(null, conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
       cacheConfig, cryptoContext);
   }
 
   /**
    * Creates a writer for the mob file in temp directory.
-   * @param rss The current region server services.
-   * @param regionEncodedName The encoded name of the current region.
+   * @param favoredNodes The favored nodes.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -572,7 +568,7 @@ public final class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  private static StoreFile.Writer createWriter(RegionServerServices rss, String regionEncodedName,
+  private static StoreFileWriter createWriter(InetSocketAddress[] favoredNodes,
     Configuration conf, FileSystem fs, HColumnDescriptor family, MobFileName mobFileName,
     Path basePath, long maxKeyCount, Compression.Algorithm compression, CacheConfig cacheConfig,
     Encryption.Context cryptoContext) throws IOException {
@@ -584,12 +580,7 @@ public final class MobUtils {
       .withHBaseCheckSum(true).withDataBlockEncoding(family.getDataBlockEncoding())
       .withEncryptionContext(cryptoContext)
       .withCreateTime(EnvironmentEdgeManager.currentTime()).build();
-
-    InetSocketAddress[] favoredNodes = null;
-    if (rss != null && regionEncodedName != null) {
-      favoredNodes = rss.getFavoredNodesForRegion(regionEncodedName);
-    }
-    StoreFile.Writer w = new StoreFile.WriterBuilder(conf, cacheConfig, fs)
+    StoreFileWriter w = new StoreFileWriter.Builder(conf, cacheConfig, fs)
       .withFilePath(new Path(basePath, mobFileName.getFileName()))
       .withComparator(CellComparator.COMPARATOR).withBloomType(BloomType.NONE)
       .withMaxKeyCount(maxKeyCount).withFavoredNodes(favoredNodes).withFileContext(hFileContext)
