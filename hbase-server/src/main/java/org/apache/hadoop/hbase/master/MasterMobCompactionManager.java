@@ -72,9 +72,9 @@ import org.apache.hadoop.hbase.regionserver.ScanInfo;
 import org.apache.hadoop.hbase.regionserver.ScanType;
 import org.apache.hadoop.hbase.regionserver.ScannerContext;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
-import org.apache.hadoop.hbase.regionserver.StoreFile.Writer;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
 import org.apache.hadoop.hbase.regionserver.StoreFileScanner;
+import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -538,7 +538,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       throws IOException {
       // create a scanner for the del files.
       StoreScanner scanner = createScanner(column, delFiles, ScanType.COMPACT_RETAIN_DELETES);
-      Writer writer = null;
+      StoreFileWriter writer = null;
       Path filePath = null;
       try {
         writer = MobUtils.createDelFileWriter(conf, fs, column,

@@ -231,8 +231,8 @@ public class MobCompactionSubprocedure extends Subprocedure {
       .setMethodName(
         MasterMobCompactionStatusProtos.MasterMobCompactionStatusService.getDescriptor()
           .getMethods().get(0).getName()).setRequest(request.toByteString()).build();
-    CoprocessorServiceResponse servieResponse = ProtobufUtil.execService(rss.getClusterConnection()
-      .getMaster(), call);
+    CoprocessorServiceResponse servieResponse = ProtobufUtil.execService(null, rss
+      .getClusterConnection().getMaster(), call);
     MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse response =
       MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse
       .parseFrom(servieResponse.getValue().getValue());
@@ -256,7 +256,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
       .setMethodName(
         MasterMobCompactionStatusProtos.MasterMobCompactionStatusService.getDescriptor()
           .getMethods().get(1).getName()).setRequest(request.toByteString()).build();
-    ProtobufUtil.execService(rss.getClusterConnection().getMaster(), call);
+    ProtobufUtil.execService(null, rss.getClusterConnection().getMaster(), call);
   }
 
   // Callable for mob compaction.
