@@ -614,7 +614,7 @@ public class StoreFile {
     return false;
   }
 
-    /**
+  /**
    * @param fs
    * @param dir Directory to create file in.
    * @return random filename inside passed <code>dir</code>
@@ -739,7 +739,7 @@ public class StoreFile {
       @Override
       public Long apply(StoreFile sf) {
         return sf.getMaximumTimestamp() == null? (Long)Long.MAX_VALUE : sf.getMaximumTimestamp();
-  }
+      }
     }
   }
 }
