@@ -78,12 +78,15 @@ public class MobCompactionSubprocedure extends Subprocedure {
   private boolean allRegionsOnline;
   private Path mobFamilyDir;
   private CacheConfig cacheConfig;
+  private RegionServerMobCompactionProcedureManager procedureManager;
 
-  public MobCompactionSubprocedure(ProcedureMember member, String procName,
-    ForeignExceptionDispatcher errorListener, long wakeFrequency, long timeout,
-    RegionServerServices rss, List<Region> regions, TableName tableName, String columnName,
-    MobCompactionSubprocedurePool taskManager, boolean allFiles, boolean allRegionsOnline) {
+  public MobCompactionSubprocedure(RegionServerMobCompactionProcedureManager procedureManager,
+    ProcedureMember member, String procName, ForeignExceptionDispatcher errorListener,
+    long wakeFrequency, long timeout, RegionServerServices rss, List<Region> regions,
+    TableName tableName, String columnName, MobCompactionSubprocedurePool taskManager,
+    boolean allFiles, boolean allRegionsOnline) {
     super(member, procName, errorListener, wakeFrequency, timeout);
+    this.procedureManager = procedureManager;
     this.procName = procName;
     this.tableName = tableName;
     this.columnName = columnName;
@@ -108,6 +111,23 @@ public class MobCompactionSubprocedure extends Subprocedure {
       // No regions on this RS, we are basically done.
       return;
     }
+    synchronized (procedureManager) {
+      if (procedureManager.tablesToCompact.contains(tableName)) {
+        throw new ForeignException(getMemberName(), "The MOB compaction of the table " + tableName
+          + " is in progress in the server " + rss.getServerName());
+      }
+      procedureManager.tablesToCompact.add(tableName);
+    }
+    try {
+      execMobCompaction();
+    } finally {
+      synchronized (procedureManager) {
+        procedureManager.tablesToCompact.remove(tableName);
+      }
+    }
+  }
+
+  private void execMobCompaction() throws ForeignException {
     List<FileStatus> files = null;
     try {
       files = Arrays.asList(rss.getFileSystem().listStatus(mobFamilyDir));
