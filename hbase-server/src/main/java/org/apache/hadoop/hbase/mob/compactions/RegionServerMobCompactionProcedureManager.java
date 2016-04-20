@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.mob.compactions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -50,7 +51,6 @@ import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
-import org.apache.mina.util.ConcurrentHashSet;
 import org.apache.zookeeper.KeeperException;
 
 /**
@@ -76,7 +76,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
   public static final String MOB_COMPACTION_WAKE_MILLIS_KEY =
     "hbase.mob.compaction.procedure.wakefrequency";
   private static final long MOB_COMPACTION_WAKE_MILLIS_DEFAULT = 500;
-  Set<TableName> tablesToCompact = new ConcurrentHashSet<TableName>();
+  Set<TableName> tablesToCompact = new HashSet<TableName>();
 
   @Override
   public void initialize(RegionServerServices rss) throws KeeperException {
