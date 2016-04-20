@@ -71,7 +71,7 @@ public class ExpiredMobFileCleaner extends Configured implements Tool {
     LOG.info("Cleaning the expired MOB files of " + family.getNameAsString() + " in " + tableName);
     // disable the block cache.
     Configuration copyOfConf = new Configuration(conf);
-    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
+    copyOfConf.setBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY, Boolean.FALSE);
     CacheConfig cacheConfig = new CacheConfig(copyOfConf);
     MobUtils.cleanExpiredMobFiles(fs, conf, tn, family, cacheConfig,
         EnvironmentEdgeManager.currentTime());

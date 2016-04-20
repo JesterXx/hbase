@@ -116,7 +116,7 @@ public class PartitionedMobCompactor extends MobCompactor {
     compactionKVMax = this.conf.getInt(HConstants.COMPACTION_KV_MAX,
       HConstants.COMPACTION_KV_MAX_DEFAULT);
     Configuration copyOfConf = new Configuration(conf);
-    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
+    copyOfConf.setBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY, Boolean.FALSE);
     compactionCacheConfig = new CacheConfig(copyOfConf);
     tableNameTag = new ArrayBackedTag(TagType.MOB_TABLE_NAME_TAG_TYPE, tableName.getName());
     cryptoContext = EncryptionUtil.createEncryptionContext(copyOfConf, column);

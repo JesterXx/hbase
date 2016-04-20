@@ -140,7 +140,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       HConstants.COMPACTION_KV_MAX_DEFAULT);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
     Configuration copyOfConf = new Configuration(conf);
-    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
+    copyOfConf.setBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY, Boolean.FALSE);
     compactionCacheConfig = new CacheConfig(copyOfConf);
     // this pool is used to run the mob compaction
     if (mobCompactionPool != null) {
