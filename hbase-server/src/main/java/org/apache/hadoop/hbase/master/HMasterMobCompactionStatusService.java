@@ -20,14 +20,17 @@ package org.apache.hadoop.hbase.master;
 
 import java.util.List;
 
+import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.MasterMobCompactionStatusService;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorResponse;
 
+import com.google.protobuf.ByteString;
 import com.google.protobuf.RpcCallback;
 import com.google.protobuf.RpcController;
 
@@ -44,19 +47,21 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
   }
 
   /**
-   * Gets the MD5 of the start keys of the compacted regions.
+   * Gets the start keys of the compacted regions.
    */
   @Override
   public void getMobCompactRegions(RpcController controller, GetMobCompactRegionsRequest request,
     RpcCallback<GetMobCompactRegionsResponse> done) {
-    String tableNameAsString = request.getTableName();
-    String serverName = request.getServerName();
-    TableName tableName = TableName.valueOf(tableNameAsString);
-    List<String> regionStartKeys = master.mobCompactionManager.getCompactingRegions(tableName,
-      serverName);
+    org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.TableName tnPb = request.getTableName();
+    org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName snPb = request
+      .getServerName();
+    List<byte[]> regionStartKeys = master.mobCompactionManager.getCompactingRegions(
+      ProtobufUtil.toTableName(tnPb), ProtobufUtil.toServerName(snPb));
     GetMobCompactRegionsResponse.Builder builder = GetMobCompactRegionsResponse.newBuilder();
     if (!regionStartKeys.isEmpty()) {
-      builder.addAllRegionStartKey(regionStartKeys);
+      for (byte[] startKey : regionStartKeys) {
+        builder.addRegionStartKey(ByteString.copyFrom(startKey));
+      }
     }
     done.run(builder.build());
   }
@@ -68,9 +73,8 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
   public void updateMobCompactionAsMajor(RpcController controller,
     UpdateMobCompactionAsMajorRequest request,
     RpcCallback<UpdateMobCompactionAsMajorResponse> done) {
-    String tableNameAsString = request.getTableName();
-    String serverName = request.getServerName();
-    TableName tableName = TableName.valueOf(tableNameAsString);
+    TableName tableName = ProtobufUtil.toTableName(request.getTableName());
+    ServerName serverName = ProtobufUtil.toServerName(request.getServerName());
     master.mobCompactionManager.updateAsMajorCompaction(tableName, serverName);
     done.run(UpdateMobCompactionAsMajorResponse.getDefaultInstance());
   }

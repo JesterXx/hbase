@@ -55,8 +55,8 @@ import org.apache.hadoop.hbase.regionserver.RegionServerServices;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.util.ByteStringer;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.MD5Hash;
 
+import com.google.protobuf.ByteString;
 import com.google.protobuf.ServiceException;
 
 /**
@@ -207,16 +207,13 @@ public class MobCompactionSubprocedure extends Subprocedure {
       // if they are the same, it means all regions are online, all mob files owned by this region
       // server can be compacted. We call tell master this thing by setting data in zookeeper.
       try {
-        List<String> foundRegionStartKeys = getCompactRegions();
+        List<byte[]> foundRegionStartKeys = getCompactRegions();
         if (foundRegionStartKeys.size() == sortedStartKeys.size()) {
           Collections.sort(sortedStartKeys, Bytes.BYTES_COMPARATOR);
-          List<String> onlineRegionStartKeys = new ArrayList<String>(sortedStartKeys.size());
-          for (byte[] startKey : sortedStartKeys) {
-            onlineRegionStartKeys.add(MD5Hash.getMD5AsHex(startKey));
-          }
           boolean equals = true;
           for (int i = 0; i < foundRegionStartKeys.size(); i++) {
-            if (!foundRegionStartKeys.get(i).equals(onlineRegionStartKeys.get(i))) {
+            if (Bytes.BYTES_COMPARATOR.compare(foundRegionStartKeys.get(i),
+              sortedStartKeys.get(i))!= 0) {
               equals = false;
               break;
             }
@@ -235,13 +232,13 @@ public class MobCompactionSubprocedure extends Subprocedure {
 
   /**
    * Gets the regions that run the mob compaction.
-   * @return The MD5 of start keys of regions that run the mob compaction.
+   * @return The start keys of regions that run the mob compaction.
    */
-  private List<String> getCompactRegions() throws ServiceException, IOException {
+  private List<byte[]> getCompactRegions() throws ServiceException, IOException {
     MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request =
       MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest
-      .newBuilder().setServerName(rss.getServerName().getServerName())
-      .setTableName(tableName.getNameAsString()).build();
+      .newBuilder().setServerName(ProtobufUtil.toServerName(rss.getServerName()))
+      .setTableName(ProtobufUtil.toProtoTableName(tableName)).build();
     ClientProtos.CoprocessorServiceCall call = ClientProtos.CoprocessorServiceCall
       .newBuilder()
       .setRow(ByteStringer.wrap(HConstants.EMPTY_BYTE_ARRAY))
@@ -256,7 +253,11 @@ public class MobCompactionSubprocedure extends Subprocedure {
     MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse response =
       MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse
       .parseFrom(servieResponse.getValue().getValue());
-    return response.getRegionStartKeyList();
+    List<byte[]> results = new ArrayList<byte[]>(response.getRegionStartKeyCount());
+    for (ByteString bs : response.getRegionStartKeyList()) {
+      results.add(bs.toByteArray());
+    }
+    return results;
   }
 
   /**
@@ -265,8 +266,8 @@ public class MobCompactionSubprocedure extends Subprocedure {
   private void updateCompactionAsMajor() throws ServiceException, IOException {
     MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest request =
       MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest
-      .newBuilder().setServerName(rss.getServerName().getServerName())
-      .setTableName(tableName.getNameAsString()).build();
+      .newBuilder().setServerName(ProtobufUtil.toServerName(rss.getServerName()))
+      .setTableName(ProtobufUtil.toProtoTableName(tableName)).build();
     ClientProtos.CoprocessorServiceCall call = ClientProtos.CoprocessorServiceCall
       .newBuilder()
       .setRow(ByteStringer.wrap(HConstants.EMPTY_BYTE_ARRAY))

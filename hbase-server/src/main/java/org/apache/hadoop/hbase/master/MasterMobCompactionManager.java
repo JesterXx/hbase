@@ -80,7 +80,6 @@ import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
-import org.apache.hadoop.hbase.util.MD5Hash;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.zookeeper.KeeperException;
 
@@ -121,8 +120,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
   private ProcedureCoordinator coordinator;
   private Map<TableName, Future<Void>> compactions = new HashMap<TableName, Future<Void>>();
-  private Map<TableName, Map<String, Pair<Boolean, List<String>>>> compactingRegions =
-    new HashMap<TableName, Map<String, Pair<Boolean, List<String>>>>();
+  private Map<TableName, Map<ServerName, Pair<Boolean, List<byte[]>>>> compactingRegions =
+    new HashMap<TableName, Map<ServerName, Pair<Boolean, List<byte[]>>>>();
 
   public MasterMobCompactionManager(HMaster master) {
     this(master, null);
@@ -193,17 +192,17 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
    * @param serverName The server to run the mob compaction.
    * @return The start keys of regions that run the mob compaction.
    */
-  public List<String> getCompactingRegions(TableName tableName, String serverName) {
-    Map<String, Pair<Boolean, List<String>>> serverRegionMapping = compactingRegions
+  public List<byte[]> getCompactingRegions(TableName tableName, ServerName serverName) {
+    Map<ServerName, Pair<Boolean, List<byte[]>>> serverRegionMapping = compactingRegions
       .get(tableName);
     if (serverRegionMapping == null) {
       return Collections.emptyList();
     }
-    Pair<Boolean, List<String>> regions = serverRegionMapping.get(serverName);
-    if (regions == null) {
+    Pair<Boolean, List<byte[]>> pair = serverRegionMapping.get(serverName);
+    if (pair == null) {
       return Collections.emptyList();
     }
-    return regions.getSecond();
+    return pair.getSecond();
   }
 
   /**
@@ -211,17 +210,17 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
    * @param tableName The table to run the mob compaction.
    * @param serverName The server to run the mob compaction.
    */
-  public void updateAsMajorCompaction(TableName tableName, String serverName) {
-    Map<String, Pair<Boolean, List<String>>> serverRegionMapping = compactingRegions
+  public void updateAsMajorCompaction(TableName tableName, ServerName serverName) {
+    Map<ServerName, Pair<Boolean, List<byte[]>>> serverRegionMapping = compactingRegions
       .get(tableName);
     if (serverRegionMapping == null) {
       return;
     }
-    Pair<Boolean, List<String>> regions = serverRegionMapping.get(serverName);
-    if (regions == null) {
+    Pair<Boolean, List<byte[]>> pair = serverRegionMapping.get(serverName);
+    if (pair == null) {
       return;
     }
-    regions.setFirst(Boolean.TRUE);
+    pair.setFirst(Boolean.TRUE);
   }
 
   /**
@@ -344,7 +343,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       boolean allRegionsOnline = true;
       List<Pair<HRegionInfo, ServerName>> regionsAndLocations = MetaTableAccessor
         .getTableRegionsAndLocations(master.getConnection(), tableName, false);
-      Map<String, List<String>> regionServers = new HashMap<String, List<String>>();
+      Map<String, List<byte[]>> regionServers = new HashMap<String, List<byte[]>>();
       for (Pair<HRegionInfo, ServerName> region : regionsAndLocations) {
         if (region != null && region.getFirst() != null && region.getSecond() != null) {
           HRegionInfo hri = region.getFirst();
@@ -353,27 +352,27 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
             continue;
           }
           String serverName = region.getSecond().toString();
-          List<String> regionNames = regionServers.get(serverName);
+          List<byte[]> regionNames = regionServers.get(serverName);
           if (regionNames != null) {
-            regionNames.add(MD5Hash.getMD5AsHex(hri.getStartKey()));
+            regionNames.add(hri.getStartKey());
           } else {
-            regionNames = new ArrayList<String>();
-            regionNames.add(MD5Hash.getMD5AsHex(hri.getStartKey()));
+            regionNames = new ArrayList<byte[]>();
+            regionNames.add(hri.getStartKey());
             regionServers.put(serverName, regionNames);
           }
         }
       }
       boolean archiveDelFiles = false;
-      Map<String, Pair<Boolean, List<String>>> serverRegionMapping = Collections.emptyMap();
+      Map<ServerName, Pair<Boolean, List<byte[]>>> serverRegionMapping = Collections.emptyMap();
       if (allRegionsOnline && !regionServers.isEmpty()) {
         // record the online regions of each region server
-        serverRegionMapping =
-          new HashMap<String, Pair<Boolean, List<String>>>();
+        serverRegionMapping = new HashMap<ServerName, Pair<Boolean, List<byte[]>>>();
         compactingRegions.put(tableName, serverRegionMapping);
-        for (Entry<String, List<String>> entry : regionServers.entrySet()) {
-          String serverName = entry.getKey();
-          List<String> startKeysOfOnlineRegions = entry.getValue();
-          Pair<Boolean, List<String>> pair = new Pair<Boolean, List<String>>();
+        for (Entry<String, List<byte[]>> entry : regionServers.entrySet()) {
+          String serverNameAsString = entry.getKey();
+          ServerName serverName = ServerName.valueOf(serverNameAsString);
+          List<byte[]> startKeysOfOnlineRegions = entry.getValue();
+          Pair<Boolean, List<byte[]>> pair = new Pair<Boolean, List<byte[]>>();
           serverRegionMapping.put(serverName, pair);
           pair.setFirst(Boolean.FALSE);
           pair.setSecond(startKeysOfOnlineRegions);
@@ -401,7 +400,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         LOG.info("Done waiting - mob compaction for " + procedureName);
         if (allRegionsOnline && !serverRegionMapping.isEmpty()) {
           // check if all the files are selected in compaction of all region servers.
-          for (Entry<String, Pair<Boolean, List<String>>> entry : serverRegionMapping.entrySet()) {
+          for (Entry<ServerName, Pair<Boolean, List<byte[]>>> entry : serverRegionMapping
+            .entrySet()) {
             boolean isAllFiles = entry.getValue().getFirst();
             LOG.info("Mob compaction " + procedureName + " in server " + entry.getKey() + " is "
               + (isAllFiles ? "major" : "minor"));
