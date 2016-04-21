@@ -49,6 +49,7 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.Stoppable;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotEnabledException;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
@@ -88,6 +89,7 @@ import com.google.common.collect.Lists;
 /**
  * The mob compaction manager used in {@link HMaster}
  */
+@InterfaceAudience.Private
 public class MasterMobCompactionManager extends MasterProcedureManager implements Stoppable {
 
   static final Log LOG = LogFactory.getLog(MasterMobCompactionManager.class);

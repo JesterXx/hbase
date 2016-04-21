@@ -8,7 +8,7 @@ public final class MasterMobCompactionStatusProtos {
   public static void registerAllExtensions(
       com.google.protobuf.ExtensionRegistry registry) {
   }
-  public interface GetMobCompactRegionsRequestOrBuilder
+  public interface GetMobCompactionRegionsRequestOrBuilder
       extends com.google.protobuf.MessageOrBuilder {
 
     // required .hbase.pb.TableName table_name = 1;
@@ -40,24 +40,24 @@ public final class MasterMobCompactionStatusProtos {
     org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerNameOrBuilder getServerNameOrBuilder();
   }
   /**
-   * Protobuf type {@code hbase.pb.GetMobCompactRegionsRequest}
+   * Protobuf type {@code hbase.pb.GetMobCompactionRegionsRequest}
    */
-  public static final class GetMobCompactRegionsRequest extends
+  public static final class GetMobCompactionRegionsRequest extends
       com.google.protobuf.GeneratedMessage
-      implements GetMobCompactRegionsRequestOrBuilder {
-    // Use GetMobCompactRegionsRequest.newBuilder() to construct.
-    private GetMobCompactRegionsRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      implements GetMobCompactionRegionsRequestOrBuilder {
+    // Use GetMobCompactionRegionsRequest.newBuilder() to construct.
+    private GetMobCompactionRegionsRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
       super(builder);
       this.unknownFields = builder.getUnknownFields();
     }
-    private GetMobCompactRegionsRequest(boolean noInit) { this.unknownFields = com.google.protobuf.UnknownFieldSet.getDefaultInstance(); }
+    private GetMobCompactionRegionsRequest(boolean noInit) { this.unknownFields = com.google.protobuf.UnknownFieldSet.getDefaultInstance(); }
 
-    private static final GetMobCompactRegionsRequest defaultInstance;
-    public static GetMobCompactRegionsRequest getDefaultInstance() {
+    private static final GetMobCompactionRegionsRequest defaultInstance;
+    public static GetMobCompactionRegionsRequest getDefaultInstance() {
       return defaultInstance;
     }
 
-    public GetMobCompactRegionsRequest getDefaultInstanceForType() {
+    public GetMobCompactionRegionsRequest getDefaultInstanceForType() {
       return defaultInstance;
     }
 
@@ -67,7 +67,7 @@ public final class MasterMobCompactionStatusProtos {
         getUnknownFields() {
       return this.unknownFields;
     }
-    private GetMobCompactRegionsRequest(
+    private GetMobCompactionRegionsRequest(
         com.google.protobuf.CodedInputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
@@ -130,28 +130,28 @@ public final class MasterMobCompactionStatusProtos {
     }
     public static final com.google.protobuf.Descriptors.Descriptor
         getDescriptor() {
-      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsRequest_descriptor;
+      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsRequest_descriptor;
     }
 
     protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
         internalGetFieldAccessorTable() {
-      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsRequest_fieldAccessorTable
+      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsRequest_fieldAccessorTable
           .ensureFieldAccessorsInitialized(
-              org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.Builder.class);
+              org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.Builder.class);
     }
 
-    public static com.google.protobuf.Parser<GetMobCompactRegionsRequest> PARSER =
-        new com.google.protobuf.AbstractParser<GetMobCompactRegionsRequest>() {
-      public GetMobCompactRegionsRequest parsePartialFrom(
+    public static com.google.protobuf.Parser<GetMobCompactionRegionsRequest> PARSER =
+        new com.google.protobuf.AbstractParser<GetMobCompactionRegionsRequest>() {
+      public GetMobCompactionRegionsRequest parsePartialFrom(
           com.google.protobuf.CodedInputStream input,
           com.google.protobuf.ExtensionRegistryLite extensionRegistry)
           throws com.google.protobuf.InvalidProtocolBufferException {
-        return new GetMobCompactRegionsRequest(input, extensionRegistry);
+        return new GetMobCompactionRegionsRequest(input, extensionRegistry);
       }
     };
 
     @java.lang.Override
-    public com.google.protobuf.Parser<GetMobCompactRegionsRequest> getParserForType() {
+    public com.google.protobuf.Parser<GetMobCompactionRegionsRequest> getParserForType() {
       return PARSER;
     }
 
@@ -272,10 +272,10 @@ public final class MasterMobCompactionStatusProtos {
       if (obj == this) {
        return true;
       }
-      if (!(obj instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest)) {
+      if (!(obj instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)) {
         return super.equals(obj);
       }
-      org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest other = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest) obj;
+      org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest other = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest) obj;
 
       boolean result = true;
       result = result && (hasTableName() == other.hasTableName());
@@ -314,53 +314,53 @@ public final class MasterMobCompactionStatusProtos {
       return hash;
     }
 
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(
         com.google.protobuf.ByteString data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(
         com.google.protobuf.ByteString data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(byte[] data)
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(byte[] data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(
         byte[] data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(java.io.InputStream input)
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(java.io.InputStream input)
         throws java.io.IOException {
       return PARSER.parseFrom(input);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(
         java.io.InputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws java.io.IOException {
       return PARSER.parseFrom(input, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseDelimitedFrom(java.io.InputStream input)
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseDelimitedFrom(java.io.InputStream input)
         throws java.io.IOException {
       return PARSER.parseDelimitedFrom(input);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseDelimitedFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseDelimitedFrom(
         java.io.InputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws java.io.IOException {
       return PARSER.parseDelimitedFrom(input, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(
         com.google.protobuf.CodedInputStream input)
         throws java.io.IOException {
       return PARSER.parseFrom(input);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parseFrom(
         com.google.protobuf.CodedInputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws java.io.IOException {
@@ -369,7 +369,7 @@ public final class MasterMobCompactionStatusProtos {
 
     public static Builder newBuilder() { return Builder.create(); }
     public Builder newBuilderForType() { return newBuilder(); }
-    public static Builder newBuilder(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest prototype) {
+    public static Builder newBuilder(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest prototype) {
       return newBuilder().mergeFrom(prototype);
     }
     public Builder toBuilder() { return newBuilder(this); }
@@ -381,24 +381,24 @@ public final class MasterMobCompactionStatusProtos {
       return builder;
     }
     /**
-     * Protobuf type {@code hbase.pb.GetMobCompactRegionsRequest}
+     * Protobuf type {@code hbase.pb.GetMobCompactionRegionsRequest}
      */
     public static final class Builder extends
         com.google.protobuf.GeneratedMessage.Builder<Builder>
-       implements org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequestOrBuilder {
+       implements org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequestOrBuilder {
       public static final com.google.protobuf.Descriptors.Descriptor
           getDescriptor() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsRequest_descriptor;
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsRequest_descriptor;
       }
 
       protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
           internalGetFieldAccessorTable() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsRequest_fieldAccessorTable
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsRequest_fieldAccessorTable
             .ensureFieldAccessorsInitialized(
-                org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.Builder.class);
+                org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.Builder.class);
       }
 
-      // Construct using org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.newBuilder()
+      // Construct using org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.newBuilder()
       private Builder() {
         maybeForceBuilderInitialization();
       }
@@ -441,23 +441,23 @@ public final class MasterMobCompactionStatusProtos {
 
       public com.google.protobuf.Descriptors.Descriptor
           getDescriptorForType() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsRequest_descriptor;
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsRequest_descriptor;
       }
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest getDefaultInstanceForType() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.getDefaultInstance();
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest getDefaultInstanceForType() {
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.getDefaultInstance();
       }
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest build() {
-        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest result = buildPartial();
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest build() {
+        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest result = buildPartial();
         if (!result.isInitialized()) {
           throw newUninitializedMessageException(result);
         }
         return result;
       }
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest buildPartial() {
-        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest result = new org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest(this);
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest buildPartial() {
+        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest result = new org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest(this);
         int from_bitField0_ = bitField0_;
         int to_bitField0_ = 0;
         if (((from_bitField0_ & 0x00000001) == 0x00000001)) {
@@ -482,16 +482,16 @@ public final class MasterMobCompactionStatusProtos {
       }
 
       public Builder mergeFrom(com.google.protobuf.Message other) {
-        if (other instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest) {
-          return mergeFrom((org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest)other);
+        if (other instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest) {
+          return mergeFrom((org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)other);
         } else {
           super.mergeFrom(other);
           return this;
         }
       }
 
-      public Builder mergeFrom(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest other) {
-        if (other == org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.getDefaultInstance()) return this;
+      public Builder mergeFrom(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest other) {
+        if (other == org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.getDefaultInstance()) return this;
         if (other.hasTableName()) {
           mergeTableName(other.getTableName());
         }
@@ -526,11 +526,11 @@ public final class MasterMobCompactionStatusProtos {
           com.google.protobuf.CodedInputStream input,
           com.google.protobuf.ExtensionRegistryLite extensionRegistry)
           throws java.io.IOException {
-        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest parsedMessage = null;
+        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest parsedMessage = null;
         try {
           parsedMessage = PARSER.parsePartialFrom(input, extensionRegistry);
         } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-          parsedMessage = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest) e.getUnfinishedMessage();
+          parsedMessage = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest) e.getUnfinishedMessage();
           throw e;
         } finally {
           if (parsedMessage != null) {
@@ -775,18 +775,18 @@ public final class MasterMobCompactionStatusProtos {
         return serverNameBuilder_;
       }
 
-      // @@protoc_insertion_point(builder_scope:hbase.pb.GetMobCompactRegionsRequest)
+      // @@protoc_insertion_point(builder_scope:hbase.pb.GetMobCompactionRegionsRequest)
     }
 
     static {
-      defaultInstance = new GetMobCompactRegionsRequest(true);
+      defaultInstance = new GetMobCompactionRegionsRequest(true);
       defaultInstance.initFields();
     }
 
-    // @@protoc_insertion_point(class_scope:hbase.pb.GetMobCompactRegionsRequest)
+    // @@protoc_insertion_point(class_scope:hbase.pb.GetMobCompactionRegionsRequest)
   }
 
-  public interface GetMobCompactRegionsResponseOrBuilder
+  public interface GetMobCompactionRegionsResponseOrBuilder
       extends com.google.protobuf.MessageOrBuilder {
 
     // repeated bytes region_start_key = 1;
@@ -804,24 +804,24 @@ public final class MasterMobCompactionStatusProtos {
     com.google.protobuf.ByteString getRegionStartKey(int index);
   }
   /**
-   * Protobuf type {@code hbase.pb.GetMobCompactRegionsResponse}
+   * Protobuf type {@code hbase.pb.GetMobCompactionRegionsResponse}
    */
-  public static final class GetMobCompactRegionsResponse extends
+  public static final class GetMobCompactionRegionsResponse extends
       com.google.protobuf.GeneratedMessage
-      implements GetMobCompactRegionsResponseOrBuilder {
-    // Use GetMobCompactRegionsResponse.newBuilder() to construct.
-    private GetMobCompactRegionsResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      implements GetMobCompactionRegionsResponseOrBuilder {
+    // Use GetMobCompactionRegionsResponse.newBuilder() to construct.
+    private GetMobCompactionRegionsResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
       super(builder);
       this.unknownFields = builder.getUnknownFields();
     }
-    private GetMobCompactRegionsResponse(boolean noInit) { this.unknownFields = com.google.protobuf.UnknownFieldSet.getDefaultInstance(); }
+    private GetMobCompactionRegionsResponse(boolean noInit) { this.unknownFields = com.google.protobuf.UnknownFieldSet.getDefaultInstance(); }
 
-    private static final GetMobCompactRegionsResponse defaultInstance;
-    public static GetMobCompactRegionsResponse getDefaultInstance() {
+    private static final GetMobCompactionRegionsResponse defaultInstance;
+    public static GetMobCompactionRegionsResponse getDefaultInstance() {
       return defaultInstance;
     }
 
-    public GetMobCompactRegionsResponse getDefaultInstanceForType() {
+    public GetMobCompactionRegionsResponse getDefaultInstanceForType() {
       return defaultInstance;
     }
 
@@ -831,7 +831,7 @@ public final class MasterMobCompactionStatusProtos {
         getUnknownFields() {
       return this.unknownFields;
     }
-    private GetMobCompactRegionsResponse(
+    private GetMobCompactionRegionsResponse(
         com.google.protobuf.CodedInputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
@@ -879,28 +879,28 @@ public final class MasterMobCompactionStatusProtos {
     }
     public static final com.google.protobuf.Descriptors.Descriptor
         getDescriptor() {
-      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsResponse_descriptor;
+      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsResponse_descriptor;
     }
 
     protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
         internalGetFieldAccessorTable() {
-      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsResponse_fieldAccessorTable
+      return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsResponse_fieldAccessorTable
           .ensureFieldAccessorsInitialized(
-              org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.Builder.class);
+              org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.Builder.class);
     }
 
-    public static com.google.protobuf.Parser<GetMobCompactRegionsResponse> PARSER =
-        new com.google.protobuf.AbstractParser<GetMobCompactRegionsResponse>() {
-      public GetMobCompactRegionsResponse parsePartialFrom(
+    public static com.google.protobuf.Parser<GetMobCompactionRegionsResponse> PARSER =
+        new com.google.protobuf.AbstractParser<GetMobCompactionRegionsResponse>() {
+      public GetMobCompactionRegionsResponse parsePartialFrom(
           com.google.protobuf.CodedInputStream input,
           com.google.protobuf.ExtensionRegistryLite extensionRegistry)
           throws com.google.protobuf.InvalidProtocolBufferException {
-        return new GetMobCompactRegionsResponse(input, extensionRegistry);
+        return new GetMobCompactionRegionsResponse(input, extensionRegistry);
       }
     };
 
     @java.lang.Override
-    public com.google.protobuf.Parser<GetMobCompactRegionsResponse> getParserForType() {
+    public com.google.protobuf.Parser<GetMobCompactionRegionsResponse> getParserForType() {
       return PARSER;
     }
 
@@ -980,10 +980,10 @@ public final class MasterMobCompactionStatusProtos {
       if (obj == this) {
        return true;
       }
-      if (!(obj instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse)) {
+      if (!(obj instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse)) {
         return super.equals(obj);
       }
-      org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse other = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse) obj;
+      org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse other = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse) obj;
 
       boolean result = true;
       result = result && getRegionStartKeyList()
@@ -1010,53 +1010,53 @@ public final class MasterMobCompactionStatusProtos {
       return hash;
     }
 
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(
         com.google.protobuf.ByteString data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(
         com.google.protobuf.ByteString data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(byte[] data)
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(byte[] data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(
         byte[] data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(java.io.InputStream input)
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(java.io.InputStream input)
         throws java.io.IOException {
       return PARSER.parseFrom(input);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(
         java.io.InputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws java.io.IOException {
       return PARSER.parseFrom(input, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseDelimitedFrom(java.io.InputStream input)
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseDelimitedFrom(java.io.InputStream input)
         throws java.io.IOException {
       return PARSER.parseDelimitedFrom(input);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseDelimitedFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseDelimitedFrom(
         java.io.InputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws java.io.IOException {
       return PARSER.parseDelimitedFrom(input, extensionRegistry);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(
         com.google.protobuf.CodedInputStream input)
         throws java.io.IOException {
       return PARSER.parseFrom(input);
     }
-    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parseFrom(
+    public static org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parseFrom(
         com.google.protobuf.CodedInputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws java.io.IOException {
@@ -1065,7 +1065,7 @@ public final class MasterMobCompactionStatusProtos {
 
     public static Builder newBuilder() { return Builder.create(); }
     public Builder newBuilderForType() { return newBuilder(); }
-    public static Builder newBuilder(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse prototype) {
+    public static Builder newBuilder(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse prototype) {
       return newBuilder().mergeFrom(prototype);
     }
     public Builder toBuilder() { return newBuilder(this); }
@@ -1077,24 +1077,24 @@ public final class MasterMobCompactionStatusProtos {
       return builder;
     }
     /**
-     * Protobuf type {@code hbase.pb.GetMobCompactRegionsResponse}
+     * Protobuf type {@code hbase.pb.GetMobCompactionRegionsResponse}
      */
     public static final class Builder extends
         com.google.protobuf.GeneratedMessage.Builder<Builder>
-       implements org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponseOrBuilder {
+       implements org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponseOrBuilder {
       public static final com.google.protobuf.Descriptors.Descriptor
           getDescriptor() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsResponse_descriptor;
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsResponse_descriptor;
       }
 
       protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
           internalGetFieldAccessorTable() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsResponse_fieldAccessorTable
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsResponse_fieldAccessorTable
             .ensureFieldAccessorsInitialized(
-                org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.Builder.class);
+                org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.class, org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.Builder.class);
       }
 
-      // Construct using org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.newBuilder()
+      // Construct using org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.newBuilder()
       private Builder() {
         maybeForceBuilderInitialization();
       }
@@ -1125,23 +1125,23 @@ public final class MasterMobCompactionStatusProtos {
 
       public com.google.protobuf.Descriptors.Descriptor
           getDescriptorForType() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactRegionsResponse_descriptor;
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.internal_static_hbase_pb_GetMobCompactionRegionsResponse_descriptor;
       }
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse getDefaultInstanceForType() {
-        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.getDefaultInstance();
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse getDefaultInstanceForType() {
+        return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.getDefaultInstance();
       }
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse build() {
-        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse result = buildPartial();
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse build() {
+        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse result = buildPartial();
         if (!result.isInitialized()) {
           throw newUninitializedMessageException(result);
         }
         return result;
       }
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse buildPartial() {
-        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse result = new org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse(this);
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse buildPartial() {
+        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse result = new org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse(this);
         int from_bitField0_ = bitField0_;
         if (((bitField0_ & 0x00000001) == 0x00000001)) {
           regionStartKey_ = java.util.Collections.unmodifiableList(regionStartKey_);
@@ -1153,16 +1153,16 @@ public final class MasterMobCompactionStatusProtos {
       }
 
       public Builder mergeFrom(com.google.protobuf.Message other) {
-        if (other instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse) {
-          return mergeFrom((org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse)other);
+        if (other instanceof org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse) {
+          return mergeFrom((org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse)other);
         } else {
           super.mergeFrom(other);
           return this;
         }
       }
 
-      public Builder mergeFrom(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse other) {
-        if (other == org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.getDefaultInstance()) return this;
+      public Builder mergeFrom(org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse other) {
+        if (other == org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.getDefaultInstance()) return this;
         if (!other.regionStartKey_.isEmpty()) {
           if (regionStartKey_.isEmpty()) {
             regionStartKey_ = other.regionStartKey_;
@@ -1185,11 +1185,11 @@ public final class MasterMobCompactionStatusProtos {
           com.google.protobuf.CodedInputStream input,
           com.google.protobuf.ExtensionRegistryLite extensionRegistry)
           throws java.io.IOException {
-        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse parsedMessage = null;
+        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse parsedMessage = null;
         try {
           parsedMessage = PARSER.parsePartialFrom(input, extensionRegistry);
         } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-          parsedMessage = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse) e.getUnfinishedMessage();
+          parsedMessage = (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse) e.getUnfinishedMessage();
           throw e;
         } finally {
           if (parsedMessage != null) {
@@ -1272,15 +1272,15 @@ public final class MasterMobCompactionStatusProtos {
         return this;
       }
 
-      // @@protoc_insertion_point(builder_scope:hbase.pb.GetMobCompactRegionsResponse)
+      // @@protoc_insertion_point(builder_scope:hbase.pb.GetMobCompactionRegionsResponse)
     }
 
     static {
-      defaultInstance = new GetMobCompactRegionsResponse(true);
+      defaultInstance = new GetMobCompactionRegionsResponse(true);
       defaultInstance.initFields();
     }
 
-    // @@protoc_insertion_point(class_scope:hbase.pb.GetMobCompactRegionsResponse)
+    // @@protoc_insertion_point(class_scope:hbase.pb.GetMobCompactionRegionsResponse)
   }
 
   public interface UpdateMobCompactionAsMajorRequestOrBuilder
@@ -2408,12 +2408,12 @@ public final class MasterMobCompactionStatusProtos {
 
     public interface Interface {
       /**
-       * <code>rpc GetMobCompactRegions(.hbase.pb.GetMobCompactRegionsRequest) returns (.hbase.pb.GetMobCompactRegionsResponse);</code>
+       * <code>rpc GetMobCompactRegions(.hbase.pb.GetMobCompactionRegionsRequest) returns (.hbase.pb.GetMobCompactionRegionsResponse);</code>
        */
       public abstract void getMobCompactRegions(
           com.google.protobuf.RpcController controller,
-          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request,
-          com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse> done);
+          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
+          com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done);
 
       /**
        * <code>rpc UpdateMobCompactionAsMajor(.hbase.pb.UpdateMobCompactionAsMajorRequest) returns (.hbase.pb.UpdateMobCompactionAsMajorResponse);</code>
@@ -2431,8 +2431,8 @@ public final class MasterMobCompactionStatusProtos {
         @java.lang.Override
         public  void getMobCompactRegions(
             com.google.protobuf.RpcController controller,
-            org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request,
-            com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse> done) {
+            org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
+            com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done) {
           impl.getMobCompactRegions(controller, request, done);
         }
 
@@ -2467,7 +2467,7 @@ public final class MasterMobCompactionStatusProtos {
           }
           switch(method.getIndex()) {
             case 0:
-              return impl.getMobCompactRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest)request);
+              return impl.getMobCompactRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)request);
             case 1:
               return impl.updateMobCompactionAsMajor(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest)request);
             default:
@@ -2485,7 +2485,7 @@ public final class MasterMobCompactionStatusProtos {
           }
           switch(method.getIndex()) {
             case 0:
-              return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.getDefaultInstance();
+              return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.getDefaultInstance();
             case 1:
               return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest.getDefaultInstance();
             default:
@@ -2503,7 +2503,7 @@ public final class MasterMobCompactionStatusProtos {
           }
           switch(method.getIndex()) {
             case 0:
-              return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.getDefaultInstance();
+              return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.getDefaultInstance();
             case 1:
               return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorResponse.getDefaultInstance();
             default:
@@ -2515,12 +2515,12 @@ public final class MasterMobCompactionStatusProtos {
     }
 
     /**
-     * <code>rpc GetMobCompactRegions(.hbase.pb.GetMobCompactRegionsRequest) returns (.hbase.pb.GetMobCompactRegionsResponse);</code>
+     * <code>rpc GetMobCompactRegions(.hbase.pb.GetMobCompactionRegionsRequest) returns (.hbase.pb.GetMobCompactionRegionsResponse);</code>
      */
     public abstract void getMobCompactRegions(
         com.google.protobuf.RpcController controller,
-        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request,
-        com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse> done);
+        org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
+        com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done);
 
     /**
      * <code>rpc UpdateMobCompactionAsMajor(.hbase.pb.UpdateMobCompactionAsMajorRequest) returns (.hbase.pb.UpdateMobCompactionAsMajorResponse);</code>
@@ -2553,8 +2553,8 @@ public final class MasterMobCompactionStatusProtos {
       }
       switch(method.getIndex()) {
         case 0:
-          this.getMobCompactRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest)request,
-            com.google.protobuf.RpcUtil.<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse>specializeCallback(
+          this.getMobCompactRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)request,
+            com.google.protobuf.RpcUtil.<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse>specializeCallback(
               done));
           return;
         case 1:
@@ -2577,7 +2577,7 @@ public final class MasterMobCompactionStatusProtos {
       }
       switch(method.getIndex()) {
         case 0:
-          return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest.getDefaultInstance();
+          return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest.getDefaultInstance();
         case 1:
           return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest.getDefaultInstance();
         default:
@@ -2595,7 +2595,7 @@ public final class MasterMobCompactionStatusProtos {
       }
       switch(method.getIndex()) {
         case 0:
-          return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.getDefaultInstance();
+          return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.getDefaultInstance();
         case 1:
           return org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorResponse.getDefaultInstance();
         default:
@@ -2621,17 +2621,17 @@ public final class MasterMobCompactionStatusProtos {
 
       public  void getMobCompactRegions(
           com.google.protobuf.RpcController controller,
-          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request,
-          com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse> done) {
+          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
+          com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done) {
         channel.callMethod(
           getDescriptor().getMethods().get(0),
           controller,
           request,
-          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.getDefaultInstance(),
+          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.getDefaultInstance(),
           com.google.protobuf.RpcUtil.generalizeCallback(
             done,
-            org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.class,
-            org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.getDefaultInstance()));
+            org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.class,
+            org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.getDefaultInstance()));
       }
 
       public  void updateMobCompactionAsMajor(
@@ -2656,9 +2656,9 @@ public final class MasterMobCompactionStatusProtos {
     }
 
     public interface BlockingInterface {
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse getMobCompactRegions(
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse getMobCompactRegions(
           com.google.protobuf.RpcController controller,
-          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request)
+          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request)
           throws com.google.protobuf.ServiceException;
 
       public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorResponse updateMobCompactionAsMajor(
@@ -2674,15 +2674,15 @@ public final class MasterMobCompactionStatusProtos {
 
       private final com.google.protobuf.BlockingRpcChannel channel;
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse getMobCompactRegions(
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse getMobCompactRegions(
           com.google.protobuf.RpcController controller,
-          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request)
+          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request)
           throws com.google.protobuf.ServiceException {
-        return (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse) channel.callBlockingMethod(
+        return (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse) channel.callBlockingMethod(
           getDescriptor().getMethods().get(0),
           controller,
           request,
-          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse.getDefaultInstance());
+          org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse.getDefaultInstance());
       }
 
 
@@ -2703,15 +2703,15 @@ public final class MasterMobCompactionStatusProtos {
   }
 
   private static com.google.protobuf.Descriptors.Descriptor
-    internal_static_hbase_pb_GetMobCompactRegionsRequest_descriptor;
+    internal_static_hbase_pb_GetMobCompactionRegionsRequest_descriptor;
   private static
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
-      internal_static_hbase_pb_GetMobCompactRegionsRequest_fieldAccessorTable;
+      internal_static_hbase_pb_GetMobCompactionRegionsRequest_fieldAccessorTable;
   private static com.google.protobuf.Descriptors.Descriptor
-    internal_static_hbase_pb_GetMobCompactRegionsResponse_descriptor;
+    internal_static_hbase_pb_GetMobCompactionRegionsResponse_descriptor;
   private static
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
-      internal_static_hbase_pb_GetMobCompactRegionsResponse_fieldAccessorTable;
+      internal_static_hbase_pb_GetMobCompactionRegionsResponse_fieldAccessorTable;
   private static com.google.protobuf.Descriptors.Descriptor
     internal_static_hbase_pb_UpdateMobCompactionAsMajorRequest_descriptor;
   private static
@@ -2732,41 +2732,41 @@ public final class MasterMobCompactionStatusProtos {
   static {
     java.lang.String[] descriptorData = {
       "\n\037MasterMobCompactionStatus.proto\022\010hbase" +
-      ".pb\032\013HBase.proto\"q\n\033GetMobCompactRegions" +
-      "Request\022\'\n\ntable_name\030\001 \002(\0132\023.hbase.pb.T" +
-      "ableName\022)\n\013server_name\030\002 \002(\0132\024.hbase.pb" +
-      ".ServerName\"8\n\034GetMobCompactRegionsRespo" +
-      "nse\022\030\n\020region_start_key\030\001 \003(\014\"w\n!UpdateM" +
-      "obCompactionAsMajorRequest\022\'\n\ntable_name" +
-      "\030\001 \002(\0132\023.hbase.pb.TableName\022)\n\013server_na" +
-      "me\030\002 \002(\0132\024.hbase.pb.ServerName\"$\n\"Update" +
-      "MobCompactionAsMajorResponse2\202\002\n MasterM",
-      "obCompactionStatusService\022e\n\024GetMobCompa" +
-      "ctRegions\022%.hbase.pb.GetMobCompactRegion" +
-      "sRequest\032&.hbase.pb.GetMobCompactRegions" +
-      "Response\022w\n\032UpdateMobCompactionAsMajor\022+" +
-      ".hbase.pb.UpdateMobCompactionAsMajorRequ" +
-      "est\032,.hbase.pb.UpdateMobCompactionAsMajo" +
-      "rResponseBU\n*org.apache.hadoop.hbase.pro" +
-      "tobuf.generatedB\037MasterMobCompactionStat" +
-      "usProtosH\001\210\001\001\240\001\001"
+      ".pb\032\013HBase.proto\"t\n\036GetMobCompactionRegi" +
+      "onsRequest\022\'\n\ntable_name\030\001 \002(\0132\023.hbase.p" +
+      "b.TableName\022)\n\013server_name\030\002 \002(\0132\024.hbase" +
+      ".pb.ServerName\";\n\037GetMobCompactionRegion" +
+      "sResponse\022\030\n\020region_start_key\030\001 \003(\014\"w\n!U" +
+      "pdateMobCompactionAsMajorRequest\022\'\n\ntabl" +
+      "e_name\030\001 \002(\0132\023.hbase.pb.TableName\022)\n\013ser" +
+      "ver_name\030\002 \002(\0132\024.hbase.pb.ServerName\"$\n\"" +
+      "UpdateMobCompactionAsMajorResponse2\210\002\n M",
+      "asterMobCompactionStatusService\022k\n\024GetMo" +
+      "bCompactRegions\022(.hbase.pb.GetMobCompact" +
+      "ionRegionsRequest\032).hbase.pb.GetMobCompa" +
+      "ctionRegionsResponse\022w\n\032UpdateMobCompact" +
+      "ionAsMajor\022+.hbase.pb.UpdateMobCompactio" +
+      "nAsMajorRequest\032,.hbase.pb.UpdateMobComp" +
+      "actionAsMajorResponseBU\n*org.apache.hado" +
+      "op.hbase.protobuf.generatedB\037MasterMobCo" +
+      "mpactionStatusProtosH\001\210\001\001\240\001\001"
     };
     com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner =
       new com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner() {
         public com.google.protobuf.ExtensionRegistry assignDescriptors(
             com.google.protobuf.Descriptors.FileDescriptor root) {
           descriptor = root;
-          internal_static_hbase_pb_GetMobCompactRegionsRequest_descriptor =
+          internal_static_hbase_pb_GetMobCompactionRegionsRequest_descriptor =
             getDescriptor().getMessageTypes().get(0);
-          internal_static_hbase_pb_GetMobCompactRegionsRequest_fieldAccessorTable = new
+          internal_static_hbase_pb_GetMobCompactionRegionsRequest_fieldAccessorTable = new
             com.google.protobuf.GeneratedMessage.FieldAccessorTable(
-              internal_static_hbase_pb_GetMobCompactRegionsRequest_descriptor,
+              internal_static_hbase_pb_GetMobCompactionRegionsRequest_descriptor,
               new java.lang.String[] { "TableName", "ServerName", });
-          internal_static_hbase_pb_GetMobCompactRegionsResponse_descriptor =
+          internal_static_hbase_pb_GetMobCompactionRegionsResponse_descriptor =
             getDescriptor().getMessageTypes().get(1);
-          internal_static_hbase_pb_GetMobCompactRegionsResponse_fieldAccessorTable = new
+          internal_static_hbase_pb_GetMobCompactionRegionsResponse_fieldAccessorTable = new
             com.google.protobuf.GeneratedMessage.FieldAccessorTable(
-              internal_static_hbase_pb_GetMobCompactRegionsResponse_descriptor,
+              internal_static_hbase_pb_GetMobCompactionRegionsResponse_descriptor,
               new java.lang.String[] { "RegionStartKey", });
           internal_static_hbase_pb_UpdateMobCompactionAsMajorRequest_descriptor =
             getDescriptor().getMessageTypes().get(2);

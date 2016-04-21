@@ -24,8 +24,8 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest;
-import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest;
+import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.MasterMobCompactionStatusService;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest;
 import org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorResponse;
@@ -50,14 +50,14 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
    * Gets the start keys of the compacted regions.
    */
   @Override
-  public void getMobCompactRegions(RpcController controller, GetMobCompactRegionsRequest request,
-    RpcCallback<GetMobCompactRegionsResponse> done) {
+  public void getMobCompactRegions(RpcController controller,
+    GetMobCompactionRegionsRequest request, RpcCallback<GetMobCompactionRegionsResponse> done) {
     org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.TableName tnPb = request.getTableName();
     org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName snPb = request
       .getServerName();
     List<byte[]> regionStartKeys = master.mobCompactionManager.getCompactingRegions(
       ProtobufUtil.toTableName(tnPb), ProtobufUtil.toServerName(snPb));
-    GetMobCompactRegionsResponse.Builder builder = GetMobCompactRegionsResponse.newBuilder();
+    GetMobCompactionRegionsResponse.Builder builder = GetMobCompactionRegionsResponse.newBuilder();
     if (!regionStartKeys.isEmpty()) {
       for (byte[] startKey : regionStartKeys) {
         builder.addRegionStartKey(ByteString.copyFrom(startKey));

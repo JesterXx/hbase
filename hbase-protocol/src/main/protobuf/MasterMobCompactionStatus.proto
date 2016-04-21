@@ -25,12 +25,12 @@ option optimize_for = SPEED;
 
 import "HBase.proto";
 
-message GetMobCompactRegionsRequest {
+message GetMobCompactionRegionsRequest {
   required TableName table_name = 1;
   required ServerName server_name = 2;
 }
 
-message GetMobCompactRegionsResponse {
+message GetMobCompactionRegionsResponse {
   repeated bytes region_start_key = 1;
 }
 
@@ -43,8 +43,8 @@ message UpdateMobCompactionAsMajorResponse {
 }
 
 service MasterMobCompactionStatusService {
-  rpc GetMobCompactRegions(GetMobCompactRegionsRequest)
-  	  returns(GetMobCompactRegionsResponse);
+  rpc GetMobCompactRegions(GetMobCompactionRegionsRequest)
+  	  returns(GetMobCompactionRegionsResponse);
 
   rpc UpdateMobCompactionAsMajor(UpdateMobCompactionAsMajorRequest)
       returns(UpdateMobCompactionAsMajorResponse);

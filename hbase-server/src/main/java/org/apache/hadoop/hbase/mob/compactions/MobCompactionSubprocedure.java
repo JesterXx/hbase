@@ -34,6 +34,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
 import org.apache.hadoop.hbase.io.HFileLink;
@@ -64,6 +65,7 @@ import com.google.protobuf.ServiceException;
  * The mob compaction is distributed to region servers, and executed in subprocedure
  * in each region server.
  */
+@InterfaceAudience.Private
 public class MobCompactionSubprocedure extends Subprocedure {
   private static final Log LOG = LogFactory.getLog(MobCompactionSubprocedure.class);
 
@@ -235,8 +237,8 @@ public class MobCompactionSubprocedure extends Subprocedure {
    * @return The start keys of regions that run the mob compaction.
    */
   private List<byte[]> getCompactRegions() throws ServiceException, IOException {
-    MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest request =
-      MasterMobCompactionStatusProtos.GetMobCompactRegionsRequest
+    MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request =
+      MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest
       .newBuilder().setServerName(ProtobufUtil.toServerName(rss.getServerName()))
       .setTableName(ProtobufUtil.toProtoTableName(tableName)).build();
     ClientProtos.CoprocessorServiceCall call = ClientProtos.CoprocessorServiceCall
@@ -250,8 +252,8 @@ public class MobCompactionSubprocedure extends Subprocedure {
           .getMethods().get(0).getName()).setRequest(request.toByteString()).build();
     CoprocessorServiceResponse servieResponse = ProtobufUtil.execService(null, rss
       .getClusterConnection().getMaster(), call);
-    MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse response =
-      MasterMobCompactionStatusProtos.GetMobCompactRegionsResponse
+    MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse response =
+      MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse
       .parseFrom(servieResponse.getValue().getValue());
     List<byte[]> results = new ArrayList<byte[]>(response.getRegionStartKeyCount());
     for (ByteString bs : response.getRegionStartKeyList()) {
