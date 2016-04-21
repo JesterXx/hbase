@@ -67,9 +67,9 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
   private static final String CONCURENT_MOB_COMPACTION_TASKS_KEY =
     "hbase.mob.compaction.procedure.concurrentTasks";
   private static final int DEFAULT_CONCURRENT_MOB_COMPACTION_TASKS = 10;
-  public static final String MOB_COMPACTION_THREADS_KEY =
+  public static final String MOB_COMPACTION_PROCEDURE_POOL_THREADS_KEY =
     "hbase.mob.compaction.procedure.pool.threads";
-  public static final int FLUSH_REQUEST_THREADS_DEFAULT = 5;
+  public static final int MOB_COMPACTION_PROCEDURE_POOL_THREADS_DEFAULT = 5;
 
   public static final String MOB_COMPACTION_TIMEOUT_MILLIS_KEY =
     "hbase.mob.compaction.procedure.timeout";
@@ -90,7 +90,8 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     Configuration conf = rss.getConfiguration();
     long keepAlive = conf.getLong(MOB_COMPACTION_TIMEOUT_MILLIS_KEY,
       MOB_COMPACTION_TIMEOUT_MILLIS_DEFAULT);
-    int opThreads = conf.getInt(MOB_COMPACTION_THREADS_KEY, FLUSH_REQUEST_THREADS_DEFAULT);
+    int opThreads = conf.getInt(MOB_COMPACTION_PROCEDURE_POOL_THREADS_KEY,
+      MOB_COMPACTION_PROCEDURE_POOL_THREADS_DEFAULT);
 
     // create the actual mob compaction procedure member
     ThreadPoolExecutor pool = ProcedureMember.defaultPool(rss.getServerName().toString(),
