@@ -115,11 +115,17 @@ public class PartitionedMobCompactor extends MobCompactor {
       tableName.getNamespaceAsString(), tableName.getQualifierAsString())));
     compactionKVMax = this.conf.getInt(HConstants.COMPACTION_KV_MAX,
       HConstants.COMPACTION_KV_MAX_DEFAULT);
-    Configuration copyOfConf = new Configuration(conf);
-    copyOfConf.setBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY, Boolean.FALSE);
-    compactionCacheConfig = new CacheConfig(copyOfConf);
+    boolean cacheDataOnRead = conf.getBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY,
+      CacheConfig.DEFAULT_CACHE_DATA_ON_READ);
+    Configuration configration = conf;
+    if (cacheDataOnRead) {
+      Configuration copyOfConf = new Configuration(conf);
+      copyOfConf.setBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY, Boolean.FALSE);
+      configration = copyOfConf;
+    }
+    compactionCacheConfig = new CacheConfig(configration);
     tableNameTag = new ArrayBackedTag(TagType.MOB_TABLE_NAME_TAG_TYPE, tableName.getName());
-    cryptoContext = EncryptionUtil.createEncryptionContext(copyOfConf, column);
+    cryptoContext = EncryptionUtil.createEncryptionContext(configration, column);
   }
 
   @Override

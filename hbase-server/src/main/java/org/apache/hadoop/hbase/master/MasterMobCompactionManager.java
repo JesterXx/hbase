@@ -122,6 +122,9 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
   private ProcedureCoordinator coordinator;
   private Map<TableName, Future<Void>> compactions = new HashMap<TableName, Future<Void>>();
+  // This records the mappings of tables and mob compactions.
+  // The value of this map is a mapping of server names and pairs of the execution information and
+  // the related online regions.
   private Map<TableName, Map<ServerName, Pair<Boolean, List<byte[]>>>> compactingRegions =
     new HashMap<TableName, Map<ServerName, Pair<Boolean, List<byte[]>>>>();
 
@@ -140,9 +143,15 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
     compactionKVMax = this.conf.getInt(HConstants.COMPACTION_KV_MAX,
       HConstants.COMPACTION_KV_MAX_DEFAULT);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
-    Configuration copyOfConf = new Configuration(conf);
-    copyOfConf.setBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY, Boolean.FALSE);
-    compactionCacheConfig = new CacheConfig(copyOfConf);
+    boolean cacheDataOnRead = conf.getBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY,
+      CacheConfig.DEFAULT_CACHE_DATA_ON_READ);
+    Configuration configration = conf;
+    if (cacheDataOnRead) {
+      Configuration copyOfConf = new Configuration(conf);
+      copyOfConf.setBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY, Boolean.FALSE);
+      configration = copyOfConf;
+    }
+    compactionCacheConfig = new CacheConfig(configration);
     // this pool is used to run the mob compaction
     if (mobCompactionPool != null) {
       this.mobCompactionPool = mobCompactionPool;
@@ -222,6 +231,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
     if (pair == null) {
       return;
     }
+    // mark it as true which means the mob compaction in the given server is major.
     pair.setFirst(Boolean.TRUE);
   }
 
@@ -265,6 +275,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       } catch (IOException e) {
         LOG.error(
           "Failed to perform the mob compaction for the table " + tableName.getNameAsString(), e);
+        throw e;
       } finally {
         // release lock
         if (lock != null && tableLocked) {
@@ -307,9 +318,9 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         List<Path> delFilePaths = compactDelFiles(column, selectDelFiles(mobFamilyDir),
           EnvironmentEdgeManager.currentTime(), cryptoContext, mobTableDir, mobFamilyDir);
         // dispatch mob compaction request to region servers.
-        boolean isAllFiles = dispatchMobCompaction(tableName, column, allFiles);
+        boolean archiveDelFiles = dispatchMobCompaction(tableName, column, allFiles);
         // archive the del files if it is a major compaction
-        if (isAllFiles && !delFilePaths.isEmpty()) {
+        if (archiveDelFiles && !delFilePaths.isEmpty()) {
           LOG.info("After a mob compaction with all files selected, archiving the del files "
             + delFilePaths);
           List<StoreFile> delFiles = new ArrayList<StoreFile>();
@@ -324,7 +335,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
             LOG.error("Failed to archive the del files " + delFilePaths, e);
           }
         }
-      } catch (Exception e) {
+      } catch (IOException e) {
         LOG.error("Failed to compact the mob files for the column " + column.getNameAsString()
           + " in the table " + tableName.getNameAsString(), e);
       }
@@ -406,10 +417,10 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           // check if all the files are selected in compaction of all region servers.
           for (Entry<ServerName, Pair<Boolean, List<byte[]>>> entry : serverRegionMapping
             .entrySet()) {
-            boolean isAllFiles = entry.getValue().getFirst();
+            boolean major = entry.getValue().getFirst();
             LOG.info("Mob compaction " + procedureName + " in server " + entry.getKey() + " is "
-              + (isAllFiles ? "major" : "minor"));
-            if (isAllFiles) {
+              + (major ? "major" : "minor"));
+            if (major) {
               archiveDelFiles = true;
             } else {
               archiveDelFiles = false;
