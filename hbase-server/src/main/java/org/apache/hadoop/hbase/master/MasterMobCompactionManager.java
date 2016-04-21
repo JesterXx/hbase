@@ -288,7 +288,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         }
         // remove this compaction from memory.
         synchronized (MasterMobCompactionManager.this) {
-          compactions.remove(tableName.getNameAsString());
+          compactions.remove(tableName);
         }
         try {
           master.reportMobCompactionEnd(tableName);

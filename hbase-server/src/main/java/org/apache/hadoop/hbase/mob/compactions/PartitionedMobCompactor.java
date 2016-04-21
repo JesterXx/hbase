@@ -102,7 +102,7 @@ public class PartitionedMobCompactor extends MobCompactor {
     HColumnDescriptor column, Map<String, byte[]> prefixAndKeys) throws IOException {
     super(rss, region, tableName, column);
     this.prefixAndKeys = prefixAndKeys;
-    regionInfo = region.getRegionInfo();
+    regionInfo = this.region.getRegionInfo();
     mergeableSize = conf.getLong(MobConstants.MOB_COMPACTION_MERGEABLE_THRESHOLD,
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD);
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
