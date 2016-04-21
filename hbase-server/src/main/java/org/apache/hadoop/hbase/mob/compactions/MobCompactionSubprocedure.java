@@ -195,11 +195,14 @@ public class MobCompactionSubprocedure extends Subprocedure {
 
     // wait for everything to complete.
     boolean success = false;
-    LOG.debug("Mob compaction tasks submitted for " + regions.size() + " regions");
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Mob compaction tasks submitted for " + regions.size() + " regions in table "
+        + tableName.getNameAsString());
+    }
     try {
       success = taskManager.waitForOutstandingTasks();
-      LOG.info("Mob compaction tasks for region server " + rss.getServerName() + " are finished["
-        + success + "]");
+      LOG.info("Mob compaction tasks of the table " + tableName.getNameAsString()
+        + " for region server " + rss.getServerName() + " are finished[" + success + "]");
     } catch (InterruptedException e) {
       throw new ForeignException(getMemberName(), e);
     }

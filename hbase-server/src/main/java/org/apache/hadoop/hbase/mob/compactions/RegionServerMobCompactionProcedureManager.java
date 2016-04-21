@@ -151,7 +151,8 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       involvedRegions = rss.getOnlineRegions(tableName);
     } catch (IOException e1) {
       throw new IllegalStateException(
-        "Failed to figure out if there is region for mob compaction.", e1);
+        "Failed to get the online regions for mob compaction in table "
+          + tableName.getNameAsString() + ".", e1);
     }
     // parse the column names and if it is a major compaction
     boolean allFiles = (data[0] != (byte) 0);

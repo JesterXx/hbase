@@ -109,14 +109,14 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
   public static final String MOB_COMPACTION_PROCEDURE_SIGNATURE = "mob-compaction-proc";
 
   private static final String MOB_COMPACTION_TIMEOUT_MILLIS_KEY =
-    "hbase.mob.compaction.master.timeoutMillis";
+    "hbase.master.mob.compaction.timeoutMillis";
   private static final int MOB_COMPACTION_TIMEOUT_MILLIS_DEFAULT = 1800000; // 30 min
   private static final String MOB_COMPACTION_WAKE_MILLIS_KEY =
-    "hbase.mob.compaction.master.wakeMillis";
+    "hbase.master.mob.compaction.wakeMillis";
   private static final int MOB_COMPACTION_WAKE_MILLIS_DEFAULT = 500;
 
   private static final String MOB_COMPACTION_PROC_POOL_THREADS_KEY =
-    "hbase.mob.compaction.procedure.master.threads";
+    "hbase.master.mob.compaction.procedure.threads";
   private static final int MOB_COMPACTION_PROC_POOL_THREADS_DEFAULT = 2;
   private boolean closePoolOnStop = true;
 
@@ -263,7 +263,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           doCompaction(conf, fs, tableName, column, allFiles);
         }
       } catch (IOException e) {
-        LOG.error("Failed to perform the mob compaction", e);
+        LOG.error(
+          "Failed to perform the mob compaction for the table " + tableName.getNameAsString(), e);
       } finally {
         // release lock
         if (lock != null && tableLocked) {
@@ -281,7 +282,8 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         try {
           master.reportMobCompactionEnd(tableName);
         } catch (IOException e) {
-          LOG.error("Failed to mark end of mob compation", e);
+          LOG.error(
+            "Failed to mark end of mob compation for the table " + tableName.getNameAsString(), e);
         }
       }
       return null;
@@ -349,7 +351,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       for (Pair<HRegionInfo, ServerName> region : regionsAndLocations) {
         if (region != null && region.getFirst() != null && region.getSecond() != null) {
           HRegionInfo hri = region.getFirst();
-          if (hri.isOffline() && (hri.isSplit() || hri.isSplitParent())) {
+          if (hri.isOffline()) {
             allRegionsOnline = false;
             continue;
           }
@@ -575,7 +577,9 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       try {
         MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
       } catch (IOException e) {
-        LOG.error("Failed to archive the old del files " + delFiles, e);
+        LOG.error(
+          "Failed to archive the old del files " + delFiles + " in the column "
+            + column.getNameAsString(), e);
       }
       return path;
     }
