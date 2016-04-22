@@ -346,6 +346,7 @@ public class HRegionServer extends HasThread implements
   public static final String REGIONSERVER = "regionserver";
 
   MetricsRegionServer metricsRegionServer;
+  MetricsTable metricsTable;
   private SpanReceiverHost spanReceiverHost;
 
   /**
@@ -771,8 +772,6 @@ public class HRegionServer extends HasThread implements
           HConstants.DEFAULT_THREAD_WAKE_FREQUENCY);
         healthCheckChore = new HealthCheckChore(sleepTime, this, getConfiguration());
       }
-      this.pauseMonitor = new JvmPauseMonitor(conf);
-      pauseMonitor.start();
 
       initializeZooKeeper();
       if (!isStopped() && !isAborted()) {
@@ -1408,6 +1407,10 @@ public class HRegionServer extends HasThread implements
       this.walFactory = setupWALAndReplication();
       // Init in here rather than in constructor after thread name has been set
       this.metricsRegionServer = new MetricsRegionServer(new MetricsRegionServerWrapperImpl(this));
+      this.metricsTable = new MetricsTable(new MetricsTableWrapperAggregateImpl(this));
+      // Now that we have a metrics source, start the pause monitor
+      this.pauseMonitor = new JvmPauseMonitor(conf, getMetrics().getMetricsSource());
+      pauseMonitor.start();
 
       startServiceThreads();
       startHeapMemoryManager();
