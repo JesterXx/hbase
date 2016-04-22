@@ -2408,9 +2408,9 @@ public final class MasterMobCompactionStatusProtos {
 
     public interface Interface {
       /**
-       * <code>rpc GetMobCompactRegions(.hbase.pb.GetMobCompactionRegionsRequest) returns (.hbase.pb.GetMobCompactionRegionsResponse);</code>
+       * <code>rpc GetMobCompactionRegions(.hbase.pb.GetMobCompactionRegionsRequest) returns (.hbase.pb.GetMobCompactionRegionsResponse);</code>
        */
-      public abstract void getMobCompactRegions(
+      public abstract void getMobCompactionRegions(
           com.google.protobuf.RpcController controller,
           org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
           com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done);
@@ -2429,11 +2429,11 @@ public final class MasterMobCompactionStatusProtos {
         final Interface impl) {
       return new MasterMobCompactionStatusService() {
         @java.lang.Override
-        public  void getMobCompactRegions(
+        public  void getMobCompactionRegions(
             com.google.protobuf.RpcController controller,
             org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
             com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done) {
-          impl.getMobCompactRegions(controller, request, done);
+          impl.getMobCompactionRegions(controller, request, done);
         }
 
         @java.lang.Override
@@ -2467,7 +2467,7 @@ public final class MasterMobCompactionStatusProtos {
           }
           switch(method.getIndex()) {
             case 0:
-              return impl.getMobCompactRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)request);
+              return impl.getMobCompactionRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)request);
             case 1:
               return impl.updateMobCompactionAsMajor(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.UpdateMobCompactionAsMajorRequest)request);
             default:
@@ -2515,9 +2515,9 @@ public final class MasterMobCompactionStatusProtos {
     }
 
     /**
-     * <code>rpc GetMobCompactRegions(.hbase.pb.GetMobCompactionRegionsRequest) returns (.hbase.pb.GetMobCompactionRegionsResponse);</code>
+     * <code>rpc GetMobCompactionRegions(.hbase.pb.GetMobCompactionRegionsRequest) returns (.hbase.pb.GetMobCompactionRegionsResponse);</code>
      */
-    public abstract void getMobCompactRegions(
+    public abstract void getMobCompactionRegions(
         com.google.protobuf.RpcController controller,
         org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
         com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done);
@@ -2553,7 +2553,7 @@ public final class MasterMobCompactionStatusProtos {
       }
       switch(method.getIndex()) {
         case 0:
-          this.getMobCompactRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)request,
+          this.getMobCompactionRegions(controller, (org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest)request,
             com.google.protobuf.RpcUtil.<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse>specializeCallback(
               done));
           return;
@@ -2619,7 +2619,7 @@ public final class MasterMobCompactionStatusProtos {
         return channel;
       }
 
-      public  void getMobCompactRegions(
+      public  void getMobCompactionRegions(
           com.google.protobuf.RpcController controller,
           org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request,
           com.google.protobuf.RpcCallback<org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse> done) {
@@ -2656,7 +2656,7 @@ public final class MasterMobCompactionStatusProtos {
     }
 
     public interface BlockingInterface {
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse getMobCompactRegions(
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse getMobCompactionRegions(
           com.google.protobuf.RpcController controller,
           org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request)
           throws com.google.protobuf.ServiceException;
@@ -2674,7 +2674,7 @@ public final class MasterMobCompactionStatusProtos {
 
       private final com.google.protobuf.BlockingRpcChannel channel;
 
-      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse getMobCompactRegions(
+      public org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsResponse getMobCompactionRegions(
           com.google.protobuf.RpcController controller,
           org.apache.hadoop.hbase.protobuf.generated.MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request)
           throws com.google.protobuf.ServiceException {
@@ -2740,16 +2740,16 @@ public final class MasterMobCompactionStatusProtos {
       "pdateMobCompactionAsMajorRequest\022\'\n\ntabl" +
       "e_name\030\001 \002(\0132\023.hbase.pb.TableName\022)\n\013ser" +
       "ver_name\030\002 \002(\0132\024.hbase.pb.ServerName\"$\n\"" +
-      "UpdateMobCompactionAsMajorResponse2\210\002\n M",
-      "asterMobCompactionStatusService\022k\n\024GetMo" +
-      "bCompactRegions\022(.hbase.pb.GetMobCompact" +
-      "ionRegionsRequest\032).hbase.pb.GetMobCompa" +
-      "ctionRegionsResponse\022w\n\032UpdateMobCompact" +
-      "ionAsMajor\022+.hbase.pb.UpdateMobCompactio" +
-      "nAsMajorRequest\032,.hbase.pb.UpdateMobComp" +
-      "actionAsMajorResponseBU\n*org.apache.hado" +
-      "op.hbase.protobuf.generatedB\037MasterMobCo" +
-      "mpactionStatusProtosH\001\210\001\001\240\001\001"
+      "UpdateMobCompactionAsMajorResponse2\213\002\n M",
+      "asterMobCompactionStatusService\022n\n\027GetMo" +
+      "bCompactionRegions\022(.hbase.pb.GetMobComp" +
+      "actionRegionsRequest\032).hbase.pb.GetMobCo" +
+      "mpactionRegionsResponse\022w\n\032UpdateMobComp" +
+      "actionAsMajor\022+.hbase.pb.UpdateMobCompac" +
+      "tionAsMajorRequest\032,.hbase.pb.UpdateMobC" +
+      "ompactionAsMajorResponseBU\n*org.apache.h" +
+      "adoop.hbase.protobuf.generatedB\037MasterMo" +
+      "bCompactionStatusProtosH\001\210\001\001\240\001\001"
     };
     com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner =
       new com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner() {

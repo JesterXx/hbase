@@ -321,7 +321,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
         boolean archiveDelFiles = dispatchMobCompaction(tableName, column, allFiles);
         // archive the del files if it is a major compaction
         if (archiveDelFiles && !delFilePaths.isEmpty()) {
-          LOG.info("After a mob compaction with all files selected, archiving the del files "
+          LOG.info("After a mob compaction with all files selected, archive the del files "
             + delFilePaths);
           List<StoreFile> delFiles = new ArrayList<StoreFile>();
           for (Path delFilePath : delFilePaths) {

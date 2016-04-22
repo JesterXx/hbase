@@ -43,7 +43,7 @@ message UpdateMobCompactionAsMajorResponse {
 }
 
 service MasterMobCompactionStatusService {
-  rpc GetMobCompactRegions(GetMobCompactionRegionsRequest)
+  rpc GetMobCompactionRegions(GetMobCompactionRegionsRequest)
       returns(GetMobCompactionRegionsResponse);
 
   rpc UpdateMobCompactionAsMajor(UpdateMobCompactionAsMajorRequest)

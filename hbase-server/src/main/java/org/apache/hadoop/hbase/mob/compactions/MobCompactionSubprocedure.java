@@ -210,9 +210,9 @@ public class MobCompactionSubprocedure extends Subprocedure {
     if (allRegionsOnline && success && !regions.isEmpty()) {
       // compare the regions passed from master and existing regions in the current region server.
       // if they are the same, it means all regions are online, all mob files owned by this region
-      // server can be compacted. We call tell master this thing by setting data in zookeeper.
+      // server can be compacted. We call update the mob compaction in this server as major.
       try {
-        List<byte[]> foundRegionStartKeys = getCompactRegions();
+        List<byte[]> foundRegionStartKeys = getCompactionRegions();
         if (foundRegionStartKeys.size() == sortedStartKeys.size()) {
           Collections.sort(sortedStartKeys, Bytes.BYTES_COMPARATOR);
           boolean equals = true;
@@ -239,7 +239,7 @@ public class MobCompactionSubprocedure extends Subprocedure {
    * Gets the regions that run the mob compaction.
    * @return The start keys of regions that run the mob compaction.
    */
-  private List<byte[]> getCompactRegions() throws ServiceException, IOException {
+  private List<byte[]> getCompactionRegions() throws ServiceException, IOException {
     MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest request =
       MasterMobCompactionStatusProtos.GetMobCompactionRegionsRequest
       .newBuilder().setServerName(ProtobufUtil.toServerName(rss.getServerName()))

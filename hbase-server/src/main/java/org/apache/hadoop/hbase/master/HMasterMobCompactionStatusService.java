@@ -50,7 +50,7 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
    * Gets the start keys of the compacted regions.
    */
   @Override
-  public void getMobCompactRegions(RpcController controller,
+  public void getMobCompactionRegions(RpcController controller,
     GetMobCompactionRegionsRequest request, RpcCallback<GetMobCompactionRegionsResponse> done) {
     org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.TableName tnPb = request.getTableName();
     org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName snPb = request
