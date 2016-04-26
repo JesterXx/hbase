@@ -179,7 +179,7 @@ public class PartitionedMobCompactor extends MobCompactor {
       String fn = file.getPath().getName();
       if (HFileLink.isHFileLink(file.getPath())) {
         link = HFileLink.buildFromHFileLinkPattern(conf, file.getPath());
-        fn = link.getOriginPath().getName(); 
+        fn = link.getOriginPath().getName();
       }
       if (!StoreFileInfo.isDelFile((fn))) {
         MobFileName fileName = MobFileName.create(fn);
