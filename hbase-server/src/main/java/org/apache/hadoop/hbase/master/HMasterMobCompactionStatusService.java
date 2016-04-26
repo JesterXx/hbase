@@ -40,9 +40,9 @@ import com.google.protobuf.RpcController;
 @InterfaceAudience.Private
 public class HMasterMobCompactionStatusService extends MasterMobCompactionStatusService {
 
-  private HMaster master;
+  private MasterServices master;
 
-  public HMasterMobCompactionStatusService(HMaster master) {
+  public HMasterMobCompactionStatusService(MasterServices master) {
     this.master = master;
   }
 
