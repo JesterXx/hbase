@@ -350,4 +350,9 @@ public interface MasterServices extends Server {
    * @return load balancer
    */
   public LoadBalancer getLoadBalancer();
+
+  /**
+   * @return Master's instance of {@link MobCompactionManager}
+   */
+  MobCompactionManager getMobCompactionManager();
 }

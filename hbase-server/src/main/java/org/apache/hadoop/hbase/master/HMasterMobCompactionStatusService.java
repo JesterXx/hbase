@@ -55,7 +55,7 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
     org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.TableName tnPb = request.getTableName();
     org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ServerName snPb = request
       .getServerName();
-    List<byte[]> regionStartKeys = master.mobCompactionManager.getCompactingRegions(
+    List<byte[]> regionStartKeys = master.getMobCompactionManager().getCompactingRegions(
       ProtobufUtil.toTableName(tnPb), ProtobufUtil.toServerName(snPb));
     GetMobCompactionRegionsResponse.Builder builder = GetMobCompactionRegionsResponse.newBuilder();
     if (!regionStartKeys.isEmpty()) {
@@ -75,7 +75,7 @@ public class HMasterMobCompactionStatusService extends MasterMobCompactionStatus
     RpcCallback<UpdateMobCompactionAsMajorResponse> done) {
     TableName tableName = ProtobufUtil.toTableName(request.getTableName());
     ServerName serverName = ProtobufUtil.toServerName(request.getServerName());
-    master.mobCompactionManager.updateAsMajorCompaction(tableName, serverName);
+    master.getMobCompactionManager().updateAsMajorCompaction(tableName, serverName);
     done.run(UpdateMobCompactionAsMajorResponse.getDefaultInstance());
   }
 }

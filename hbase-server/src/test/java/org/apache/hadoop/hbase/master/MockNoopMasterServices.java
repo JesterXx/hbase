@@ -326,4 +326,9 @@ public class MockNoopMasterServices implements MasterServices, Server {
   public MasterProcedureManagerHost getMasterProcedureManagerHost() {
     return null;
   }
+
+  @Override
+  public MobCompactionManager getMobCompactionManager() {
+    return null;
+  }
 }

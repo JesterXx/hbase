@@ -310,7 +310,7 @@ public class HMaster extends HRegionServer implements MasterServices {
   private HFileCleaner hfileCleaner;
   private ExpiredMobFileCleanerChore expiredMobFileCleanerChore;
   private MobCompactionChore mobCompactChore;
-  MobCompactionManager mobCompactionManager;
+  private MobCompactionManager mobCompactionManager;
   // used to synchronize the mobCompactionStates
   private final IdLock mobCompactionLock = new IdLock();
   // save the information of mob compactions in tables.
@@ -2855,5 +2855,10 @@ public class HMaster extends HRegionServer implements MasterServices {
   @Override
   public LoadBalancer getLoadBalancer() {
     return balancer;
+  }
+
+  @Override
+  public MobCompactionManager getMobCompactionManager() {
+    return mobCompactionManager;
   }
 }
