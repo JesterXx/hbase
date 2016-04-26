@@ -183,7 +183,7 @@ public class PartitionedMobCompactor extends MobCompactor {
       }
       if (!StoreFileInfo.isDelFile((fn))) {
         MobFileName fileName = MobFileName.create(fn);
-        if (!isOwnByRegion(fileName.getStartKey())) {
+        if (!isOwnedByRegion(fileName.getStartKey())) {
           irrelevantFileCount++;
           continue;
         }
@@ -239,7 +239,7 @@ public class PartitionedMobCompactor extends MobCompactor {
    * @param prefix The prefix of the mob file name.
    * @return True if the start key is owned by the current region.
    */
-  private boolean isOwnByRegion(String prefix) {
+  private boolean isOwnedByRegion(String prefix) {
     byte[] startKey = prefixAndKeys.get(prefix);
     return regionInfo.containsRow(startKey);
   }

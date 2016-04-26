@@ -310,7 +310,7 @@ public class HMaster extends HRegionServer implements MasterServices {
   private HFileCleaner hfileCleaner;
   private ExpiredMobFileCleanerChore expiredMobFileCleanerChore;
   private MobCompactionChore mobCompactChore;
-  MasterMobCompactionManager mobCompactionManager;
+  MobCompactionManager mobCompactionManager;
   // used to synchronize the mobCompactionStates
   private final IdLock mobCompactionLock = new IdLock();
   // save the information of mob compactions in tables.
@@ -620,7 +620,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     this.mpmHost = new MasterProcedureManagerHost();
     this.mpmHost.register(this.snapshotManager);
     this.mpmHost.register(new MasterFlushTableProcedureManager());
-    this.mobCompactionManager = new MasterMobCompactionManager(this);
+    this.mobCompactionManager = new MobCompactionManager(this);
     this.mpmHost.register(this.mobCompactionManager);
     this.registerService(new HMasterMobCompactionStatusService(this));
     this.mpmHost.loadProcedures(conf);

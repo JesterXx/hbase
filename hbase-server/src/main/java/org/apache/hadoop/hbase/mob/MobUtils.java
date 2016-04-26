@@ -787,7 +787,9 @@ public final class MobUtils {
           file = fs.getFileStatus(location);
         }
       } catch (FileNotFoundException e) {
-        LOG.warn("The file " + location + " can not be found", e);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("The file " + location + " can not be found", e);
+        }
       }
       if (file != null) {
         return file;

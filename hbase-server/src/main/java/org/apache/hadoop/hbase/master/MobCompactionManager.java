@@ -90,9 +90,9 @@ import com.google.common.collect.Lists;
  * The mob compaction manager used in {@link HMaster}
  */
 @InterfaceAudience.Private
-public class MasterMobCompactionManager extends MasterProcedureManager implements Stoppable {
+public class MobCompactionManager extends MasterProcedureManager implements Stoppable {
 
-  static final Log LOG = LogFactory.getLog(MasterMobCompactionManager.class);
+  static final Log LOG = LogFactory.getLog(MobCompactionManager.class);
   private HMaster master;
   private Configuration conf;
   private ThreadPoolExecutor mobCompactionPool;
@@ -128,11 +128,11 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
   private Map<TableName, Map<ServerName, Pair<Boolean, List<byte[]>>>> compactingRegions =
     new HashMap<TableName, Map<ServerName, Pair<Boolean, List<byte[]>>>>();
 
-  public MasterMobCompactionManager(HMaster master) {
+  public MobCompactionManager(HMaster master) {
     this(master, null);
   }
 
-  public MasterMobCompactionManager(HMaster master, ThreadPoolExecutor mobCompactionPool) {
+  public MobCompactionManager(HMaster master, ThreadPoolExecutor mobCompactionPool) {
     this.master = master;
     this.fs = master.getFileSystem();
     this.conf = master.getConfiguration();
@@ -287,7 +287,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           }
         }
         // remove this compaction from memory.
-        synchronized (MasterMobCompactionManager.this) {
+        synchronized (MobCompactionManager.this) {
           compactions.remove(tableName);
         }
         try {
@@ -493,15 +493,21 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           return file;
         }
       } catch (FileNotFoundException e) {
-        LOG.warn("The file " + path + " can not be found", e);
+        if (LOG.isDebugEnabled()) {
+          LOG.warn("The file " + path + " can not be found", e);
+        }
       }
       return null;
     }
 
     /**
      * Compacts the del files in batches which avoids opening too many files.
-     * @param request The compaction request.
-     * @param delFilePaths
+     * @param column The column family that the MOB compaction runs in.
+     * @param delFilePaths The paths of the del files.
+     * @param selectionTime The time when the compaction of del files starts
+     * @param cryptoContext The current encryption context.
+     * @param mobTableDir The directory of the MOB table.
+     * @param mobFamilyDir The directory of MOB column family.
      * @return The paths of new del files after merging or the original files if no merging
      *         is necessary.
      * @throws IOException
@@ -512,7 +518,7 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       if (delFilePaths.size() <= delFileMaxCount) {
         return delFilePaths;
       }
-      // when there are more del files than the number that is allowed, merge it firstly.
+      // when there are more del files than the number that is allowed, merge them firstly.
       int offset = 0;
       List<Path> paths = new ArrayList<Path>();
       while (offset < delFilePaths.size()) {
@@ -543,19 +549,23 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
     /**
      * Compacts the del file in a batch.
-     * @param request The compaction request.
+     * @param column The column family that the MOB compaction runs in.
      * @param delFiles The del files.
+     * @param selectionTime The time when the compaction of del files starts
+     * @param cryptoContext The current encryption context.
+     * @param mobTableDir The directory of the MOB table.
+     * @param mobFamilyDir The directory of MOB column family.
      * @return The path of new del file after merging.
      * @throws IOException
      */
     private Path compactDelFilesInBatch(HColumnDescriptor column, List<StoreFile> delFiles,
       long selectionTime, Encryption.Context cryptoContext, Path mobTableDir, Path mobFamilyDir)
       throws IOException {
-      // create a scanner for the del files.
-      StoreScanner scanner = createScanner(column, delFiles, ScanType.COMPACT_RETAIN_DELETES);
       StoreFileWriter writer = null;
       Path filePath = null;
-      try {
+      // create a scanner for the del files.
+      try (StoreScanner scanner =
+        createScanner(column, delFiles, ScanType.COMPACT_RETAIN_DELETES)) {
         writer = MobUtils.createDelFileWriter(conf, fs, column,
           MobUtils.formatDate(new Date(selectionTime)), tempPath, Long.MAX_VALUE,
           column.getCompactionCompression(), HConstants.EMPTY_START_ROW, compactionCacheConfig,
@@ -573,7 +583,6 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
           cells.clear();
         } while (hasMore);
       } finally {
-        scanner.close();
         if (writer != null) {
           try {
             writer.close();
@@ -590,13 +599,14 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
       } catch (IOException e) {
         LOG.error(
           "Failed to archive the old del files " + delFiles + " in the column "
-            + column.getNameAsString(), e);
+            + column.getNameAsString() + " of the table " + tableName.getNameAsString(), e);
       }
       return path;
     }
 
     /**
      * Creates a store scanner.
+     * @param column The column family that that the MOB compaction runs in.
      * @param filesToCompact The files to be compacted.
      * @param scanType The scan type.
      * @return The store scanner.
@@ -618,8 +628,9 @@ public class MasterMobCompactionManager extends MasterProcedureManager implement
 
   @Override
   public void stop(String why) {
-    if (this.stopped)
+    if (this.stopped) {
       return;
+    }
     this.stopped = true;
     for (Future<Void> compaction : compactions.values()) {
       if (compaction != null) {

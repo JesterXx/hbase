@@ -149,6 +149,9 @@ public class MobCompactionSubprocedure extends Subprocedure {
         try {
           link = HFileLink.buildFromHFileLinkPattern(conf, path);
           FileStatus linkedFile = MobUtils.getReferencedFileStatus(rss.getFileSystem(), link);
+          if (linkedFile == null) {
+            continue;
+          }
           path = linkedFile.getPath();
         } catch (IOException e) {
           throw new ForeignException(getMemberName(), e);
@@ -212,20 +215,16 @@ public class MobCompactionSubprocedure extends Subprocedure {
       // if they are the same, it means all regions are online, all mob files owned by this region
       // server can be compacted. We call update the mob compaction in this server as major.
       try {
-        List<byte[]> foundRegionStartKeys = getCompactionRegions();
-        if (foundRegionStartKeys.size() == sortedStartKeys.size()) {
+        List<byte[]> currentRegionStartKeys = getCompactionRegions();
+        if (currentRegionStartKeys.size() == sortedStartKeys.size()) {
           Collections.sort(sortedStartKeys, Bytes.BYTES_COMPARATOR);
-          boolean equals = true;
-          for (int i = 0; i < foundRegionStartKeys.size(); i++) {
-            if (Bytes.BYTES_COMPARATOR.compare(foundRegionStartKeys.get(i),
+          for (int i = 0; i < currentRegionStartKeys.size(); i++) {
+            if (Bytes.BYTES_COMPARATOR.compare(currentRegionStartKeys.get(i),
               sortedStartKeys.get(i))!= 0) {
-              equals = false;
-              break;
+              return;
             }
           }
-          if (equals) {
-            updateCompactionAsMajor();
-          }
+          updateCompactionAsMajor();
         }
       } catch (ServiceException e) {
         throw new ForeignException(getMemberName(), e);

@@ -39,7 +39,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionDispatcher;
-import org.apache.hadoop.hbase.master.MasterMobCompactionManager;
+import org.apache.hadoop.hbase.master.MobCompactionManager;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.procedure.ProcedureMember;
 import org.apache.hadoop.hbase.procedure.ProcedureMemberRpcs;
@@ -65,7 +65,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
   private ProcedureMemberRpcs memberRpcs;
   private ProcedureMember member;
   private static final String CONCURENT_MOB_COMPACTION_TASKS_KEY =
-    "hbase.mob.compaction.procedure.concurrentTasks";
+    "hbase.mob.compaction.procedure.concurrent.tasks";
   private static final int DEFAULT_CONCURRENT_MOB_COMPACTION_TASKS = 10;
   public static final String MOB_COMPACTION_PROCEDURE_POOL_THREADS_KEY =
     "hbase.mob.compaction.procedure.pool.threads";
@@ -85,7 +85,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
     this.rss = rss;
     ZooKeeperWatcher zkw = rss.getZooKeeper();
     this.memberRpcs = new ZKProcedureMemberRpcs(zkw,
-      MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE);
+      MobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE);
 
     Configuration conf = rss.getConfiguration();
     long keepAlive = conf.getLong(MOB_COMPACTION_TIMEOUT_MILLIS_KEY,
@@ -128,7 +128,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
 
   @Override
   public String getProcedureSignature() {
-    return MasterMobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE;
+    return MobCompactionManager.MOB_COMPACTION_PROCEDURE_SIGNATURE;
   }
 
   /**
@@ -190,7 +190,7 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
    * {@link org.apache.hadoop.hbase.executor.ExecutorService}.
    *
    * It uses a {@link java.util.concurrent.ExecutorCompletionService} which provides queuing of
-   * completed tasks which lets us efficiently cancel pending tasks upon the earliest operation
+   * all tasks which lets us efficiently cancel pending tasks upon the earliest operation
    * failures.
    */
   static class MobCompactionSubprocedurePool {
