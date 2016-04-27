@@ -321,6 +321,7 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
      * @param tableName The current table name.
      * @param column The current column descriptor.
      * @param allFiles If a major compaction is required.
+     * @throws IOException
      */
     private void doCompaction(Configuration conf, FileSystem fs, TableName tableName,
       HColumnDescriptor column, boolean allFiles) throws IOException {
