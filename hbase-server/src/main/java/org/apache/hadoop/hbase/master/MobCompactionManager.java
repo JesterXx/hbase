@@ -269,8 +269,22 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
           lock.acquire();
         }
         tableLocked = true;
+        StringBuilder errorMsg = null;
         for (HColumnDescriptor column : columns) {
-          doCompaction(conf, fs, tableName, column, allFiles);
+          try {
+            doCompaction(conf, fs, tableName, column, allFiles);
+          } catch (IOException e) {
+            LOG.error("Failed to compact the mob files for the column " + column.getNameAsString()
+              + " in the table " + tableName.getNameAsString(), e);
+            if (errorMsg == null) {
+              errorMsg = new StringBuilder();
+            }
+            errorMsg.append(column.getNameAsString() + " ");
+          }
+        }
+        if (errorMsg != null) {
+          throw new IOException("Failed to compact the mob files for the columns "
+            + errorMsg.toString() + " in the table " + tableName.getNameAsString());
         }
       } catch (IOException e) {
         LOG.error(
@@ -309,35 +323,30 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
      * @param allFiles If a major compaction is required.
      */
     private void doCompaction(Configuration conf, FileSystem fs, TableName tableName,
-      HColumnDescriptor column, boolean allFiles) {
-      try {
-        // merge del files
-        Encryption.Context cryptoContext = EncryptionUtil.createEncryptionContext(conf, column);
-        Path mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
-        Path mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
-        List<Path> delFilePaths = compactDelFiles(column, selectDelFiles(mobFamilyDir),
-          EnvironmentEdgeManager.currentTime(), cryptoContext, mobTableDir, mobFamilyDir);
-        // dispatch mob compaction request to region servers.
-        boolean archiveDelFiles = dispatchMobCompaction(tableName, column, allFiles);
-        // archive the del files if it is a major compaction
-        if (archiveDelFiles && !delFilePaths.isEmpty()) {
-          LOG.info("After a mob compaction with all files selected, archive the del files "
-            + delFilePaths);
-          List<StoreFile> delFiles = new ArrayList<StoreFile>();
-          for (Path delFilePath : delFilePaths) {
-            StoreFile sf = new StoreFile(fs, delFilePath, conf, compactionCacheConfig,
-              BloomType.NONE);
-            delFiles.add(sf);
-          }
-          try {
-            MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
-          } catch (IOException e) {
-            LOG.error("Failed to archive the del files " + delFilePaths, e);
-          }
+      HColumnDescriptor column, boolean allFiles) throws IOException {
+      // merge del files
+      Encryption.Context cryptoContext = EncryptionUtil.createEncryptionContext(conf, column);
+      Path mobTableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), tableName);
+      Path mobFamilyDir = MobUtils.getMobFamilyPath(conf, tableName, column.getNameAsString());
+      List<Path> delFilePaths = compactDelFiles(column, selectDelFiles(mobFamilyDir),
+        EnvironmentEdgeManager.currentTime(), cryptoContext, mobTableDir, mobFamilyDir);
+      // dispatch mob compaction request to region servers.
+      boolean archiveDelFiles = dispatchMobCompaction(tableName, column, allFiles);
+      // archive the del files if it is a major compaction
+      if (archiveDelFiles && !delFilePaths.isEmpty()) {
+        LOG.info("After a mob compaction with all files selected, archive the del files "
+          + delFilePaths);
+        List<StoreFile> delFiles = new ArrayList<StoreFile>();
+        for (Path delFilePath : delFilePaths) {
+          StoreFile sf = new StoreFile(fs, delFilePath, conf, compactionCacheConfig,
+            BloomType.NONE);
+          delFiles.add(sf);
         }
-      } catch (IOException e) {
-        LOG.error("Failed to compact the mob files for the column " + column.getNameAsString()
-          + " in the table " + tableName.getNameAsString(), e);
+        try {
+          MobUtils.removeMobFiles(conf, fs, tableName, mobTableDir, column.getName(), delFiles);
+        } catch (IOException e) {
+          LOG.error("Failed to archive the del files " + delFilePaths, e);
+        }
       }
     }
 
@@ -568,7 +577,7 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
         createScanner(column, delFiles, ScanType.COMPACT_RETAIN_DELETES)) {
         writer = MobUtils.createDelFileWriter(conf, fs, column,
           MobUtils.formatDate(new Date(selectionTime)), tempPath, Long.MAX_VALUE,
-          column.getCompactionCompression(), HConstants.EMPTY_START_ROW, compactionCacheConfig,
+          column.getCompactionCompressionType(), HConstants.EMPTY_START_ROW, compactionCacheConfig,
           cryptoContext);
         filePath = writer.getPath();
         List<Cell> cells = new ArrayList<Cell>();
