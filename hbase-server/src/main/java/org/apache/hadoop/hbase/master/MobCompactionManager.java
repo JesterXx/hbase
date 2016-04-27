@@ -265,7 +265,7 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
         // the tableLockManager might be null in testing. In that case, it is lock-free.
         if (tableLockManager != null) {
           lock = tableLockManager.writeLock(MobUtils.getTableLockName(tableName),
-            "Run MobCompactor");
+            "Run MOB Compaction");
           lock.acquire();
         }
         tableLocked = true;
