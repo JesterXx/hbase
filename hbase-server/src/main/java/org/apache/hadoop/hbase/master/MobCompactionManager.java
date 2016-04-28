@@ -504,7 +504,7 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
         }
       } catch (FileNotFoundException e) {
         if (LOG.isDebugEnabled()) {
-          LOG.warn("The file " + path + " can not be found", e);
+          LOG.debug("The file " + path + " can not be found", e);
         }
       }
       return null;
