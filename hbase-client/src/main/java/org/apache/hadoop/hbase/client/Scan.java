@@ -85,6 +85,7 @@ public class Scan extends Query {
   private static final Log LOG = LogFactory.getLog(Scan.class);
 
   private static final String RAW_ATTR = "_raw_";
+  public static final String NEED_ROLLING_SCAN = "rolling";
 
   private byte [] startRow = HConstants.EMPTY_START_ROW;
   private byte [] stopRow  = HConstants.EMPTY_END_ROW;

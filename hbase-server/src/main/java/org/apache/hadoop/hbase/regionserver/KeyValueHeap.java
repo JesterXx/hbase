@@ -66,6 +66,9 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
 
   protected KVScannerComparator comparator;
 
+  KeyValueHeap() {
+  }
+
   /**
    * Constructor.  This KeyValueHeap will handle closing of passed in
    * KeyValueScanners.
@@ -287,7 +290,7 @@ public class KeyValueHeap extends NonReversedNonLazyKeyValueScanner
    * @param forward whether to seek forward (also known as reseek)
    * @param useBloom whether to optimize seeks using Bloom filters
    */
-  private boolean generalizedSeek(boolean isLazy, Cell seekKey,
+  boolean generalizedSeek(boolean isLazy, Cell seekKey,
       boolean forward, boolean useBloom) throws IOException {
     if (!isLazy && useBloom) {
       throw new IllegalArgumentException("Multi-column Bloom filter " +
