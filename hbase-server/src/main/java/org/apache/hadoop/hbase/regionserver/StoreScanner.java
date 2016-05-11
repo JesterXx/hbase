@@ -46,6 +46,7 @@ import org.apache.hadoop.hbase.regionserver.ScanQueryMatcher.MatchCode;
 import org.apache.hadoop.hbase.regionserver.ScannerContext.LimitScope;
 import org.apache.hadoop.hbase.regionserver.ScannerContext.NextState;
 import org.apache.hadoop.hbase.regionserver.handler.ParallelSeekHandler;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -133,6 +134,7 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
   protected List<KeyValueScanner> currentScanners = new ArrayList<KeyValueScanner>();
   // flush update lock
   private ReentrantLock flushLock = new ReentrantLock();
+  private boolean needRollingScanner = false;
 
   protected final long readPt;
 
@@ -218,6 +220,7 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
     // set rowOffset
     this.storeOffset = scan.getRowOffsetPerColumnFamily();
     addCurrentScanners(scanners);
+    needRollingScanner = needRollingScanner(scan, get);
     // Combine all seeked scanners with a heap
     resetKVHeap(scanners, store.getComparator());
   }
@@ -275,6 +278,7 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
     // Seek all scanners to the initial key
     seekScanners(scanners, matcher.getStartKey(), false, parallelSeekEnabled);
     addCurrentScanners(scanners);
+    needRollingScanner = needRollingScanner(scan, get);
     // Combine all seeked scanners with a heap
     resetKVHeap(scanners, store.getComparator());
   }
@@ -314,6 +318,7 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
     // Seek all scanners to the initial key
     seekScanners(scanners, matcher.getStartKey(), false, parallelSeekEnabled);
     addCurrentScanners(scanners);
+    needRollingScanner = needRollingScanner(scan, get);
     resetKVHeap(scanners, scanInfo.getComparator());
   }
 
@@ -370,7 +375,12 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
   protected void resetKVHeap(List<? extends KeyValueScanner> scanners,
       CellComparator comparator) throws IOException {
     // Combine all seeked scanners with a heap
-    heap = new KeyValueHeap(scanners, comparator);
+    byte[] needRollingScanner = scan.getAttribute(Scan.NEED_ROLLING_SCAN);
+    if (needRollingScanner != null && Bytes.toBoolean(needRollingScanner)) {
+      heap = new RollingKeyValueHeap(scanners, comparator);
+    } else {
+      heap = new KeyValueHeap(scanners, comparator);
+    }
   }
 
   /**
@@ -969,6 +979,14 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
     if (this.heap != null) {
       this.heap.shipped();
     }
+  }
+
+  private boolean needRollingScanner(Scan scan, boolean isGet) {
+    if (isGet) {
+      return false;
+    }
+    byte[] needRollingScanner = scan.getAttribute(Scan.NEED_ROLLING_SCAN);
+    return needRollingScanner != null && Bytes.toBoolean(needRollingScanner);
   }
 }
 
