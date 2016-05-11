@@ -375,8 +375,7 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
   protected void resetKVHeap(List<? extends KeyValueScanner> scanners,
       CellComparator comparator) throws IOException {
     // Combine all seeked scanners with a heap
-    byte[] needRollingScanner = scan.getAttribute(Scan.NEED_ROLLING_SCAN);
-    if (needRollingScanner != null && Bytes.toBoolean(needRollingScanner)) {
+    if (needRollingScanner) {
       heap = new RollingKeyValueHeap(scanners, comparator);
     } else {
       heap = new KeyValueHeap(scanners, comparator);
