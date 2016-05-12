@@ -36,7 +36,6 @@ import org.apache.hadoop.hbase.util.ClassSize;
 public class MultiVersionConsistencyControl {
   static final long NO_WRITE_NUMBER = 0;
   private volatile long memstoreRead = 0;
-  private final Object readWaiters = new Object();
 
   // This is the pending queue of writes.
   private final LinkedHashSet<WriteEntry> writeQueue =
@@ -194,12 +193,6 @@ public class MultiVersionConsistencyControl {
 
       // notify waiters on writeQueue before return
       writeQueue.notifyAll();
-    }
-
-    if (nextReadValue > 0) {
-      synchronized (readWaiters) {
-        readWaiters.notifyAll();
-      }
     }
 
     if (memstoreRead >= e.getWriteNumber()) {
