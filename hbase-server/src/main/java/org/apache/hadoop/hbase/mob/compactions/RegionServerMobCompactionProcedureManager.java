@@ -241,10 +241,17 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       int sz = futures.size();
       try {
         boolean success = true;
+        ExecutionException existingException = null;
         // Using the completion service to process the futures.
         for (int i = 0; i < sz; i++) {
           Future<Boolean> f = taskPool.take();
-          success = f.get() && success;
+          try {
+            success = f.get() && success;
+          } catch (ExecutionException e) {
+            success = false;
+            existingException = e; // only throw the last exception
+            LOG.error("Got Exception in MobCompactionSubprocedurePool" + (i + 1), e);
+          }
           if (!futures.remove(f)) {
             LOG.warn("unexpected future" + f);
           }
@@ -254,6 +261,9 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
         }
         if (LOG.isDebugEnabled()) {
           LOG.debug("Completed " + sz + " local region mob compaction tasks.");
+        }
+        if (existingException != null) {
+          throw existingException;
         }
         return success;
       } catch (InterruptedException e) {
@@ -266,10 +276,8 @@ public class RegionServerMobCompactionProcedureManager extends RegionServerProce
       } catch (ExecutionException e) {
         Throwable cause = e.getCause();
         if (cause instanceof ForeignException) {
-          LOG.warn("Rethrowing ForeignException from MobCompactionSubprocedurePool", e);
           throw (ForeignException) e.getCause();
         }
-        LOG.warn("Got Exception in MobCompactionSubprocedurePool", e);
         throw new ForeignException(name, e.getCause());
       } finally {
         cancelTasks();
