@@ -93,16 +93,14 @@ import com.google.common.collect.Lists;
 public class MobCompactionManager extends MasterProcedureManager implements Stoppable {
 
   static final Log LOG = LogFactory.getLog(MobCompactionManager.class);
-  private HMaster master;
-  private Configuration conf;
-  private ThreadPoolExecutor mobCompactionPool;
-  private int delFileMaxCount;
-  private int compactionBatchSize;
-  protected int compactionKVMax;
-  private Path tempPath;
-  private CacheConfig compactionCacheConfig;
+  private final HMaster master;
+  private final ThreadPoolExecutor mobCompactionPool;
+  private final int delFileMaxCount;
+  private final int compactionBatchSize;
+  protected final int compactionKVMax;
+  private final Path tempPath;
+  private final CacheConfig compactionCacheConfig;
   private boolean stopped;
-  private FileSystem fs;
   public static final String MOB_COMPACTION_PROCEDURE_COLUMN_KEY = "mobCompaction-column";
   public static final String MOB_COMPACTION_PROCEDURE_ALL_FILES_KEY = "mobCompaction-allFiles";
 
@@ -134,13 +132,12 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
 
   public MobCompactionManager(HMaster master, ThreadPoolExecutor mobCompactionPool) {
     this.master = master;
-    this.fs = master.getFileSystem();
-    this.conf = master.getConfiguration();
+    Configuration conf = master.getConfiguration();
     delFileMaxCount = conf.getInt(MobConstants.MOB_DELFILE_MAX_COUNT,
       MobConstants.DEFAULT_MOB_DELFILE_MAX_COUNT);
     compactionBatchSize = conf.getInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_COMPACTION_BATCH_SIZE);
-    compactionKVMax = this.conf.getInt(HConstants.COMPACTION_KV_MAX,
+    compactionKVMax = conf.getInt(HConstants.COMPACTION_KV_MAX,
       HConstants.COMPACTION_KV_MAX_DEFAULT);
     tempPath = new Path(MobUtils.getMobHome(conf), MobConstants.TEMP_DIR_NAME);
     boolean cacheDataOnRead = conf.getBoolean(CacheConfig.CACHE_DATA_ON_READ_KEY,
@@ -186,8 +183,8 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
         LOG.error(msg);
         throw new IOException(msg);
       }
-      Future<Void> future = mobCompactionPool.submit(new CompactionRunner(fs, tableName, columns,
-        master.getTableLockManager(), allFiles));
+      Future<Void> future = mobCompactionPool.submit(new CompactionRunner(tableName, columns,
+        allFiles));
       compactions.put(tableName, future);
       if (LOG.isDebugEnabled()) {
         LOG.debug("The mob compaction is requested for the columns " + columns + " of the table "
@@ -239,19 +236,20 @@ public class MobCompactionManager extends MasterProcedureManager implements Stop
    * A callable for mob compaction
    */
   private class CompactionRunner implements Callable<Void> {
-    private FileSystem fs;
-    private TableName tableName;
-    private List<HColumnDescriptor> columns;
-    private TableLockManager tableLockManager;
-    private boolean allFiles;
+    private final Configuration conf;
+    private final FileSystem fs;
+    private final TableName tableName;
+    private final List<HColumnDescriptor> columns;
+    private final TableLockManager tableLockManager;
+    private final boolean allFiles;
 
-    public CompactionRunner(FileSystem fs, TableName tableName, List<HColumnDescriptor> columns,
-      TableLockManager tableLockManager, boolean allFiles) {
-      super();
-      this.fs = fs;
+    public CompactionRunner(TableName tableName, List<HColumnDescriptor> columns,
+      boolean allFiles) {
+      this.conf = master.getConfiguration();
+      this.fs = master.getFileSystem();
       this.tableName = tableName;
       this.columns = columns;
-      this.tableLockManager = tableLockManager;
+      this.tableLockManager = master.getTableLockManager();
       this.allFiles = allFiles;
     }
 
