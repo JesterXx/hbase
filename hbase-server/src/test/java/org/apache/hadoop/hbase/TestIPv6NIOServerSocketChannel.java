@@ -24,6 +24,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.channels.ServerSocketChannel;
+import java.util.Locale;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -36,7 +37,7 @@ import org.junit.experimental.categories.Category;
 import org.junit.rules.TestRule;
 
 /**
- * This tests whether ServerSocketChannel works over ipv6, which Zookeeper
+ * This tests whether ServerSocketChannel works over ipv6, which ZooKeeper
  * depends on. On Windows Oracle JDK 6, creating a ServerSocketChannel throws
  * java.net.SocketException: Address family not supported by protocol family
  * exception. It is a known JVM bug, seems to be only resolved for JDK7:
@@ -124,7 +125,7 @@ public class TestIPv6NIOServerSocketChannel {
       //java.net.SocketException: Address family not supported by protocol family
       //or java.net.SocketException: Protocol family not supported
       Assert.assertFalse(ex.getClass().isInstance(BindException.class));
-      Assert.assertTrue(ex.getMessage().toLowerCase().contains("protocol family"));
+      Assert.assertTrue(ex.getMessage().toLowerCase(Locale.ROOT).contains("protocol family"));
       LOG.info("Received expected exception:");
       LOG.info(ex);
 

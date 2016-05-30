@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.classification.InterfaceStability;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -40,7 +41,8 @@ import com.google.common.annotations.VisibleForTesting;
  * Don't subclass ScheduledChore if the task relies on being woken up for something to do, such as
  * an entry being added to a queue, etc.
  */
-@InterfaceAudience.Private
+@InterfaceAudience.Public
+@InterfaceStability.Stable
 public abstract class ScheduledChore implements Runnable {
   private static final Log LOG = LogFactory.getLog(ScheduledChore.class);
 
@@ -55,9 +57,9 @@ public abstract class ScheduledChore implements Runnable {
   /**
    * Scheduling parameters. Used by ChoreService when scheduling the chore to run periodically
    */
-  private final int period;
+  private final int period; // in TimeUnit units
   private final TimeUnit timeUnit;
-  private final long initialDelay;
+  private final long initialDelay; // in TimeUnit units
 
   /**
    * Interface to the ChoreService that this ScheduledChore is scheduled with. null if the chore is
@@ -68,8 +70,8 @@ public abstract class ScheduledChore implements Runnable {
   /**
    * Variables that encapsulate the meaningful state information
    */
-  private long timeOfLastRun = -1;
-  private long timeOfThisRun = -1;
+  private long timeOfLastRun = -1; // system time millis
+  private long timeOfThisRun = -1; // system time millis
   private boolean initialChoreComplete = false;
 
   /**
@@ -116,6 +118,8 @@ public abstract class ScheduledChore implements Runnable {
   /**
    * This constructor is for test only. It allows us to create an object and to call chore() on it.
    */
+  @InterfaceAudience.Private
+  @VisibleForTesting
   protected ScheduledChore() {
     this.name = null;
     this.stopper = null;
@@ -127,7 +131,7 @@ public abstract class ScheduledChore implements Runnable {
   /**
    * @param name Name assigned to Chore. Useful for identification amongst chores of the same type
    * @param stopper When {@link Stoppable#isStopped()} is true, this chore will cancel and cleanup
-   * @param period Period with which this Chore repeats execution when scheduled.
+   * @param period Period in millis with which this Chore repeats execution when scheduled.
    */
   public ScheduledChore(final String name, Stoppable stopper, final int period) {
     this(name, stopper, period, DEFAULT_INITIAL_DELAY);
@@ -136,7 +140,7 @@ public abstract class ScheduledChore implements Runnable {
   /**
    * @param name Name assigned to Chore. Useful for identification amongst chores of the same type
    * @param stopper When {@link Stoppable#isStopped()} is true, this chore will cancel and cleanup
-   * @param period Period with which this Chore repeats execution when scheduled.
+   * @param period Period in millis with which this Chore repeats execution when scheduled.
    * @param initialDelay Delay before this Chore begins to execute once it has been scheduled. A
    *          value of 0 means the chore will begin to execute immediately. Negative delays are
    *          invalid and will be corrected to a value of 0.
@@ -149,10 +153,10 @@ public abstract class ScheduledChore implements Runnable {
   /**
    * @param name Name assigned to Chore. Useful for identification amongst chores of the same type
    * @param stopper When {@link Stoppable#isStopped()} is true, this chore will cancel and cleanup
-   * @param period Period with which this Chore repeats execution when scheduled.
-   * @param initialDelay Delay before this Chore begins to execute once it has been scheduled. A
-   *          value of 0 means the chore will begin to execute immediately. Negative delays are
-   *          invalid and will be corrected to a value of 0.
+   * @param period Period in Timeunit unit with which this Chore repeats execution when scheduled.
+   * @param initialDelay Delay in Timeunit unit before this Chore begins to execute once it has been
+   *          scheduled. A value of 0 means the chore will begin to execute immediately. Negative
+   *          delays are invalid and will be corrected to a value of 0.
    * @param unit The unit that is used to measure period and initialDelay
    */
   public ScheduledChore(final String name, Stoppable stopper, final int period,
@@ -165,7 +169,7 @@ public abstract class ScheduledChore implements Runnable {
   }
 
   /**
-   * @see java.lang.Thread#run()
+   * @see java.lang.Runnable#run()
    */
   @Override
   public void run() {
@@ -213,8 +217,8 @@ public abstract class ScheduledChore implements Runnable {
   }
 
   /**
-   * @return How long has it been since this chore last run. Useful for checking if the chore has
-   *         missed its scheduled start time by too large of a margin
+   * @return How long in millis has it been since this chore last run. Useful for checking if the
+   *         chore has missed its scheduled start time by too large of a margin
    */
   synchronized long getTimeBetweenRuns() {
     return timeOfThisRun - timeOfLastRun;
@@ -228,11 +232,18 @@ public abstract class ScheduledChore implements Runnable {
         && getTimeBetweenRuns() > getMaximumAllowedTimeBetweenRuns();
   }
 
+  /**
+   * @return max allowed time in millis between runs.
+   */
   private double getMaximumAllowedTimeBetweenRuns() {
     // Threshold used to determine if the Chore's current run started too late
     return 1.5 * timeUnit.toMillis(period);
   }
 
+  /**
+   * @param time in system millis
+   * @return true if time is earlier or equal to current milli time
+   */
   private synchronized boolean isValidTime(final long time) {
     return time > 0 && time <= System.currentTimeMillis();
   }
@@ -276,10 +287,16 @@ public abstract class ScheduledChore implements Runnable {
     return stopper;
   }
 
+  /**
+   * @return period to execute chore in getTimeUnit() units
+   */
   public int getPeriod() {
     return period;
   }
 
+  /**
+   * @return initial delay before executing chore in getTimeUnit() units
+   */
   public long getInitialDelay() {
     return initialDelay;
   }
@@ -314,6 +331,7 @@ public abstract class ScheduledChore implements Runnable {
     return choreServicer != null && choreServicer.isChoreScheduled(this);
   }
 
+  @InterfaceAudience.Private
   @VisibleForTesting
   public synchronized void choreForTesting() {
     chore();
@@ -339,6 +357,12 @@ public abstract class ScheduledChore implements Runnable {
   protected synchronized void cleanup() {
   }
 
+  /**
+   * A summation of this chore in human readable format. Downstream users should not presume
+   * parsing of this string can relaibly be done between versions. Instead, they should rely
+   * on the public accessor methods to get the information they desire.
+   */
+  @InterfaceAudience.Private
   @Override
   public String toString() {
     return "[ScheduledChore: Name: " + getName() + " Period: " + getPeriod() + " Unit: "

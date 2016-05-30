@@ -30,6 +30,7 @@ import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -141,7 +142,9 @@ public abstract class AbstractRpcClient implements RpcClient {
     // For NO CODEC, "hbase.client.rpc.codec" must be configured with empty string AND
     // "hbase.client.default.rpc.codec" also -- because default is to do cell block encoding.
     String className = conf.get(HConstants.RPC_CODEC_CONF_KEY, getDefaultCodec(this.conf));
-    if (className == null || className.length() == 0) return null;
+    if (className == null || className.length() == 0) {
+      return null;
+    }
     try {
       return (Codec)Class.forName(className).newInstance();
     } catch (Exception e) {
@@ -161,9 +164,11 @@ public abstract class AbstractRpcClient implements RpcClient {
    */
   private static CompressionCodec getCompressor(final Configuration conf) {
     String className = conf.get("hbase.client.rpc.compressor", null);
-    if (className == null || className.isEmpty()) return null;
+    if (className == null || className.isEmpty()) {
+      return null;
+    }
     try {
-        return (CompressionCodec)Class.forName(className).newInstance();
+      return (CompressionCodec)Class.forName(className).newInstance();
     } catch (Exception e) {
       throw new RuntimeException("Failed getting compressor " + className, e);
     }
@@ -252,8 +257,8 @@ public abstract class AbstractRpcClient implements RpcClient {
    *               will be a
    *               new Connection each time.
    * @return A pair with the Message response and the Cell data (if any).
-   * @throws InterruptedException
-   * @throws java.io.IOException
+   * @throws InterruptedException if call is interrupted
+   * @throws java.io.IOException if transport failed
    */
   protected abstract Pair<Message, CellScanner> call(PayloadCarryingRpcController pcrc,
       Descriptors.MethodDescriptor md, Message param, Message returnType, User ticket,
@@ -262,8 +267,29 @@ public abstract class AbstractRpcClient implements RpcClient {
 
   @Override
   public BlockingRpcChannel createBlockingRpcChannel(final ServerName sn, final User ticket,
-      int defaultOperationTimeout) {
+      int defaultOperationTimeout) throws UnknownHostException {
     return new BlockingRpcChannelImplementation(this, sn, ticket, defaultOperationTimeout);
+  }
+
+  /**
+   * Configure a payload carrying controller
+   * @param controller to configure
+   * @param channelOperationTimeout timeout for operation
+   * @return configured payload controller
+   */
+  static PayloadCarryingRpcController configurePayloadCarryingRpcController(
+      RpcController controller, int channelOperationTimeout) {
+    PayloadCarryingRpcController pcrc;
+    if (controller != null && controller instanceof PayloadCarryingRpcController) {
+      pcrc = (PayloadCarryingRpcController) controller;
+      if (!pcrc.hasCallTimeout()) {
+        pcrc.setCallTimeout(channelOperationTimeout);
+      }
+    } else {
+      pcrc = new PayloadCarryingRpcController();
+      pcrc.setCallTimeout(channelOperationTimeout);
+    }
+    return pcrc;
   }
 
   /**
@@ -307,8 +333,12 @@ public abstract class AbstractRpcClient implements RpcClient {
      * @param channelOperationTimeout - the default timeout when no timeout is given
      */
     protected BlockingRpcChannelImplementation(final AbstractRpcClient rpcClient,
-        final ServerName sn, final User ticket, int channelOperationTimeout) {
+        final ServerName sn, final User ticket, int channelOperationTimeout)
+        throws UnknownHostException {
       this.isa = new InetSocketAddress(sn.getHostname(), sn.getPort());
+      if (this.isa.isUnresolved()) {
+        throw new UnknownHostException(sn.getHostname());
+      }
       this.rpcClient = rpcClient;
       this.ticket = ticket;
       this.channelOperationTimeout = channelOperationTimeout;
@@ -317,16 +347,9 @@ public abstract class AbstractRpcClient implements RpcClient {
     @Override
     public Message callBlockingMethod(Descriptors.MethodDescriptor md, RpcController controller,
         Message param, Message returnType) throws ServiceException {
-      PayloadCarryingRpcController pcrc;
-      if (controller != null && controller instanceof PayloadCarryingRpcController) {
-        pcrc = (PayloadCarryingRpcController) controller;
-        if (!pcrc.hasCallTimeout()) {
-          pcrc.setCallTimeout(channelOperationTimeout);
-        }
-      } else {
-        pcrc = new PayloadCarryingRpcController();
-        pcrc.setCallTimeout(channelOperationTimeout);
-      }
+      PayloadCarryingRpcController pcrc = configurePayloadCarryingRpcController(
+          controller,
+          channelOperationTimeout);
 
       return this.rpcClient.callBlockingMethod(md, pcrc, param, returnType, this.ticket, this.isa);
     }

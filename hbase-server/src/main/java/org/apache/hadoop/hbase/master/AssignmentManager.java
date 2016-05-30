@@ -44,7 +44,6 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -62,7 +61,8 @@ import org.apache.hadoop.hbase.RegionStateListener;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
-import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.client.MasterSwitchType;
 import org.apache.hadoop.hbase.client.RegionReplicaUtil;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.TableState;
@@ -84,13 +84,13 @@ import org.apache.hadoop.hbase.quotas.QuotaExceededException;
 import org.apache.hadoop.hbase.regionserver.RegionOpeningState;
 import org.apache.hadoop.hbase.regionserver.RegionServerAbortedException;
 import org.apache.hadoop.hbase.regionserver.RegionServerStoppedException;
-import org.apache.hadoop.hbase.wal.DefaultWALProvider;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.KeyLocker;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.PairOfSameType;
 import org.apache.hadoop.hbase.util.Threads;
+import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
 import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.util.StringUtils;
@@ -471,9 +471,9 @@ public class AssignmentManager {
     }
     if (!failover) {
       // If any region except meta is in transition on a live server, it's a failover.
-      Map<String, RegionState> regionsInTransition = regionStates.getRegionsInTransition();
+      Set<RegionState> regionsInTransition = regionStates.getRegionsInTransition();
       if (!regionsInTransition.isEmpty()) {
-        for (RegionState regionState: regionsInTransition.values()) {
+        for (RegionState regionState: regionsInTransition) {
           ServerName serverName = regionState.getServerName();
           if (!regionState.getRegion().isMetaRegion()
               && serverName != null && onlineServers.contains(serverName)) {
@@ -500,8 +500,8 @@ public class AssignmentManager {
           // In the case of a clean exit, the shutdown handler would have presplit any WALs and
           // removed empty directories.
           Path logDir = new Path(rootdir,
-              DefaultWALProvider.getWALDirectoryName(serverName.toString()));
-          Path splitDir = logDir.suffix(DefaultWALProvider.SPLITTING_EXT);
+            AbstractFSWALProvider.getWALDirectoryName(serverName.toString()));
+          Path splitDir = logDir.suffix(AbstractFSWALProvider.SPLITTING_EXT);
           if (checkWals(fs, logDir) || checkWals(fs, splitDir)) {
             LOG.debug("Found queued dead server " + serverName);
             failover = true;
@@ -542,7 +542,7 @@ public class AssignmentManager {
           }
         }
       }
-      processRegionsInTransition(regionStates.getRegionsInTransition().values());
+      processRegionsInTransition(regionStates.getRegionsInTransition());
     }
 
     // Now we can safely claim failover cleanup completed and enable
@@ -2010,7 +2010,7 @@ public class AssignmentManager {
     long oldestRITTime = 0;
     int ritThreshold = this.server.getConfiguration().
       getInt(HConstants.METRICS_RIT_STUCK_WARNING_THRESHOLD, 60000);
-    for (RegionState state: regionStates.getRegionsInTransition().values()) {
+    for (RegionState state: regionStates.getRegionsInTransition()) {
       totalRITs++;
       long ritTime = currentTime - state.getStamp();
       if (ritTime > ritThreshold) { // more than the threshold
@@ -2364,7 +2364,7 @@ public class AssignmentManager {
     }
 
     if (!((HMaster)server).getSplitOrMergeTracker().isSplitOrMergeEnabled(
-            Admin.MasterSwitchType.SPLIT)) {
+            MasterSwitchType.SPLIT)) {
       return "split switch is off!";
     }
 
@@ -2527,7 +2527,7 @@ public class AssignmentManager {
     }
 
     if (!((HMaster)server).getSplitOrMergeTracker().isSplitOrMergeEnabled(
-            Admin.MasterSwitchType.MERGE)) {
+            MasterSwitchType.MERGE)) {
       return "merge switch is off!";
     }
     // Just return in case of retrying

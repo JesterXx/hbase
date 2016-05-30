@@ -18,6 +18,14 @@
  */
 package org.apache.hadoop.hbase.master;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.Message;
+import com.google.protobuf.RpcCallback;
+import com.google.protobuf.RpcController;
+import com.google.protobuf.Service;
+import com.google.protobuf.ServiceException;
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -36,12 +44,13 @@ import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.PleaseHoldException;
 import org.apache.hadoop.hbase.ProcedureInfo;
+import org.apache.hadoop.hbase.ProcedureUtil;
 import org.apache.hadoop.hbase.ServerLoad;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.UnknownRegionException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.MasterSwitchType;
 import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
 import org.apache.hadoop.hbase.exceptions.DeserializationException;
@@ -95,14 +104,6 @@ import org.apache.hadoop.hbase.util.ByteStringer;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.zookeeper.KeeperException;
-
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.Message;
-import com.google.protobuf.RpcCallback;
-import com.google.protobuf.RpcController;
-import com.google.protobuf.Service;
-import com.google.protobuf.ServiceException;
 
 /**
  * Implements the master RPC services.
@@ -165,7 +166,7 @@ public class MasterRpcServices extends RSRpcServices
       }
       try {
         if (mode == BalanceSwitchMode.SYNC) {
-          synchronized (master.balancer) {
+          synchronized (master.getLoadBalancer()) {
             master.loadBalancerTracker.setBalancerOn(newValue);
           }
         } else {
@@ -232,7 +233,8 @@ public class MasterRpcServices extends RSRpcServices
       throw new ServiceException(ioe);
     }
     byte[] encodedRegionName = request.getRegionName().toByteArray();
-    RegionStoreSequenceIds ids = master.serverManager.getLastFlushedSequenceId(encodedRegionName);
+    RegionStoreSequenceIds ids = master.getServerManager()
+      .getLastFlushedSequenceId(encodedRegionName);
     return ResponseConverter.buildGetLastFlushedSequenceIdResponse(ids);
   }
 
@@ -243,8 +245,8 @@ public class MasterRpcServices extends RSRpcServices
       master.checkServiceStarted();
       ClusterStatusProtos.ServerLoad sl = request.getLoad();
       ServerName serverName = ProtobufUtil.toServerName(request.getServer());
-      ServerLoad oldLoad = master.serverManager.getLoad(serverName);
-      master.serverManager.regionServerReport(serverName, new ServerLoad(sl));
+      ServerLoad oldLoad = master.getServerManager().getLoad(serverName);
+      master.getServerManager().regionServerReport(serverName, new ServerLoad(sl));
       if (sl != null && master.metricsMaster != null) {
         // Up our metrics.
         master.metricsMaster.incrementRequests(sl.getTotalNumberOfRequests()
@@ -266,7 +268,7 @@ public class MasterRpcServices extends RSRpcServices
         request.getPort(), request.getServerStartCode());
       // if regionserver passed hostname to use,
       // then use it instead of doing a reverse DNS lookup
-      ServerName rs = master.serverManager.regionServerStartup(request, ia);
+      ServerName rs = master.getServerManager().regionServerStartup(request, ia);
 
       // Send back some config info
       RegionServerStartupResponse.Builder resp = createConfigurationSubset();
@@ -326,7 +328,7 @@ public class MasterRpcServices extends RSRpcServices
         LOG.warn("assignRegion specifier type: expected: " + RegionSpecifierType.REGION_NAME
           + " actual: " + type);
       }
-      RegionStates regionStates = master.assignmentManager.getRegionStates();
+      RegionStates regionStates = master.getAssignmentManager().getRegionStates();
       HRegionInfo regionInfo = regionStates.getRegionInfo(regionName);
       if (regionInfo == null) throw new UnknownRegionException(Bytes.toString(regionName));
       if (master.cpHost != null) {
@@ -336,7 +338,7 @@ public class MasterRpcServices extends RSRpcServices
       }
       LOG.info(master.getClientIdAuditPrefix()
         + " assign " + regionInfo.getRegionNameAsString());
-      master.assignmentManager.assign(regionInfo, true);
+      master.getAssignmentManager().assign(regionInfo, true);
       if (master.cpHost != null) {
         master.cpHost.postAssign(regionInfo);
       }
@@ -503,7 +505,7 @@ public class MasterRpcServices extends RSRpcServices
         + request.getRegionA().getType() + ", region_b="
         + request.getRegionB().getType());
     }
-    RegionStates regionStates = master.assignmentManager.getRegionStates();
+    RegionStates regionStates = master.getAssignmentManager().getRegionStates();
     RegionState regionStateA = regionStates.getRegionState(Bytes.toString(encodedNameOfRegionA));
     RegionState regionStateB = regionStates.getRegionState(Bytes.toString(encodedNameOfRegionB));
     if (regionStateA == null || regionStateB == null) {
@@ -706,7 +708,7 @@ public class MasterRpcServices extends RSRpcServices
     GetClusterStatusResponse.Builder response = GetClusterStatusResponse.newBuilder();
     try {
       master.checkInitialized();
-      response.setClusterStatus(master.getClusterStatus().convert());
+      response.setClusterStatus(ProtobufUtil.convert(master.getClusterStatus()));
     } catch (IOException e) {
       throw new ServiceException(e);
     }
@@ -767,7 +769,7 @@ public class MasterRpcServices extends RSRpcServices
 
     try {
       master.checkInitialized();
-      Pair<Integer,Integer> pair = master.assignmentManager.getReopenStatus(tableName);
+      Pair<Integer,Integer> pair = master.getAssignmentManager().getReopenStatus(tableName);
       GetSchemaAlterStatusResponse.Builder ret = GetSchemaAlterStatusResponse.newBuilder();
       ret.setYetToUpdateRegions(pair.getFirst());
       ret.setTotalRegions(pair.getSecond());
@@ -957,7 +959,7 @@ public class MasterRpcServices extends RSRpcServices
         builder.setStartTime(result.getStartTime());
         builder.setLastUpdate(result.getLastUpdate());
         if (result.isFailed()) {
-          builder.setException(result.getForeignExceptionMessage());
+          builder.setException(result.getForeignExceptionMessage().getForeignExchangeMessage());
         }
         if (result.hasResultData()) {
           builder.setResult(ByteStringer.wrap(result.getResult()));
@@ -1017,7 +1019,7 @@ public class MasterRpcServices extends RSRpcServices
       ListProceduresResponse.Builder response =
           ListProceduresResponse.newBuilder();
       for(ProcedureInfo p: master.listProcedures()) {
-        response.addProcedure(ProcedureInfo.convertToProcedureProto(p));
+        response.addProcedure(ProcedureUtil.convertToProcedureProto(p));
       }
       return response.build();
     } catch (IOException e) {
@@ -1155,7 +1157,7 @@ public class MasterRpcServices extends RSRpcServices
         master.cpHost.preRegionOffline(hri);
       }
       LOG.info(master.getClientIdAuditPrefix() + " offline " + hri.getRegionNameAsString());
-      master.assignmentManager.regionOffline(hri);
+      master.getAssignmentManager().regionOffline(hri);
       if (master.cpHost != null) {
         master.cpHost.postRegionOffline(hri);
       }
@@ -1301,7 +1303,7 @@ public class MasterRpcServices extends RSRpcServices
       }
       LOG.debug(master.getClientIdAuditPrefix() + " unassign " + hri.getRegionNameAsString()
           + " in current location if it is online and reassign.force=" + force);
-      master.assignmentManager.unassign(hri);
+      master.getAssignmentManager().unassign(hri);
       if (master.cpHost != null) {
         master.cpHost.postUnassign(hri, force);
       }
@@ -1320,16 +1322,16 @@ public class MasterRpcServices extends RSRpcServices
       RegionStateTransition rt = req.getTransition(0);
       TableName tableName = ProtobufUtil.toTableName(
         rt.getRegionInfo(0).getTableName());
-      RegionStates regionStates = master.assignmentManager.getRegionStates();
+      RegionStates regionStates = master.getAssignmentManager().getRegionStates();
       if (!(TableName.META_TABLE_NAME.equals(tableName)
           && regionStates.getRegionState(HRegionInfo.FIRST_META_REGIONINFO) != null)
-            && !master.assignmentManager.isFailoverCleanupDone()) {
+            && !master.getAssignmentManager().isFailoverCleanupDone()) {
         // Meta region is assigned before master finishes the
         // failover cleanup. So no need this check for it
         throw new PleaseHoldException("Master is rebuilding user regions");
       }
       ServerName sn = ProtobufUtil.toServerName(req.getServer());
-      String error = master.assignmentManager.onRegionTransition(sn, rt);
+      String error = master.getAssignmentManager().onRegionTransition(sn, rt);
       ReportRegionStateTransitionResponse.Builder rrtr =
         ReportRegionStateTransitionResponse.newBuilder();
       if (error != null) {
@@ -1500,8 +1502,8 @@ public class MasterRpcServices extends RSRpcServices
       if (!master.getSplitOrMergeTracker().lock(skipLock)) {
         throw new DoNotRetryIOException("can't set splitOrMerge switch due to lock");
       }
-      for (MasterSwitchType masterSwitchType : request.getSwitchTypesList()) {
-        Admin.MasterSwitchType switchType = convert(masterSwitchType);
+      for (MasterProtos.MasterSwitchType masterSwitchType : request.getSwitchTypesList()) {
+        MasterSwitchType switchType = convert(masterSwitchType);
         boolean oldValue = master.isSplitOrMergeEnabled(switchType);
         response.addPrevValue(oldValue);
         boolean bypass = false;
@@ -1619,12 +1621,12 @@ public class MasterRpcServices extends RSRpcServices
     return response.build();
   }
 
-  private Admin.MasterSwitchType convert(MasterSwitchType switchType) {
+  private MasterSwitchType convert(MasterProtos.MasterSwitchType switchType) {
     switch (switchType) {
       case SPLIT:
-        return Admin.MasterSwitchType.SPLIT;
+        return MasterSwitchType.SPLIT;
       case MERGE:
-        return Admin.MasterSwitchType.MERGE;
+        return MasterSwitchType.MERGE;
       default:
         break;
     }

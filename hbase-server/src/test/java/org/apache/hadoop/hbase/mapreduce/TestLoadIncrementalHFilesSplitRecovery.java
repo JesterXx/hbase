@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.mapreduce;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -46,9 +47,9 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableExistsException;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
-import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -63,6 +64,7 @@ import org.apache.hadoop.hbase.regionserver.TestHRegionServerBulkLoad;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.testclassification.MapReduceTests;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.Pair;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -283,7 +285,7 @@ public class TestLoadIncrementalHFilesSplitRecovery {
                 throws IOException {
           int i = attmptedCalls.incrementAndGet();
           if (i == 1) {
-            Connection errConn = null;
+            Connection errConn;
             try {
               errConn = getMockedConnection(util.getConfiguration());
             } catch (Exception e) {
@@ -291,10 +293,10 @@ public class TestLoadIncrementalHFilesSplitRecovery {
               throw new RuntimeException("mocking cruft, should never happen");
             }
             failedCalls.incrementAndGet();
-            return super.tryAtomicRegionLoad((HConnection)errConn, tableName, first, lqis);
+            return super.tryAtomicRegionLoad(errConn, tableName, first, lqis);
           }
 
-          return super.tryAtomicRegionLoad((HConnection)conn, tableName, first, lqis);
+          return super.tryAtomicRegionLoad(conn, tableName, first, lqis);
         }
       };
       try {
@@ -314,9 +316,9 @@ public class TestLoadIncrementalHFilesSplitRecovery {
   }
 
   @SuppressWarnings("deprecation")
-  private HConnection getMockedConnection(final Configuration conf)
+  private ClusterConnection getMockedConnection(final Configuration conf)
   throws IOException, ServiceException {
-    HConnection c = Mockito.mock(HConnection.class);
+    ClusterConnection c = Mockito.mock(ClusterConnection.class);
     Mockito.when(c.getConfiguration()).thenReturn(conf);
     Mockito.doNothing().when(c).close();
     // Make it so we return a particular location when asked.
@@ -421,6 +423,42 @@ public class TestLoadIncrementalHFilesSplitRecovery {
       }
       assertExpectedTable(connection, table, ROWCOUNT, 2);
       assertEquals(20, countedLqis.get());
+    }
+  }
+
+  /**
+   * This test creates a table with many small regions.  The bulk load files
+   * would be splitted multiple times before all of them can be loaded successfully.
+   */
+  @Test (timeout=120000)
+  public void testSplitTmpFileCleanUp() throws Exception {
+    final TableName table = TableName.valueOf("splitTmpFileCleanUp");
+    byte[][] SPLIT_KEYS = new byte[][] { Bytes.toBytes("row_00000010"),
+        Bytes.toBytes("row_00000020"), Bytes.toBytes("row_00000030"),
+        Bytes.toBytes("row_00000040"), Bytes.toBytes("row_00000050")};
+    try (Connection connection = ConnectionFactory.createConnection(util.getConfiguration())) {
+      setupTableWithSplitkeys(table, 10, SPLIT_KEYS);
+
+      LoadIncrementalHFiles lih = new LoadIncrementalHFiles(util.getConfiguration());
+
+      // create HFiles
+      Path bulk = buildBulkFiles(table, 2);
+      try (Table t = connection.getTable(table);
+          RegionLocator locator = connection.getRegionLocator(table);
+          Admin admin = connection.getAdmin()) {
+        lih.doBulkLoad(bulk, admin, t, locator);
+      }
+      // family path
+      Path tmpPath = new Path(bulk, family(0));
+      // TMP_DIR under family path
+      tmpPath = new Path(tmpPath, LoadIncrementalHFiles.TMP_DIR);
+      FileSystem fs = bulk.getFileSystem(util.getConfiguration());
+      // HFiles have been splitted, there is TMP_DIR
+      assertTrue(fs.exists(tmpPath));
+      // TMP_DIR should have been cleaned-up
+      assertNull(LoadIncrementalHFiles.TMP_DIR + " should be empty.",
+        FSUtils.listStatus(fs, tmpPath));
+      assertExpectedTable(connection, table, ROWCOUNT, 2);
     }
   }
 

@@ -39,13 +39,13 @@ org.apache.hadoop.hbase.ServerLoad;
 org.apache.hadoop.hbase.ServerName;
 org.apache.hadoop.hbase.TableName;
 org.apache.hadoop.hbase.client.Admin;
+org.apache.hadoop.hbase.client.SnapshotDescription;
 org.apache.hadoop.hbase.master.AssignmentManager;
 org.apache.hadoop.hbase.master.DeadServer;
 org.apache.hadoop.hbase.master.HMaster;
 org.apache.hadoop.hbase.master.RegionState;
 org.apache.hadoop.hbase.master.ServerManager;
 org.apache.hadoop.hbase.protobuf.ProtobufUtil;
-org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 org.apache.hadoop.hbase.quotas.QuotaUtil;
 org.apache.hadoop.hbase.security.access.AccessControlLists;
 org.apache.hadoop.hbase.security.visibility.VisibilityConstants;
@@ -273,13 +273,13 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
                     <td>When ZooKeeper client version was compiled</td>
                 </tr>
                 <tr>
-                    <td>Zookeeper Quorum</td>
+                    <td>ZooKeeper Quorum</td>
                     <%escape #n>
                     <td> <% formatZKString() %> </td>
                     <td>Addresses of all registered ZK servers. For more, see <a href="/zk.jsp">zk dump</a>.</td>
                 </tr>
                 <tr>
-                    <td>Zookeeper Base Path</td>
+                    <td>ZooKeeper Base Path</td>
                     <td> <% master.getZooKeeper().getBaseZNode() %></td>
                     <td>Root node of this cluster in ZK.</td>
                 </tr>
@@ -477,7 +477,7 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
         <td><% new Date(snapshotDesc.getCreationTime()) %></td>
     </tr>
     </%for>
-    <p><% snapshots.size() %> snapshot(s) in set.</p>
+    <p><% snapshots.size() %> snapshot(s) in set. [<a href="/snapshotsStats.jsp">Snapshot Storefile stats</a>]</p>
 </table>
 </%if>
 </%def>

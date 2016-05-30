@@ -235,12 +235,8 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
    */
   private ExecutorService getDefaultThreadPool(Configuration conf) {
     int maxThreads = conf.getInt("hbase.region.replica.replication.threads.max", 256);
-    int coreThreads = conf.getInt("hbase.region.replica.replication.threads.core", 16);
     if (maxThreads == 0) {
       maxThreads = Runtime.getRuntime().availableProcessors() * 8;
-    }
-    if (coreThreads == 0) {
-      coreThreads = Runtime.getRuntime().availableProcessors() * 8;
     }
     long keepAliveTime = conf.getLong("hbase.region.replica.replication.threads.keepalivetime", 60);
     LinkedBlockingQueue<Runnable> workQueue =
@@ -248,7 +244,7 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
             conf.getInt(HConstants.HBASE_CLIENT_MAX_TOTAL_TASKS,
               HConstants.DEFAULT_HBASE_CLIENT_MAX_TOTAL_TASKS));
     ThreadPoolExecutor tpe = new ThreadPoolExecutor(
-      coreThreads,
+      maxThreads,
       maxThreads,
       keepAliveTime,
       TimeUnit.SECONDS,
@@ -566,10 +562,10 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
           if (cause instanceof IOException) {
             // The table can be disabled or dropped at this time. For disabled tables, we have no
             // cheap mechanism to detect this case because meta does not contain this information.
-            // HConnection.isTableDisabled() is a zk call which we cannot do for every replay RPC.
-            // So instead we start the replay RPC with retries and
-            // check whether the table is dropped or disabled which might cause
-            // SocketTimeoutException, or RetriesExhaustedException or similar if we get IOE.
+            // ClusterConnection.isTableDisabled() is a zk call which we cannot do for every replay
+            // RPC. So instead we start the replay RPC with retries and check whether the table is
+            // dropped or disabled which might cause SocketTimeoutException, or
+            // RetriesExhaustedException or similar if we get IOE.
             if (cause instanceof TableNotFoundException || connection.isTableDisabled(tableName)) {
               if (LOG.isTraceEnabled()) {
                 LOG.trace("Skipping " + entries.size() + " entries in table " + tableName

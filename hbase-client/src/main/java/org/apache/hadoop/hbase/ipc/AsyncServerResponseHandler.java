@@ -17,6 +17,13 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
+import com.google.protobuf.Message;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufInputStream;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+
 import java.io.IOException;
 
 import org.apache.hadoop.hbase.CellScanner;
@@ -25,25 +32,18 @@ import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.RPCProtos;
 import org.apache.hadoop.ipc.RemoteException;
 
-import com.google.protobuf.Message;
-
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufInputStream;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
-
 /**
  * Handles Hbase responses
  */
 @InterfaceAudience.Private
 public class AsyncServerResponseHandler extends SimpleChannelInboundHandler<ByteBuf> {
-  private final AsyncRpcChannel channel;
+  private final AsyncRpcChannelImpl channel;
 
   /**
    * Constructor
    * @param channel on which this response handler operates
    */
-  public AsyncServerResponseHandler(AsyncRpcChannel channel) {
+  public AsyncServerResponseHandler(AsyncRpcChannelImpl channel) {
     this.channel = channel;
   }
 

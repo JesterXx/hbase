@@ -401,6 +401,13 @@ public class BaseRegionObserver implements RegionObserver {
   }
 
   @Override
+  public KeyValueScanner preStoreScannerOpen(final ObserverContext<RegionCoprocessorEnvironment> c,
+      final Store store, final Scan scan, final NavigableSet<byte[]> targetCols,
+      final KeyValueScanner s, final long readPt) throws IOException {
+    return preStoreScannerOpen(c, store, scan, targetCols, s);
+  }
+
+  @Override
   public RegionScanner postScannerOpen(final ObserverContext<RegionCoprocessorEnvironment> e,
       final Scan scan, final RegionScanner s) throws IOException {
     return s;
@@ -443,6 +450,16 @@ public class BaseRegionObserver implements RegionObserver {
   @Override
   public void postScannerClose(final ObserverContext<RegionCoprocessorEnvironment> e,
       final InternalScanner s) throws IOException {
+  }
+
+  @Override
+  public void preReplayWALs(ObserverContext<? extends RegionCoprocessorEnvironment> env,
+      HRegionInfo info, Path edits) throws IOException {
+  }
+
+  @Override
+  public void postReplayWALs(ObserverContext<? extends RegionCoprocessorEnvironment> env,
+      HRegionInfo info, Path edits) throws IOException {
   }
 
   /**

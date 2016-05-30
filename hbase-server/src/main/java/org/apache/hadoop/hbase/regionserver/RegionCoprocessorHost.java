@@ -1282,13 +1282,13 @@ public class RegionCoprocessorHost
    *    Store, Scan, NavigableSet, KeyValueScanner)}
    */
   public KeyValueScanner preStoreScannerOpen(final Store store, final Scan scan,
-      final NavigableSet<byte[]> targetCols) throws IOException {
+      final NavigableSet<byte[]> targetCols, final long readPt) throws IOException {
     return execOperationWithResult(null,
         coprocessors.isEmpty() ? null : new RegionOperationWithResult<KeyValueScanner>() {
       @Override
       public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
           throws IOException {
-        setResult(oserver.preStoreScannerOpen(ctx, store, scan, targetCols, getResult()));
+        setResult(oserver.preStoreScannerOpen(ctx, store, scan, targetCols, getResult(), readPt));
       }
     });
   }
@@ -1397,6 +1397,36 @@ public class RegionCoprocessorHost
       public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
           throws IOException {
         oserver.postScannerClose(ctx, s);
+      }
+    });
+  }
+
+  /**
+   * @param info the RegionInfo for this region
+   * @param edits the file of recovered edits
+   * @throws IOException Exception
+   */
+  public void preReplayWALs(final HRegionInfo info, final Path edits) throws IOException {
+    execOperation(coprocessors.isEmpty() ? null : new RegionOperation() {
+      @Override
+      public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
+        throws IOException {
+        oserver.preReplayWALs(ctx, info, edits);
+      }
+    });
+  }
+
+  /**
+   * @param info the RegionInfo for this region
+   * @param edits the file of recovered edits
+   * @throws IOException Exception
+   */
+  public void postReplayWALs(final HRegionInfo info, final Path edits) throws IOException {
+    execOperation(coprocessors.isEmpty() ? null : new RegionOperation() {
+      @Override
+      public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
+        throws IOException {
+        oserver.postReplayWALs(ctx, info, edits);
       }
     });
   }

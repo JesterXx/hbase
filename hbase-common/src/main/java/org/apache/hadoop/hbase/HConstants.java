@@ -286,10 +286,10 @@ public final class HConstants {
   /** Parameter name for HBase client IPC pool size */
   public static final String HBASE_CLIENT_IPC_POOL_SIZE = "hbase.client.ipc.pool.size";
 
-  /** Parameter name for HBase client operation timeout, which overrides RPC timeout */
+  /** Parameter name for HBase client operation timeout. */
   public static final String HBASE_CLIENT_OPERATION_TIMEOUT = "hbase.client.operation.timeout";
 
-  /** Parameter name for HBase client operation timeout, which overrides RPC timeout */
+  /** Parameter name for HBase client operation timeout. */
   public static final String HBASE_CLIENT_META_OPERATION_TIMEOUT =
     "hbase.client.meta.operation.timeout";
 
@@ -908,6 +908,8 @@ public final class HConstants {
   public static final Pattern CP_HTD_ATTR_VALUE_PARAM_PATTERN = Pattern.compile(
       "(" + CP_HTD_ATTR_VALUE_PARAM_KEY_PATTERN + ")=(" +
       CP_HTD_ATTR_VALUE_PARAM_VALUE_PATTERN + "),?");
+  public static final String CP_HTD_ATTR_INCLUSION_KEY =
+      "hbase.coprocessor.classloader.included.classes";
 
   /** The delay when re-trying a socket operation in a loop (HBASE-4712) */
   public static final int SOCKET_RETRY_WAIT_MS = 200;
@@ -1022,13 +1024,13 @@ public final class HConstants {
    * by different set of handlers. For example, HIGH_QOS tagged methods are
    * handled by high priority handlers.
    */
-  // normal_QOS < QOS_threshold < replication_QOS < replay_QOS < admin_QOS < high_QOS
+  // normal_QOS < replication_QOS < replay_QOS < QOS_threshold < admin_QOS < high_QOS
   public static final int NORMAL_QOS = 0;
-  public static final int QOS_THRESHOLD = 10;
-  public static final int HIGH_QOS = 200;
   public static final int REPLICATION_QOS = 5;
   public static final int REPLAY_QOS = 6;
+  public static final int QOS_THRESHOLD = 10;
   public static final int ADMIN_QOS = 100;
+  public static final int HIGH_QOS = 200;
   public static final int SYSTEMTABLE_QOS = HIGH_QOS;
 
   /** Directory under /hbase where archived hfiles are stored */

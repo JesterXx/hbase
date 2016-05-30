@@ -62,6 +62,7 @@ import org.apache.hadoop.hbase.exceptions.RegionMovedException;
 import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.filter.FilterBase;
 import org.apache.hadoop.hbase.ipc.RpcClient;
+import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.Region;
@@ -114,17 +115,37 @@ public class TestHCM {
 */
   public static class SleepAndFailFirstTime extends BaseRegionObserver {
     static final AtomicLong ct = new AtomicLong(0);
+    static final String SLEEP_TIME_CONF_KEY =
+        "hbase.coprocessor.SleepAndFailFirstTime.sleepTime";
+    static final long DEFAULT_SLEEP_TIME = 20000;
+    static final AtomicLong sleepTime = new AtomicLong(DEFAULT_SLEEP_TIME);
 
     public SleepAndFailFirstTime() {
     }
 
     @Override
+    public void postOpen(ObserverContext<RegionCoprocessorEnvironment> c) {
+      RegionCoprocessorEnvironment env = c.getEnvironment();
+      Configuration conf = env.getConfiguration();
+      sleepTime.set(conf.getLong(SLEEP_TIME_CONF_KEY, DEFAULT_SLEEP_TIME));
+    }
+
+    @Override
     public void preGetOp(final ObserverContext<RegionCoprocessorEnvironment> e,
               final Get get, final List<Cell> results) throws IOException {
-      Threads.sleep(20000);
+      Threads.sleep(sleepTime.get());
       if (ct.incrementAndGet() == 1){
         throw new IOException("first call I fail");
       }
+    }
+  }
+
+  public static class SleepCoprocessor extends BaseRegionObserver {
+    public static final int SLEEP_TIME = 5000;
+    @Override
+    public void preGetOp(final ObserverContext<RegionCoprocessorEnvironment> e,
+        final Get get, final List<Cell> results) throws IOException {
+      Threads.sleep(SLEEP_TIME);
     }
   }
 
@@ -133,6 +154,7 @@ public class TestHCM {
     TEST_UTIL.getConfiguration().setBoolean(HConstants.STATUS_PUBLISHED, true);
     // Up the handlers; this test needs more than usual.
     TEST_UTIL.getConfiguration().setInt(HConstants.REGION_SERVER_HIGH_PRIORITY_HANDLER_COUNT, 10);
+    TEST_UTIL.getConfiguration().setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 5);
     TEST_UTIL.startMiniCluster(2);
   }
 
@@ -201,7 +223,7 @@ public class TestHCM {
   }
 
   /**
-   * Naive test to check that HConnection#getAdmin returns a properly constructed HBaseAdmin object
+   * Naive test to check that Connection#getAdmin returns a properly constructed HBaseAdmin object
    * @throws IOException Unable to construct admin
    */
   @Test
@@ -228,20 +250,14 @@ public class TestHCM {
 
     Table t = TEST_UTIL.createTable(tn, cf);
     TEST_UTIL.waitTableAvailable(tn);
+    TEST_UTIL.waitUntilNoRegionsInTransition();
 
-    while(TEST_UTIL.getHBaseCluster().getMaster().getAssignmentManager().
-        getRegionStates().isRegionsInTransition()){
-      Thread.sleep(1);
-    }
     final ConnectionImplementation hci =  (ConnectionImplementation)TEST_UTIL.getConnection();
     try (RegionLocator l = TEST_UTIL.getConnection().getRegionLocator(tn)) {
       while (l.getRegionLocation(rk).getPort() != sn.getPort()) {
         TEST_UTIL.getHBaseAdmin().move(l.getRegionLocation(rk).getRegionInfo().
             getEncodedNameAsBytes(), Bytes.toBytes(sn.toString()));
-        while (TEST_UTIL.getHBaseCluster().getMaster().getAssignmentManager().
-            getRegionStates().isRegionsInTransition()) {
-          Thread.sleep(1);
-        }
+        TEST_UTIL.waitUntilNoRegionsInTransition();
         hci.clearRegionCache(tn);
       }
       Assert.assertNotNull(hci.clusterStatusListener);
@@ -300,11 +316,10 @@ public class TestHCM {
   public void testOperationTimeout() throws Exception {
     HTableDescriptor hdt = TEST_UTIL.createTableDescriptor("HCM-testOperationTimeout");
     hdt.addCoprocessor(SleepAndFailFirstTime.class.getName());
-    Table t = TEST_UTIL.createTable(hdt, new byte[][]{FAM_NAM}, null);
-
+    Table t = TEST_UTIL.createTable(hdt, new byte[][]{FAM_NAM});
     if (t instanceof HTable) {
       HTable table = (HTable) t;
-
+      table.setRpcTimeout(Integer.MAX_VALUE);
       // Check that it works if the timeout is big enough
       table.setOperationTimeout(120 * 1000);
       table.get(new Get(FAM_NAM));
@@ -328,12 +343,116 @@ public class TestHCM {
     }
   }
 
+  @Test(expected = RetriesExhaustedException.class)
+  public void testRpcTimeout() throws Exception {
+    HTableDescriptor hdt = TEST_UTIL.createTableDescriptor("HCM-testRpcTimeout");
+    hdt.addCoprocessor(SleepCoprocessor.class.getName());
+    Configuration c = new Configuration(TEST_UTIL.getConfiguration());
+
+    try (Table t = TEST_UTIL.createTable(hdt, new byte[][] { FAM_NAM }, c)) {
+      assert t instanceof HTable;
+      HTable table = (HTable) t;
+      table.setRpcTimeout(SleepCoprocessor.SLEEP_TIME / 2);
+      table.setOperationTimeout(SleepCoprocessor.SLEEP_TIME * 100);
+      table.get(new Get(FAM_NAM));
+    }
+  }
+
+  /**
+   * Test starting from 0 index when RpcRetryingCaller calculate the backoff time.
+   */
+  @Test
+  public void testRpcRetryingCallerSleep() throws Exception {
+    HTableDescriptor hdt = TEST_UTIL.createTableDescriptor("HCM-testRpcRetryingCallerSleep");
+    hdt.addCoprocessorWithSpec("|" + SleepAndFailFirstTime.class.getName() + "||"
+        + SleepAndFailFirstTime.SLEEP_TIME_CONF_KEY + "=2000");
+    TEST_UTIL.createTable(hdt, new byte[][] { FAM_NAM }).close();
+
+    Configuration c = new Configuration(TEST_UTIL.getConfiguration());
+    c.setInt(HConstants.HBASE_CLIENT_PAUSE, 3000);
+    c.setInt(HConstants.HBASE_RPC_TIMEOUT_KEY, 4000);
+
+    Connection connection = ConnectionFactory.createConnection(c);
+    Table t = connection.getTable(TableName.valueOf("HCM-testRpcRetryingCallerSleep"));
+    if (t instanceof HTable) {
+      HTable table = (HTable) t;
+      table.setOperationTimeout(8000);
+      // Check that it works. Because 2s + 3s * RETRY_BACKOFF[0] + 2s < 8s
+      table.get(new Get(FAM_NAM));
+
+      // Resetting and retrying.
+      SleepAndFailFirstTime.ct.set(0);
+      try {
+        table.setOperationTimeout(6000);
+        // Will fail this time. After sleep, there are not enough time for second retry
+        // Beacuse 2s + 3s + 2s > 6s
+        table.get(new Get(FAM_NAM));
+        Assert.fail("We expect an exception here");
+      } catch (SocketTimeoutException e) {
+        LOG.info("We received an exception, as expected ", e);
+      } catch (IOException e) {
+        Assert.fail("Wrong exception:" + e.getMessage());
+      } finally {
+        table.close();
+        connection.close();
+      }
+    }
+  }
+
+  @Test
+  public void testCallableSleep() throws Exception {
+    long pauseTime;
+    long baseTime = 100;
+    TableName tableName = TableName.valueOf("HCM-testCallableSleep");
+    HTable table = TEST_UTIL.createTable(tableName, FAM_NAM);
+    RegionServerCallable<Object> regionServerCallable = new RegionServerCallable<Object>(
+        TEST_UTIL.getConnection(), tableName, ROW) {
+      public Object call(int timeout) throws IOException {
+        return null;
+      }
+    };
+
+    regionServerCallable.prepare(false);
+    for (int i = 0; i < HConstants.RETRY_BACKOFF.length; i++) {
+      pauseTime = regionServerCallable.sleep(baseTime, i);
+      assertTrue(pauseTime >= (baseTime * HConstants.RETRY_BACKOFF[i]));
+      assertTrue(pauseTime <= (baseTime * HConstants.RETRY_BACKOFF[i] * 1.01f));
+    }
+
+    RegionAdminServiceCallable<Object> regionAdminServiceCallable =
+        new RegionAdminServiceCallable<Object>(
+        (ClusterConnection) TEST_UTIL.getConnection(), new RpcControllerFactory(
+            TEST_UTIL.getConfiguration()), tableName, ROW) {
+      public Object call(int timeout) throws IOException {
+        return null;
+      }
+    };
+
+    regionAdminServiceCallable.prepare(false);
+    for (int i = 0; i < HConstants.RETRY_BACKOFF.length; i++) {
+      pauseTime = regionAdminServiceCallable.sleep(baseTime, i);
+      assertTrue(pauseTime >= (baseTime * HConstants.RETRY_BACKOFF[i]));
+      assertTrue(pauseTime <= (baseTime * HConstants.RETRY_BACKOFF[i] * 1.01f));
+    }
+
+    MasterCallable masterCallable = new MasterCallable(TEST_UTIL.getConnection()) {
+      public Object call(int timeout) throws IOException {
+        return null;
+      }
+    };
+
+    for (int i = 0; i < HConstants.RETRY_BACKOFF.length; i++) {
+      pauseTime = masterCallable.sleep(baseTime, i);
+      assertTrue(pauseTime >= (baseTime * HConstants.RETRY_BACKOFF[i]));
+      assertTrue(pauseTime <= (baseTime * HConstants.RETRY_BACKOFF[i] * 1.01f));
+    }
+  }
 
   private void testConnectionClose(boolean allowsInterrupt) throws Exception {
     TableName tableName = TableName.valueOf("HCM-testConnectionClose" + allowsInterrupt);
     TEST_UTIL.createTable(tableName, FAM_NAM).close();
 
-    boolean previousBalance = TEST_UTIL.getHBaseAdmin().setBalancerRunning(false, true);
+    boolean previousBalance = TEST_UTIL.getAdmin().setBalancerRunning(false, true);
 
     Configuration c2 = new Configuration(TEST_UTIL.getConfiguration());
     // We want to work on a separate connection.
@@ -616,9 +735,7 @@ public class TestHCM {
     HMaster master = TEST_UTIL.getMiniHBaseCluster().getMaster();
 
     // We can wait for all regions to be online, that makes log reading easier when debugging
-    while (master.getAssignmentManager().getRegionStates().isRegionsInTransition()) {
-      Thread.sleep(1);
-    }
+    TEST_UTIL.waitUntilNoRegionsInTransition();
 
     // Now moving the region to the second server
     HRegionLocation toMove = conn.getCachedLocation(TABLE_NAME, ROW).getRegionLocation();
@@ -876,7 +993,7 @@ public class TestHCM {
       TEST_UTIL.getConfiguration().get(HConstants.ZOOKEEPER_CLIENT_PORT));
 
     // This should be enough to connect
-    HConnection conn = (HConnection) ConnectionFactory.createConnection(c);
+    ClusterConnection conn = (ClusterConnection) ConnectionFactory.createConnection(c);
     assertTrue(conn.isMasterRunning());
     conn.close();
   }
@@ -909,9 +1026,7 @@ public class TestHCM {
       HMaster master = TEST_UTIL.getMiniHBaseCluster().getMaster();
 
       // We can wait for all regions to be online, that makes log reading easier when debugging
-      while (master.getAssignmentManager().getRegionStates().isRegionsInTransition()) {
-        Thread.sleep(1);
-      }
+      TEST_UTIL.waitUntilNoRegionsInTransition();
 
       Put put = new Put(ROW_X);
       put.addColumn(FAM_NAM, ROW_X, ROW_X);
@@ -1008,7 +1123,7 @@ public class TestHCM {
     }
   }
 
-  @Ignore ("Test presumes RETRY_BACKOFF will never change; it has") @Test
+  @Test
   public void testErrorBackoffTimeCalculation() throws Exception {
     // TODO: This test would seem to presume hardcoded RETRY_BACKOFF which it should not.
     final long ANY_PAUSE = 100;
@@ -1028,40 +1143,23 @@ public class TestHCM {
 
       // Check some backoff values from HConstants sequence.
       tracker.reportServerError(location);
-      assertEqualsWithJitter(ANY_PAUSE, tracker.calculateBackoffTime(location, ANY_PAUSE));
+      assertEqualsWithJitter(ANY_PAUSE * HConstants.RETRY_BACKOFF[0],
+        tracker.calculateBackoffTime(location, ANY_PAUSE));
       tracker.reportServerError(location);
       tracker.reportServerError(location);
       tracker.reportServerError(location);
-      assertEqualsWithJitter(ANY_PAUSE * 5, tracker.calculateBackoffTime(location, ANY_PAUSE));
+      assertEqualsWithJitter(ANY_PAUSE * HConstants.RETRY_BACKOFF[3],
+        tracker.calculateBackoffTime(location, ANY_PAUSE));
 
       // All of this shouldn't affect backoff for different location.
       assertEquals(0, tracker.calculateBackoffTime(diffLocation, ANY_PAUSE));
       tracker.reportServerError(diffLocation);
-      assertEqualsWithJitter(ANY_PAUSE, tracker.calculateBackoffTime(diffLocation, ANY_PAUSE));
+      assertEqualsWithJitter(ANY_PAUSE * HConstants.RETRY_BACKOFF[0],
+        tracker.calculateBackoffTime(diffLocation, ANY_PAUSE));
 
       // Check with different base.
-      assertEqualsWithJitter(ANY_PAUSE * 10,
+      assertEqualsWithJitter(ANY_PAUSE * 2 * HConstants.RETRY_BACKOFF[3],
           tracker.calculateBackoffTime(location, ANY_PAUSE * 2));
-
-      // See that time from last error is taken into account. Time shift is applied after jitter,
-      // so pass the original expected backoff as the base for jitter.
-      long timeShift = (long)(ANY_PAUSE * 0.5);
-      timeMachine.setValue(timeBase + timeShift);
-      assertEqualsWithJitter((ANY_PAUSE * 5) - timeShift,
-        tracker.calculateBackoffTime(location, ANY_PAUSE), ANY_PAUSE * 2);
-
-      // However we should not go into negative.
-      timeMachine.setValue(timeBase + ANY_PAUSE * 100);
-      assertEquals(0, tracker.calculateBackoffTime(location, ANY_PAUSE));
-
-      // We also should not go over the boundary; last retry would be on it.
-      long timeLeft = (long)(ANY_PAUSE * 0.5);
-      timeMachine.setValue(timeBase + largeAmountOfTime - timeLeft);
-      assertTrue(tracker.canTryMore(1));
-      tracker.reportServerError(location);
-      assertEquals(timeLeft, tracker.calculateBackoffTime(location, ANY_PAUSE));
-      timeMachine.setValue(timeBase + largeAmountOfTime);
-      assertFalse(tracker.canTryMore(1));
     } finally {
       EnvironmentEdgeManager.reset();
     }

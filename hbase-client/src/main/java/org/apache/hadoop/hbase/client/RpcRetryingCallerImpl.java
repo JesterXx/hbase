@@ -57,23 +57,25 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
 
   private final long pause;
   private final int maxAttempts;// how many times to try
+  private final int rpcTimeout;// timeout for each rpc request
   private final AtomicBoolean cancelled = new AtomicBoolean(false);
   private final RetryingCallerInterceptor interceptor;
   private final RetryingCallerInterceptorContext context;
   private final RetryingTimeTracker tracker;
 
   public RpcRetryingCallerImpl(long pause, int retries, int startLogErrorsCnt) {
-    this(pause, retries, RetryingCallerInterceptorFactory.NO_OP_INTERCEPTOR, startLogErrorsCnt);
+    this(pause, retries, RetryingCallerInterceptorFactory.NO_OP_INTERCEPTOR, startLogErrorsCnt, 0);
   }
   
   public RpcRetryingCallerImpl(long pause, int retries,
-      RetryingCallerInterceptor interceptor, int startLogErrorsCnt) {
+      RetryingCallerInterceptor interceptor, int startLogErrorsCnt, int rpcTimeout) {
     this.pause = pause;
     this.maxAttempts = retries + 1;
     this.interceptor = interceptor;
     context = interceptor.createEmptyContext();
     this.startLogErrorsCnt = startLogErrorsCnt;
     this.tracker = new RetryingTimeTracker();
+    this.rpcTimeout = rpcTimeout;
   }
   
   @Override
@@ -94,9 +96,10 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
     for (int tries = 0;; tries++) {
       long expectedSleep;
       try {
-        callable.prepare(tries != 0); // if called with false, check table status on ZK
+        // bad cache entries are cleared in the call to RetryingCallable#throwable() in catch block
+        callable.prepare(tries != 0);
         interceptor.intercept(context.prepare(callable, tries));
-        return callable.call(tracker.getRemainingTime(callTimeout));
+        return callable.call(getTimeout(callTimeout));
       } catch (PreemptiveFastFailException e) {
         throw e;
       } catch (Throwable t) {
@@ -121,8 +124,8 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
         }
         // If the server is dead, we need to wait a little before retrying, to give
         //  a chance to the regions to be
-        // tries hasn't been bumped up yet so we use "tries + 1" to get right pause time
-        expectedSleep = callable.sleep(pause, tries + 1);
+        // get right pause time, start by RETRY_BACKOFF[0] * pause
+        expectedSleep = callable.sleep(pause, tries);
 
         // If, after the planned sleep, there won't be enough time left, we stop now.
         long duration = singleCallDuration(expectedSleep);
@@ -207,6 +210,14 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
       throw (DoNotRetryIOException)t;
     }
     return t;
+  }
+
+  private int getTimeout(int callTimeout){
+    int timeout = tracker.getRemainingTime(callTimeout);
+    if (timeout <= 0 || rpcTimeout > 0 && rpcTimeout < timeout){
+      timeout = rpcTimeout;
+    }
+    return timeout;
   }
 
   @Override

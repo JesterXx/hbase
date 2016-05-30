@@ -24,7 +24,7 @@ while getopts "ahd:b:" opt; do
     case "$opt" in
         a)  addendum='-addendum'
             ;;
-        d)  
+        d)
             patch_dir=$OPTARG
             ;;
         b)
@@ -52,7 +52,7 @@ fi
 # Exit if git status is dirty
 git_dirty=$(git diff --shortstat 2> /dev/null | wc -l|awk {'print $1'})
 echo "git_dirty is $git_dirty"
-if [ "$git_dirty" -ne 0 ]; then  
+if [ "$git_dirty" -ne 0 ]; then
     echo "Git status is dirty. Commit locally first.">&2
     exit 1
 fi
@@ -97,7 +97,7 @@ elif  [ "$status" -ge 1 ]; then
     # At least one patch already exists -- add a version prefix
     for i in {1..99}; do
         # Check to see the maximum version of patch that exists
-        if [ ! -f "$patch_dir/$branch-v$i.patch" ]; then
+        if [ ! -f "$patch_dir/$branch.v$i.patch" ]; then
             version=$i
             if [ -n "$addendum" ]; then
                 # Don't increment the patch # if it is an addendum
@@ -108,17 +108,24 @@ elif  [ "$status" -ge 1 ]; then
                 else
                     # We are making an addendum to a different version of the patch
                     let version=$version-1
-                    prefix="-v$version"
+                    prefix=".v$version"
                 fi
             else
-                prefix="-v$version"
+                prefix=".v$version"
             fi
             break
         fi
     done
 fi
+# If this is against a tracking branch other than master
+# include it in the patch name
+tracking_suffix=""
+if [[ $tracking_branch != "origin/master" \
+    &&  $tracking_branch != "master" ]]; then
+    tracking_suffix=".${tracking_branch#origin/}"
+fi
 
-patch_name="$branch$prefix$addendum.patch"
+patch_name="$branch$prefix$addendum$tracking_suffix.patch"
 
 # Do we need to make a diff?
 git diff --quiet $tracking_branch
@@ -134,10 +141,10 @@ local_commits=$(git log $tracking_branch..$branch|grep 'Author:'|wc -l|awk {'pri
 if [ "$local_commits" -gt 1 ]; then
     read -p "$local_commits commits exist only in your local branch. Interactive rebase?" yn
     case $yn in
-        [Yy]* ) 
+        [Yy]* )
             git rebase -i $tracking_branch
                 ;;
-        [Nn]* ) 
+        [Nn]* )
           echo "Creating $patch_dir/$patch_name using git diff."
           git diff $tracking_branch > $patch_dir/$patch_name
           exit 0
@@ -147,5 +154,3 @@ fi
 
 echo "Creating patch $patch_dir/$patch_name using git format-patch"
 git format-patch --stdout $tracking_branch > $patch_dir/$patch_name
-
-

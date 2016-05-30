@@ -18,6 +18,17 @@
  */
 package org.apache.hadoop.hbase.regionserver;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
+import com.google.protobuf.BlockingRpcChannel;
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.Message;
+import com.google.protobuf.RpcCallback;
+import com.google.protobuf.RpcController;
+import com.google.protobuf.Service;
+import com.google.protobuf.ServiceException;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.lang.Thread.UncaughtExceptionHandler;
@@ -96,6 +107,7 @@ import org.apache.hadoop.hbase.fs.HFileSystem;
 import org.apache.hadoop.hbase.http.InfoServer;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
+import org.apache.hadoop.hbase.ipc.CoprocessorRpcUtils;
 import org.apache.hadoop.hbase.ipc.RpcClient;
 import org.apache.hadoop.hbase.ipc.RpcClientFactory;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
@@ -162,7 +174,7 @@ import org.apache.hadoop.hbase.util.ServerRegionReplicaUtil;
 import org.apache.hadoop.hbase.util.Sleeper;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.hbase.util.VersionInfo;
-import org.apache.hadoop.hbase.wal.DefaultWALProvider;
+import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.zookeeper.ClusterStatusTracker;
@@ -181,17 +193,6 @@ import org.apache.hadoop.util.StringUtils;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.KeeperException.NoNodeException;
 import org.apache.zookeeper.data.Stat;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
-import com.google.protobuf.BlockingRpcChannel;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.Message;
-import com.google.protobuf.RpcCallback;
-import com.google.protobuf.RpcController;
-import com.google.protobuf.Service;
-import com.google.protobuf.ServiceException;
 
 import sun.misc.Signal;
 import sun.misc.SignalHandler;
@@ -696,21 +697,22 @@ public class HRegionServer extends HasThread implements
      * No stacking of instances is allowed for a single service name
      */
     Descriptors.ServiceDescriptor serviceDesc = instance.getDescriptorForType();
-    if (coprocessorServiceHandlers.containsKey(serviceDesc.getFullName())) {
-      LOG.error("Coprocessor service " + serviceDesc.getFullName()
+    String serviceName = CoprocessorRpcUtils.getServiceName(serviceDesc);
+    if (coprocessorServiceHandlers.containsKey(serviceName)) {
+      LOG.error("Coprocessor service " + serviceName
           + " already registered, rejecting request from " + instance);
       return false;
     }
 
-    coprocessorServiceHandlers.put(serviceDesc.getFullName(), instance);
+    coprocessorServiceHandlers.put(serviceName, instance);
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Registered regionserver coprocessor service: service=" + serviceDesc.getFullName());
+      LOG.debug("Registered regionserver coprocessor service: service=" + serviceName);
     }
     return true;
   }
 
   /**
-   * Create a 'smarter' HConnection, one that is capable of by-passing RPC if the request is to
+   * Create a 'smarter' Connection, one that is capable of by-passing RPC if the request is to
    * the local server. Safe to use going to local or remote server.
    * Create this instance in a method can be intercepted and mocked in tests.
    * @throws IOException
@@ -1072,7 +1074,7 @@ public class HRegionServer extends HasThread implements
       } catch (IOException e) {
         // Although the {@link Closeable} interface throws an {@link
         // IOException}, in reality, the implementation would never do that.
-        LOG.warn("Attempt to close server's short circuit HConnection failed.", e);
+        LOG.warn("Attempt to close server's short circuit ClusterConnection failed.", e);
       }
     }
 
@@ -1653,7 +1655,7 @@ public class HRegionServer extends HasThread implements
   private WALFactory setupWALAndReplication() throws IOException {
     // TODO Replication make assumptions here based on the default filesystem impl
     final Path oldLogDir = new Path(rootDir, HConstants.HREGION_OLDLOGDIR_NAME);
-    final String logName = DefaultWALProvider.getWALDirectoryName(this.serverName.toString());
+    final String logName = AbstractFSWALProvider.getWALDirectoryName(this.serverName.toString());
 
     Path logdir = new Path(rootDir, logName);
     if (LOG.isDebugEnabled()) LOG.debug("logdir=" + logdir);
@@ -1784,7 +1786,7 @@ public class HRegionServer extends HasThread implements
 
     // Create the log splitting worker and start it
     // set a smaller retries to fast fail otherwise splitlogworker could be blocked for
-    // quite a while inside HConnection layer. The worker won't be available for other
+    // quite a while inside Connection layer. The worker won't be available for other
     // tasks even after current task is preempted after a split task times out.
     Configuration sinkConf = HBaseConfiguration.create(conf);
     sinkConf.setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER,

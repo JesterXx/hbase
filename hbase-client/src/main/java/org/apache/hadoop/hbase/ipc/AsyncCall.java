@@ -19,8 +19,7 @@ package org.apache.hadoop.hbase.ipc;
 
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Message;
-import io.netty.channel.EventLoop;
-import io.netty.util.concurrent.DefaultPromise;
+import java.io.IOException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.CellScanner;
@@ -31,52 +30,78 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.ExceptionUtil;
 import org.apache.hadoop.ipc.RemoteException;
 
-import java.io.IOException;
-
 /**
  * Represents an Async Hbase call and its response.
  *
  * Responses are passed on to its given doneHandler and failures to the rpcController
+ *
+ * @param <T> Type of message returned
+ * @param <M> Message returned in communication to be converted
  */
 @InterfaceAudience.Private
-public class AsyncCall extends DefaultPromise<Message> {
+public class AsyncCall<M extends Message, T> extends Promise<T> {
   private static final Log LOG = LogFactory.getLog(AsyncCall.class.getName());
 
   final int id;
 
+  private final AsyncRpcChannelImpl channel;
+
   final Descriptors.MethodDescriptor method;
   final Message param;
-  final PayloadCarryingRpcController controller;
   final Message responseDefaultType;
-  final long startTime;
+
+  private final MessageConverter<M,T> messageConverter;
+  private final IOExceptionConverter exceptionConverter;
+
   final long rpcTimeout;
+
+  // For only the request
+  private final CellScanner cellScanner;
+  private final int priority;
+
+  final MetricsConnection clientMetrics;
   final MetricsConnection.CallStats callStats;
 
   /**
    * Constructor
    *
-   * @param eventLoop           for call
+   * @param channel             which initiated call
    * @param connectId           connection id
    * @param md                  the method descriptor
    * @param param               parameters to send to Server
-   * @param controller          controller for response
+   * @param cellScanner         cellScanner containing cells to send as request
    * @param responseDefaultType the default response type
+   * @param messageConverter    converts the messages to what is the expected output
+   * @param exceptionConverter  converts exceptions to expected format. Can be null
+   * @param rpcTimeout          timeout for this call in ms
+   * @param priority            for this request
+   * @param metrics             MetricsConnection to which the metrics are stored for this request
    */
-  public AsyncCall(EventLoop eventLoop, int connectId, Descriptors.MethodDescriptor md, Message
-      param, PayloadCarryingRpcController controller, Message responseDefaultType,
-      MetricsConnection.CallStats callStats) {
-    super(eventLoop);
+  public AsyncCall(AsyncRpcChannelImpl channel, int connectId, Descriptors.MethodDescriptor
+        md, Message param, CellScanner cellScanner, M responseDefaultType, MessageConverter<M, T>
+        messageConverter, IOExceptionConverter exceptionConverter, long rpcTimeout, int priority,
+      MetricsConnection metrics) {
+    super(channel.getEventExecutor());
+    this.channel = channel;
 
     this.id = connectId;
 
     this.method = md;
     this.param = param;
-    this.controller = controller;
     this.responseDefaultType = responseDefaultType;
 
-    this.startTime = EnvironmentEdgeManager.currentTime();
-    this.rpcTimeout = controller.hasCallTimeout() ? controller.getCallTimeout() : 0;
-    this.callStats = callStats;
+    this.messageConverter = messageConverter;
+    this.exceptionConverter = exceptionConverter;
+
+    this.rpcTimeout = rpcTimeout;
+
+    this.priority = priority;
+    this.cellScanner = cellScanner;
+
+    this.callStats = MetricsConnection.newCallStats();
+    callStats.setStartTime(EnvironmentEdgeManager.currentTime());
+
+    this.clientMetrics = metrics;
   }
 
   /**
@@ -85,7 +110,7 @@ public class AsyncCall extends DefaultPromise<Message> {
    * @return start time for the call
    */
   public long getStartTime() {
-    return this.startTime;
+    return this.callStats.getStartTime();
   }
 
   @Override
@@ -101,17 +126,24 @@ public class AsyncCall extends DefaultPromise<Message> {
    * @param value            to set
    * @param cellBlockScanner to set
    */
-  public void setSuccess(Message value, CellScanner cellBlockScanner) {
-    if (cellBlockScanner != null) {
-      controller.setCellScanner(cellBlockScanner);
-    }
+  public void setSuccess(M value, CellScanner cellBlockScanner) {
+    callStats.setCallTimeMs(EnvironmentEdgeManager.currentTime() - callStats.getStartTime());
 
     if (LOG.isTraceEnabled()) {
-      long callTime = EnvironmentEdgeManager.currentTime() - startTime;
-      LOG.trace("Call: " + method.getName() + ", callTime: " + callTime + "ms");
+      LOG.trace("Call: " + method.getName() + ", callTime: " + callStats.getCallTimeMs() + "ms");
     }
 
-    this.setSuccess(value);
+    if (clientMetrics != null) {
+      clientMetrics.updateRpc(method, param, callStats);
+    }
+
+    try {
+      this.setSuccess(
+          this.messageConverter.convert(value, cellBlockScanner)
+      );
+    } catch (IOException e) {
+      this.setFailed(e);
+    }
   }
 
   /**
@@ -127,6 +159,10 @@ public class AsyncCall extends DefaultPromise<Message> {
       exception = ((RemoteException) exception).unwrapRemoteException();
     }
 
+    if (this.exceptionConverter != null) {
+      exception = this.exceptionConverter.convert(exception);
+    }
+
     this.setFailure(exception);
   }
 
@@ -138,4 +174,27 @@ public class AsyncCall extends DefaultPromise<Message> {
   public long getRpcTimeout() {
     return rpcTimeout;
   }
+
+
+  /**
+   * @return Priority for this call
+   */
+  public int getPriority() {
+    return priority;
+  }
+
+  /**
+   * Get the cellScanner for this request.
+   * @return CellScanner
+   */
+  public CellScanner cellScanner() {
+    return cellScanner;
+  }
+
+  @Override
+  public boolean cancel(boolean mayInterupt){
+    this.channel.removePendingCall(this.id);
+    return super.cancel(mayInterupt);
+  }
+
 }

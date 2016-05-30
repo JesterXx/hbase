@@ -17,6 +17,16 @@
  */
 package org.apache.hadoop.hbase.util;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Ordering;
+import com.google.common.collect.TreeMultimap;
+import com.google.protobuf.ServiceException;
+
 import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -34,6 +44,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -54,15 +65,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Ordering;
-import com.google.common.collect.TreeMultimap;
-import com.google.protobuf.ServiceException;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
@@ -103,7 +105,7 @@ import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HConnection;
+import org.apache.hadoop.hbase.client.MasterSwitchType;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.RegionReplicaUtil;
 import org.apache.hadoop.hbase.client.Result;
@@ -411,7 +413,7 @@ public class HBaseFsck extends Configured implements Closeable {
    * This method maintains a lock using a file. If the creation fails we return null
    *
    * @return FSDataOutputStream object corresponding to the newly opened lock file
-   * @throws IOException
+   * @throws IOException if IO failure occurs
    */
   private FSDataOutputStream checkAndMarkRunningHbck() throws IOException {
     RetryCounter retryCounter = lockFileRetryCounterFactory.create();
@@ -546,10 +548,10 @@ public class HBaseFsck extends Configured implements Closeable {
     errors.print("Number of requests: " + status.getRequestsCount());
     errors.print("Number of regions: " + status.getRegionsCount());
 
-    Map<String, RegionState> rits = status.getRegionsInTransition();
+    Set<RegionState> rits = status.getRegionsInTransition();
     errors.print("Number of regions in transition: " + rits.size());
     if (details) {
-      for (RegionState state: rits.values()) {
+      for (RegionState state: rits) {
         errors.print("  " + state.toDescriptiveString());
       }
     }
@@ -691,7 +693,7 @@ public class HBaseFsck extends Configured implements Closeable {
     if (shouldDisableSplitAndMerge()) {
       admin.releaseSplitOrMergeLockAndRollback();
       oldSplitAndMerge = admin.setSplitOrMergeEnabled(false, false, false,
-        Admin.MasterSwitchType.SPLIT, Admin.MasterSwitchType.MERGE);
+        MasterSwitchType.SPLIT, MasterSwitchType.MERGE);
     }
 
     try {
@@ -721,7 +723,7 @@ public class HBaseFsck extends Configured implements Closeable {
     checkAndFixTableLocks();
 
     checkAndFixReplication();
-    
+
     // Remove the hbck lock
     unlockHbck();
 
@@ -1740,7 +1742,7 @@ public class HBaseFsck extends Configured implements Closeable {
         HConstants.EMPTY_START_ROW, false, false);
     if (rl == null) {
       errors.reportError(ERROR_CODE.NULL_META_REGION,
-          "META region was not found in Zookeeper");
+          "META region was not found in ZooKeeper");
       return false;
     }
     for (HRegionLocation metaLocation : rl.getRegionLocations()) {
@@ -3282,7 +3284,7 @@ public class HBaseFsck extends Configured implements Closeable {
       checker.fixExpiredTableLocks();
     }
   }
-  
+
   private void checkAndFixReplication() throws IOException {
     ReplicationChecker checker = new ReplicationChecker(getConf(), zkw, connection, errors);
     checker.checkUnDeletedQueues();
@@ -3979,13 +3981,13 @@ public class HBaseFsck extends Configured implements Closeable {
    * Contact a region server and get all information from it
    */
   static class WorkItemRegion implements Callable<Void> {
-    private HBaseFsck hbck;
-    private ServerName rsinfo;
-    private ErrorReporter errors;
-    private HConnection connection;
+    private final HBaseFsck hbck;
+    private final ServerName rsinfo;
+    private final ErrorReporter errors;
+    private final ClusterConnection connection;
 
     WorkItemRegion(HBaseFsck hbck, ServerName info,
-                   ErrorReporter errors, HConnection connection) {
+                   ErrorReporter errors, ClusterConnection connection) {
       this.hbck = hbck;
       this.rsinfo = info;
       this.errors = errors;
@@ -4066,7 +4068,7 @@ public class HBaseFsck extends Configured implements Closeable {
           errors.progress();
           String encodedName = regionDir.getPath().getName();
           // ignore directories that aren't hexadecimal
-          if (!encodedName.toLowerCase().matches("[0-9a-f]+")) {
+          if (!encodedName.toLowerCase(Locale.ROOT).matches("[0-9a-f]+")) {
             continue;
           }
 
@@ -4213,7 +4215,7 @@ public class HBaseFsck extends Configured implements Closeable {
   public boolean shouldDisableSplitAndMerge() {
     return fixAny || disableSplitAndMerge;
   }
-  
+
   /**
    * Set summary mode.
    * Print only summary of the tables and status (OK or INCONSISTENT)
@@ -4245,7 +4247,7 @@ public class HBaseFsck extends Configured implements Closeable {
     fixTableLocks = shouldFix;
     fixAny |= shouldFix;
   }
-  
+
   /**
    * Set replication fix mode.
    */
@@ -4516,7 +4518,7 @@ public class HBaseFsck extends Configured implements Closeable {
     out.println("");
     out.println(" Replication options");
     out.println("   -fixReplication   Deletes replication queues for removed peers");
-    
+
     out.flush();
     errors.reportError(ERROR_CODE.WRONG_USAGE, sw.toString());
 

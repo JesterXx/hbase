@@ -18,10 +18,13 @@
  */
 package org.apache.hadoop.hbase;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -38,7 +41,6 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.PrettyPrinter;
 import org.apache.hadoop.hbase.util.PrettyPrinter.Unit;
 
-import com.google.common.base.Preconditions;
 
 /**
  * An HColumnDescriptor contains information about a column family such as the
@@ -61,6 +63,8 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
   // Version 10 -- change metadata to standard type.
   // Version 11 -- add column family level configuration.
   private static final byte COLUMN_DESCRIPTOR_VERSION = (byte) 11;
+
+  private static final String IN_MEMORY_COMPACTION = "IN_MEMORY_COMPACTION";
 
   // These constants are used as FileInfo keys
   public static final String COMPRESSION = "COMPRESSION";
@@ -151,7 +155,7 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
    * Default number of versions of a record to keep.
    */
   public static final int DEFAULT_VERSIONS = HBaseConfiguration.create().getInt(
-    "hbase.column.max.version", 1);
+      "hbase.column.max.version", 1);
 
   /**
    * Default is not to keep a minimum of versions.
@@ -168,6 +172,11 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
    * Default setting for whether to try and serve this column family from memory or not.
    */
   public static final boolean DEFAULT_IN_MEMORY = false;
+
+  /**
+   * Default setting for whether to set the memstore of this column family as compacting or not.
+   */
+  public static final boolean DEFAULT_IN_MEMORY_COMPACTION = false;
 
   /**
    * Default setting for preventing deleted from being collected immediately.
@@ -246,30 +255,31 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
       = new HashSet<Bytes>();
 
   static {
-      DEFAULT_VALUES.put(BLOOMFILTER, DEFAULT_BLOOMFILTER);
-      DEFAULT_VALUES.put(REPLICATION_SCOPE, String.valueOf(DEFAULT_REPLICATION_SCOPE));
-      DEFAULT_VALUES.put(HConstants.VERSIONS, String.valueOf(DEFAULT_VERSIONS));
-      DEFAULT_VALUES.put(MIN_VERSIONS, String.valueOf(DEFAULT_MIN_VERSIONS));
-      DEFAULT_VALUES.put(COMPRESSION, DEFAULT_COMPRESSION);
-      DEFAULT_VALUES.put(TTL, String.valueOf(DEFAULT_TTL));
-      DEFAULT_VALUES.put(BLOCKSIZE, String.valueOf(DEFAULT_BLOCKSIZE));
-      DEFAULT_VALUES.put(HConstants.IN_MEMORY, String.valueOf(DEFAULT_IN_MEMORY));
-      DEFAULT_VALUES.put(BLOCKCACHE, String.valueOf(DEFAULT_BLOCKCACHE));
-      DEFAULT_VALUES.put(KEEP_DELETED_CELLS, String.valueOf(DEFAULT_KEEP_DELETED));
-      DEFAULT_VALUES.put(DATA_BLOCK_ENCODING, String.valueOf(DEFAULT_DATA_BLOCK_ENCODING));
-      DEFAULT_VALUES.put(CACHE_DATA_ON_WRITE, String.valueOf(DEFAULT_CACHE_DATA_ON_WRITE));
-      DEFAULT_VALUES.put(CACHE_DATA_IN_L1, String.valueOf(DEFAULT_CACHE_DATA_IN_L1));
-      DEFAULT_VALUES.put(CACHE_INDEX_ON_WRITE, String.valueOf(DEFAULT_CACHE_INDEX_ON_WRITE));
-      DEFAULT_VALUES.put(CACHE_BLOOMS_ON_WRITE, String.valueOf(DEFAULT_CACHE_BLOOMS_ON_WRITE));
-      DEFAULT_VALUES.put(EVICT_BLOCKS_ON_CLOSE, String.valueOf(DEFAULT_EVICT_BLOCKS_ON_CLOSE));
-      DEFAULT_VALUES.put(PREFETCH_BLOCKS_ON_OPEN, String.valueOf(DEFAULT_PREFETCH_BLOCKS_ON_OPEN));
-      for (String s : DEFAULT_VALUES.keySet()) {
-        RESERVED_KEYWORDS.add(new Bytes(Bytes.toBytes(s)));
-      }
-      RESERVED_KEYWORDS.add(new Bytes(Bytes.toBytes(ENCRYPTION)));
-      RESERVED_KEYWORDS.add(new Bytes(Bytes.toBytes(ENCRYPTION_KEY)));
-      RESERVED_KEYWORDS.add(new Bytes(IS_MOB_BYTES));
-      RESERVED_KEYWORDS.add(new Bytes(MOB_THRESHOLD_BYTES));
+    DEFAULT_VALUES.put(BLOOMFILTER, DEFAULT_BLOOMFILTER);
+    DEFAULT_VALUES.put(REPLICATION_SCOPE, String.valueOf(DEFAULT_REPLICATION_SCOPE));
+    DEFAULT_VALUES.put(HConstants.VERSIONS, String.valueOf(DEFAULT_VERSIONS));
+    DEFAULT_VALUES.put(MIN_VERSIONS, String.valueOf(DEFAULT_MIN_VERSIONS));
+    DEFAULT_VALUES.put(COMPRESSION, DEFAULT_COMPRESSION);
+    DEFAULT_VALUES.put(TTL, String.valueOf(DEFAULT_TTL));
+    DEFAULT_VALUES.put(BLOCKSIZE, String.valueOf(DEFAULT_BLOCKSIZE));
+    DEFAULT_VALUES.put(HConstants.IN_MEMORY, String.valueOf(DEFAULT_IN_MEMORY));
+    DEFAULT_VALUES.put(IN_MEMORY_COMPACTION, String.valueOf(DEFAULT_IN_MEMORY_COMPACTION));
+    DEFAULT_VALUES.put(BLOCKCACHE, String.valueOf(DEFAULT_BLOCKCACHE));
+    DEFAULT_VALUES.put(KEEP_DELETED_CELLS, String.valueOf(DEFAULT_KEEP_DELETED));
+    DEFAULT_VALUES.put(DATA_BLOCK_ENCODING, String.valueOf(DEFAULT_DATA_BLOCK_ENCODING));
+    DEFAULT_VALUES.put(CACHE_DATA_ON_WRITE, String.valueOf(DEFAULT_CACHE_DATA_ON_WRITE));
+    DEFAULT_VALUES.put(CACHE_DATA_IN_L1, String.valueOf(DEFAULT_CACHE_DATA_IN_L1));
+    DEFAULT_VALUES.put(CACHE_INDEX_ON_WRITE, String.valueOf(DEFAULT_CACHE_INDEX_ON_WRITE));
+    DEFAULT_VALUES.put(CACHE_BLOOMS_ON_WRITE, String.valueOf(DEFAULT_CACHE_BLOOMS_ON_WRITE));
+    DEFAULT_VALUES.put(EVICT_BLOCKS_ON_CLOSE, String.valueOf(DEFAULT_EVICT_BLOCKS_ON_CLOSE));
+    DEFAULT_VALUES.put(PREFETCH_BLOCKS_ON_OPEN, String.valueOf(DEFAULT_PREFETCH_BLOCKS_ON_OPEN));
+    for (String s : DEFAULT_VALUES.keySet()) {
+      RESERVED_KEYWORDS.add(new Bytes(Bytes.toBytes(s)));
+    }
+    RESERVED_KEYWORDS.add(new Bytes(Bytes.toBytes(ENCRYPTION)));
+    RESERVED_KEYWORDS.add(new Bytes(Bytes.toBytes(ENCRYPTION_KEY)));
+    RESERVED_KEYWORDS.add(new Bytes(IS_MOB_BYTES));
+    RESERVED_KEYWORDS.add(new Bytes(MOB_THRESHOLD_BYTES));
   }
 
   private static final int UNINITIALIZED = -1;
@@ -319,11 +329,12 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
     setMinVersions(DEFAULT_MIN_VERSIONS);
     setKeepDeletedCells(DEFAULT_KEEP_DELETED);
     setInMemory(DEFAULT_IN_MEMORY);
+    setInMemoryCompaction(DEFAULT_IN_MEMORY_COMPACTION);
     setBlockCacheEnabled(DEFAULT_BLOCKCACHE);
     setTimeToLive(DEFAULT_TTL);
-    setCompressionType(Compression.Algorithm.valueOf(DEFAULT_COMPRESSION.toUpperCase()));
-    setDataBlockEncoding(DataBlockEncoding.valueOf(DEFAULT_DATA_BLOCK_ENCODING.toUpperCase()));
-    setBloomFilterType(BloomType.valueOf(DEFAULT_BLOOMFILTER.toUpperCase()));
+    setCompressionType(Compression.Algorithm.valueOf(DEFAULT_COMPRESSION.toUpperCase(Locale.ROOT)));
+    setDataBlockEncoding(DataBlockEncoding.valueOf(DEFAULT_DATA_BLOCK_ENCODING.toUpperCase(Locale.ROOT)));
+    setBloomFilterType(BloomType.valueOf(DEFAULT_BLOOMFILTER.toUpperCase(Locale.ROOT)));
     setBlocksize(DEFAULT_BLOCKSIZE);
     setScope(DEFAULT_REPLICATION_SCOPE);
   }
@@ -565,7 +576,7 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
     if (n == null) {
       return Compression.Algorithm.NONE;
     }
-    return Compression.Algorithm.valueOf(n.toUpperCase());
+    return Compression.Algorithm.valueOf(n.toUpperCase(Locale.ROOT));
   }
 
   /**
@@ -577,7 +588,7 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
    * @return this (for chained invocation)
    */
   public HColumnDescriptor setCompressionType(Compression.Algorithm type) {
-    return setValue(COMPRESSION, type.getName().toUpperCase());
+    return setValue(COMPRESSION, type.getName().toUpperCase(Locale.ROOT));
   }
 
   /**
@@ -639,7 +650,7 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
     if (n == null) {
       return getCompressionType();
     }
-    return Compression.Algorithm.valueOf(n.toUpperCase());
+    return Compression.Algorithm.valueOf(n.toUpperCase(Locale.ROOT));
   }
 
   /**
@@ -652,7 +663,7 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
    */
   public HColumnDescriptor setCompactionCompressionType(
       Compression.Algorithm type) {
-    return setValue(COMPRESSION_COMPACT, type.getName().toUpperCase());
+    return setValue(COMPRESSION_COMPACT, type.getName().toUpperCase(Locale.ROOT));
   }
 
   /**
@@ -676,11 +687,32 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
     return setValue(HConstants.IN_MEMORY, Boolean.toString(inMemory));
   }
 
+  /**
+   * @return True if we prefer to keep the in-memory data compacted
+   *          for this column family
+   */
+  public boolean isInMemoryCompaction() {
+    String value = getValue(IN_MEMORY_COMPACTION);
+    if (value != null) {
+      return Boolean.parseBoolean(value);
+    }
+    return DEFAULT_IN_MEMORY_COMPACTION;
+  }
+
+  /**
+   * @param inMemoryCompaction True if we prefer to keep the in-memory data compacted
+   *                  for this column family
+   * @return this (for chained invocation)
+   */
+  public HColumnDescriptor setInMemoryCompaction(boolean inMemoryCompaction) {
+    return setValue(IN_MEMORY_COMPACTION, Boolean.toString(inMemoryCompaction));
+  }
+
   public KeepDeletedCells getKeepDeletedCells() {
     String value = getValue(KEEP_DELETED_CELLS);
     if (value != null) {
       // toUpperCase for backwards compatibility
-      return KeepDeletedCells.valueOf(value.toUpperCase());
+      return KeepDeletedCells.valueOf(value.toUpperCase(Locale.ROOT));
     }
     return DEFAULT_KEEP_DELETED;
   }
@@ -765,7 +797,7 @@ public class HColumnDescriptor implements Comparable<HColumnDescriptor> {
     if (n == null) {
       n = DEFAULT_BLOOMFILTER;
     }
-    return BloomType.valueOf(n.toUpperCase());
+    return BloomType.valueOf(n.toUpperCase(Locale.ROOT));
   }
 
   /**

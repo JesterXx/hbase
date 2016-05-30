@@ -18,6 +18,12 @@
  */
 package org.apache.hadoop.hbase.client;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.Message;
+import com.google.protobuf.Service;
+import com.google.protobuf.ServiceException;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
@@ -68,12 +74,6 @@ import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.hadoop.hbase.util.Threads;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.Message;
-import com.google.protobuf.Service;
-import com.google.protobuf.ServiceException;
-
 /**
  * An implementation of {@link Table}. Used to communicate with a single HBase table.
  * Lightweight. Get as needed and just close when done.
@@ -112,7 +112,8 @@ public class HTable implements HTableInterface {
   protected int scannerCaching;
   protected long scannerMaxResultSize;
   private ExecutorService pool;  // For Multi & Scan
-  private int operationTimeout;
+  private int operationTimeout; // global timeout for each blocking method with retrying rpc
+  private int rpcTimeout; // timeout for each rpc request
   private final boolean cleanupPoolOnClose; // shutdown the pool in close()
   private final boolean cleanupConnectionOnClose; // close the connection in close()
   private Consistency defaultConsistency = Consistency.STRONG;
@@ -148,7 +149,7 @@ public class HTable implements HTableInterface {
    * Used by HBase internally.  DO NOT USE. See {@link ConnectionFactory} class comment for how to
    * get a {@link Table} instance (use {@link Table} instead of {@link HTable}).
    * @param tableName Name of the table.
-   * @param connection HConnection to be used.
+   * @param connection Connection to be used.
    * @param pool ExecutorService to be used.
    * @throws IOException if a remote or network exception occurs
    */
@@ -212,6 +213,8 @@ public class HTable implements HTableInterface {
 
     this.operationTimeout = tableName.isSystemTable() ?
         connConfiguration.getMetaOperationTimeout() : connConfiguration.getOperationTimeout();
+    this.rpcTimeout = configuration.getInt(HConstants.HBASE_RPC_TIMEOUT_KEY,
+        HConstants.DEFAULT_HBASE_RPC_TIMEOUT);
     this.scannerCaching = connConfiguration.getScannerCaching();
     this.scannerMaxResultSize = connConfiguration.getScannerMaxResultSize();
     if (this.rpcCallerFactory == null) {
@@ -250,13 +253,10 @@ public class HTable implements HTableInterface {
   /**
    * <em>INTERNAL</em> Used by unit tests and tools to do low-level
    * manipulations.
-   * @return An HConnection instance.
-   * @deprecated This method will be changed from public to package protected.
+   * @return A Connection instance.
    */
-  // TODO(tsuna): Remove this.  Unit tests shouldn't require public helpers.
-  @Deprecated
   @VisibleForTesting
-  public HConnection getConnection() {
+  protected Connection getConnection() {
     return this.connection;
   }
 
@@ -266,7 +266,7 @@ public class HTable implements HTableInterface {
   @Override
   public HTableDescriptor getTableDescriptor() throws IOException {
     HTableDescriptor htd = HBaseAdmin.getTableDescriptor(tableName, connection, rpcCallerFactory,
-      rpcControllerFactory, operationTimeout);
+      rpcControllerFactory, operationTimeout, rpcTimeout);
     if (htd != null) {
       return new UnmodifyableHTableDescriptor(htd);
     }
@@ -439,7 +439,8 @@ public class HTable implements HTableInterface {
           }
         }
       };
-      return rpcCallerFactory.<Result>newCaller().callWithRetries(callable, this.operationTimeout);
+      return rpcCallerFactory.<Result>newCaller(rpcTimeout).callWithRetries(callable,
+          this.operationTimeout);
     }
 
     // Call that takes into account the replica
@@ -496,9 +497,20 @@ public class HTable implements HTableInterface {
    */
   @Override
   public <R> void batchCallback(
-      final List<? extends Row> actions, final Object[] results, final Batch.Callback<R> callback)
-      throws IOException, InterruptedException {
-    connection.processBatchCallback(actions, tableName, pool, results, callback);
+    final List<? extends Row> actions, final Object[] results, final Batch.Callback<R> callback)
+    throws IOException, InterruptedException {
+    doBatchWithCallback(actions, results, callback, connection, pool, tableName);
+  }
+
+  public static <R> void doBatchWithCallback(List<? extends Row> actions, Object[] results,
+    Callback<R> callback, ClusterConnection connection, ExecutorService pool, TableName tableName)
+    throws InterruptedIOException, RetriesExhaustedWithDetailsException {
+    AsyncRequestFuture ars = connection.getAsyncProcess().submitAll(
+      pool, tableName, actions, callback, results);
+    ars.waitUntilDone();
+    if (ars.hasError()) {
+      throw ars.getErrors();
+    }
   }
 
   /**
@@ -525,7 +537,8 @@ public class HTable implements HTableInterface {
         }
       }
     };
-    rpcCallerFactory.<Boolean> newCaller().callWithRetries(callable, this.operationTimeout);
+    rpcCallerFactory.<Boolean> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -654,7 +667,8 @@ public class HTable implements HTableInterface {
           }
         }
       };
-    return rpcCallerFactory.<Result> newCaller().callWithRetries(callable, this.operationTimeout);
+    return rpcCallerFactory.<Result> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -685,7 +699,8 @@ public class HTable implements HTableInterface {
         }
       }
     };
-    return rpcCallerFactory.<Result> newCaller().callWithRetries(callable, this.operationTimeout);
+    return rpcCallerFactory.<Result> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -740,7 +755,8 @@ public class HTable implements HTableInterface {
           }
         }
       };
-    return rpcCallerFactory.<Long> newCaller().callWithRetries(callable, this.operationTimeout);
+    return rpcCallerFactory.<Long> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -769,7 +785,8 @@ public class HTable implements HTableInterface {
           }
         }
       };
-    return rpcCallerFactory.<Boolean> newCaller().callWithRetries(callable, this.operationTimeout);
+    return rpcCallerFactory.<Boolean> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -799,7 +816,8 @@ public class HTable implements HTableInterface {
           }
         }
       };
-    return rpcCallerFactory.<Boolean> newCaller().callWithRetries(callable, this.operationTimeout);
+    return rpcCallerFactory.<Boolean> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -828,7 +846,8 @@ public class HTable implements HTableInterface {
           }
         }
       };
-    return rpcCallerFactory.<Boolean> newCaller().callWithRetries(callable, this.operationTimeout);
+    return rpcCallerFactory.<Boolean> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -858,7 +877,8 @@ public class HTable implements HTableInterface {
           }
         }
       };
-    return rpcCallerFactory.<Boolean> newCaller().callWithRetries(callable, this.operationTimeout);
+    return rpcCallerFactory.<Boolean> newCaller(rpcTimeout).callWithRetries(callable,
+        this.operationTimeout);
   }
 
   /**
@@ -979,10 +999,10 @@ public class HTable implements HTableInterface {
    *
    * @param list The collection of actions.
    * @param results An empty array, same size as list. If an exception is thrown,
-   * you can test here for partial results, and to determine which actions
-   * processed successfully.
+   *   you can test here for partial results, and to determine which actions
+   *   processed successfully.
    * @throws IOException if there are problems talking to META. Per-item
-   * exceptions are stored in the results array.
+   *   exceptions are stored in the results array.
    */
   public <R> void processBatchCallback(
     final List<? extends Row> list, final Object[] results, final Batch.Callback<R> callback)
@@ -1203,12 +1223,24 @@ public class HTable implements HTableInterface {
     return getKeysAndRegionsInRange(start, end, true).getFirst();
   }
 
+  @Override
   public void setOperationTimeout(int operationTimeout) {
     this.operationTimeout = operationTimeout;
   }
 
+  @Override
   public int getOperationTimeout() {
     return operationTimeout;
+  }
+
+  @Override
+  public int getRpcTimeout() {
+    return rpcTimeout;
+  }
+
+  @Override
+  public void setRpcTimeout(int rpcTimeout) {
+    this.rpcTimeout = rpcTimeout;
   }
 
   @Override

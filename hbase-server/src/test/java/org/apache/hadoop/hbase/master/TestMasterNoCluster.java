@@ -185,6 +185,12 @@ public class TestMasterNoCluster {
     // of the 'remote' mocked up regionservers.
     CoordinatedStateManager cp = CoordinatedStateManagerFactory.getCoordinatedStateManager(
       TESTUTIL.getConfiguration());
+    // Insert a mock for the connection, use TESTUTIL.getConfiguration rather than
+    // the conf from the master; the conf will already have an ClusterConnection
+    // associate so the below mocking of a connection will fail.
+    final ClusterConnection mockedConnection = HConnectionTestingUtility.getMockedConnectionAndDecorate(
+        TESTUTIL.getConfiguration(), rs0, rs0, rs0.getServerName(),
+        HRegionInfo.FIRST_META_REGIONINFO);
     HMaster master = new HMaster(conf, cp) {
       InetAddress getRemoteInetAddress(final int port, final long serverStartCode)
       throws UnknownHostException {
@@ -215,16 +221,12 @@ public class TestMasterNoCluster {
 
       @Override
       public ClusterConnection getConnection() {
-        // Insert a mock for the connection, use TESTUTIL.getConfiguration rather than
-        // the conf from the master; the conf will already have an HConnection
-        // associate so the below mocking of a connection will fail.
-        try {
-          return HConnectionTestingUtility.getMockedConnectionAndDecorate(
-            TESTUTIL.getConfiguration(), rs0, rs0, rs0.getServerName(),
-            HRegionInfo.FIRST_META_REGIONINFO);
-        } catch (IOException e) {
-          return null;
-        }
+        return mockedConnection;
+      }
+
+      @Override
+      public ClusterConnection getClusterConnection() {
+        return mockedConnection;
       }
     };
     master.start();
@@ -277,7 +279,7 @@ public class TestMasterNoCluster {
       InterruptedException, KeeperException, CoordinatedStateException {
         super.initializeZKBasedSystemTrackers();
         // Record a newer server in server manager at first
-        serverManager.recordNewServerWithLock(newServer, ServerLoad.EMPTY_SERVERLOAD);
+        getServerManager().recordNewServerWithLock(newServer, ServerLoad.EMPTY_SERVERLOAD);
 
         List<ServerName> onlineServers = new ArrayList<ServerName>();
         onlineServers.add(deadServer);
@@ -291,7 +293,7 @@ public class TestMasterNoCluster {
       @Override
       public ClusterConnection getConnection() {
         // Insert a mock for the connection, use TESTUTIL.getConfiguration rather than
-        // the conf from the master; the conf will already have an HConnection
+        // the conf from the master; the conf will already have a Connection
         // associate so the below mocking of a connection will fail.
         try {
           return HConnectionTestingUtility.getMockedConnectionAndDecorate(
@@ -310,7 +312,7 @@ public class TestMasterNoCluster {
       LOG.info("Master is initialized");
 
       assertFalse("The dead server should not be pulled in",
-        master.serverManager.isServerOnline(deadServer));
+        master.getServerManager().isServerOnline(deadServer));
     } finally {
       master.stopMaster();
       master.join();

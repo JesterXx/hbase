@@ -15,8 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.hadoop.hbase.ipc;
+
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.Message;
+import com.google.protobuf.RpcController;
 
 import java.io.IOException;
 
@@ -28,11 +31,6 @@ import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.CoprocessorServiceResponse;
-import org.apache.hadoop.hbase.util.ByteStringer;
-
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.Message;
-import com.google.protobuf.RpcController;
 
 /**
  * Provides clients with an RPC connection to call coprocessor endpoint {@link com.google.protobuf.Service}s
@@ -43,7 +41,7 @@ import com.google.protobuf.RpcController;
  * @see org.apache.hadoop.hbase.client.HBaseAdmin#coprocessorService()
  */
 @InterfaceAudience.Private
-public class MasterCoprocessorRpcChannel extends CoprocessorRpcChannel{
+public class MasterCoprocessorRpcChannel extends SyncCoprocessorRpcChannel {
   private static final Log LOG = LogFactory.getLog(MasterCoprocessorRpcChannel.class);
 
   private final ClusterConnection connection;
@@ -61,11 +59,7 @@ public class MasterCoprocessorRpcChannel extends CoprocessorRpcChannel{
     }
 
     final ClientProtos.CoprocessorServiceCall call =
-        ClientProtos.CoprocessorServiceCall.newBuilder()
-            .setRow(ByteStringer.wrap(HConstants.EMPTY_BYTE_ARRAY))
-            .setServiceName(method.getService().getFullName())
-            .setMethodName(method.getName())
-            .setRequest(request.toByteString()).build();
+        CoprocessorRpcUtils.buildServiceCall(HConstants.EMPTY_BYTE_ARRAY, method, request);
 
     // TODO: Are we retrying here? Does not seem so. We should use RetryingRpcCaller
     CoprocessorServiceResponse result = ProtobufUtil.execService(controller,

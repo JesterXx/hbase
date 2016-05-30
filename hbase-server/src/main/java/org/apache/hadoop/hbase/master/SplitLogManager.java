@@ -24,6 +24,8 @@ import static org.apache.hadoop.hbase.master.SplitLogManager.TerminationStatus.F
 import static org.apache.hadoop.hbase.master.SplitLogManager.TerminationStatus.IN_PROGRESS;
 import static org.apache.hadoop.hbase.master.SplitLogManager.TerminationStatus.SUCCESS;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
@@ -63,9 +65,7 @@ import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.SplitLogTask.R
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.Pair;
-import org.apache.hadoop.hbase.wal.DefaultWALProvider;
-
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 
 /**
  * Distributes the task of log splitting to the available region servers.
@@ -75,8 +75,8 @@ import com.google.common.annotations.VisibleForTesting;
  * <p>SplitLogManager monitors the tasks that it creates using the
  * timeoutMonitor thread. If a task's progress is slow then
  * {@link SplitLogManagerCoordination#checkTasks} will take away the
- * task from the owner {@link org.apache.hadoop.hbase.regionserver.SplitLogWorker} 
- * and the task will be up for grabs again. When the task is done then it is 
+ * task from the owner {@link org.apache.hadoop.hbase.regionserver.SplitLogWorker}
+ * and the task will be up for grabs again. When the task is done then it is
  * deleted by SplitLogManager.
  *
  * <p>Clients call {@link #splitLogDistributed(Path)} to split a region server's
@@ -169,12 +169,12 @@ public class SplitLogManager {
    * Get a list of paths that need to be split given a set of server-specific directories and
    * optionally  a filter.
    *
-   * See {@link DefaultWALProvider#getServerNameFromWALDirectoryName} for more info on directory
+   * See {@link AbstractFSWALProvider#getServerNameFromWALDirectoryName} for more info on directory
    * layout.
    *
    * Should be package-private, but is needed by
    * {@link org.apache.hadoop.hbase.wal.WALSplitter#split(Path, Path, Path, FileSystem,
-   *     Configuration, WALFactory)} for tests.
+   *     Configuration, org.apache.hadoop.hbase.wal.WALFactory)} for tests.
    */
   @VisibleForTesting
   public static FileStatus[] getFileList(final Configuration conf, final List<Path> logDirs,
@@ -225,7 +225,7 @@ public class SplitLogManager {
     Set<ServerName> serverNames = new HashSet<ServerName>();
     for (Path logDir : logDirs) {
       try {
-        ServerName serverName = DefaultWALProvider.getServerNameFromWALDirectoryName(logDir);
+        ServerName serverName = AbstractFSWALProvider.getServerNameFromWALDirectoryName(logDir);
         if (serverName != null) {
           serverNames.add(serverName);
         }
@@ -273,7 +273,7 @@ public class SplitLogManager {
     }
     waitForSplittingCompletion(batch, status);
     // remove recovering regions
-    if (filter == MasterFileSystem.META_FILTER /* reference comparison */) {
+    if (filter == MasterWalManager.META_FILTER /* reference comparison */) {
       // we split meta regions and user regions separately therefore logfiles are either all for
       // meta or user regions but won't for both( we could have mixed situations in tests)
       isMetaRecovery = true;
@@ -411,7 +411,7 @@ public class SplitLogManager {
     for (ServerName tmpServerName : serverNames) {
       recoveredServerNameSet.add(tmpServerName.getServerName());
     }
-   
+
     this.recoveringRegionLock.lock();
     try {
       ((BaseCoordinatedStateManager) server.getCoordinatedStateManager())

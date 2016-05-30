@@ -54,7 +54,7 @@ import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.HasThread;
 import org.apache.hadoop.hbase.util.Threads;
-import org.apache.hadoop.hbase.wal.DefaultWALProvider;
+import org.apache.hadoop.hbase.wal.FSHLogProvider;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.wal.WALKey;
 import org.apache.hadoop.hbase.wal.WALPrettyPrinter;
@@ -212,7 +212,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
    * @param prefix should always be hostname and port in distributed env and it will be URL encoded
    *          before being used. If prefix is null, "wal" will be used
    * @param suffix will be url encoded. null is treated as empty. non-empty must start with
-   *          {@link DefaultWALProvider#WAL_FILE_NAME_DELIMITER}
+   *          {@link org.apache.hadoop.hbase.wal.AbstractFSWALProvider#WAL_FILE_NAME_DELIMITER}
    */
   public FSHLog(final FileSystem fs, final Path rootDir, final String logDir,
       final String archiveDir, final Configuration conf, final List<WALActionsListener> listeners,
@@ -258,8 +258,9 @@ public class FSHLog extends AbstractFSWAL<Writer> {
   /**
    * Currently, we need to expose the writer's OutputStream to tests so that they can manipulate the
    * default behavior (such as setting the maxRecoveryErrorCount value for example (see
-   * {@link TestWALReplay#testReplayEditsWrittenIntoWAL()}). This is done using reflection on the
-   * underlying HDFS OutputStream. NOTE: This could be removed once Hadoop1 support is removed.
+   * {@link AbstractTestWALReplay#testReplayEditsWrittenIntoWAL()}). This is done using reflection
+   * on the underlying HDFS OutputStream. NOTE: This could be removed once Hadoop1 support is
+   * removed.
    * @return null if underlying stream is not ready.
    */
   @VisibleForTesting
@@ -288,7 +289,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
    * @return Writer instance
    */
   protected Writer createWriterInstance(final Path path) throws IOException {
-    Writer writer = DefaultWALProvider.createWriter(conf, fs, path, false);
+    Writer writer = FSHLogProvider.createWriter(conf, fs, path, false);
     if (writer instanceof ProtobufLogWriter) {
       preemptiveSync((ProtobufLogWriter) writer);
     }
@@ -431,11 +432,6 @@ public class FSHLog extends AbstractFSWAL<Writer> {
       this.writer.close();
       this.writer = null;
     }
-  }
-
-  @Override
-  public String toString() {
-    return "FSHLog " + walFilePrefix + ":" + walFileSuffix + "(num " + filenum + ")";
   }
 
   @edu.umd.cs.findbugs.annotations.SuppressWarnings(value = "NP_NULL_ON_SOME_PATH_EXCEPTION",

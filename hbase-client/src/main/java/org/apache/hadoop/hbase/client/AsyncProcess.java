@@ -55,6 +55,7 @@ import org.apache.hadoop.hbase.client.backoff.ServerStatistics;
 import org.apache.hadoop.hbase.client.coprocessor.Batch;
 import org.apache.hadoop.hbase.exceptions.ClientExceptionsUtil;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
+import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
@@ -113,6 +114,11 @@ class AsyncProcess {
   public static final String START_LOG_ERRORS_AFTER_COUNT_KEY =
       "hbase.client.start.log.errors.counter";
   public static final int DEFAULT_START_LOG_ERRORS_AFTER_COUNT = 9;
+
+  /**
+   * Configuration to decide whether to log details for batch error
+   */
+  public static final String LOG_DETAILS_FOR_BATCH_ERROR = "hbase.client.log.batcherrors.details";
 
   /**
    * The context used to wait for results from one submit call.
@@ -222,6 +228,8 @@ class AsyncProcess {
   protected int serverTrackerTimeout;
   protected int timeout;
   protected long primaryCallTimeoutMicroseconds;
+  /** Whether to log details for batch errors */
+  private final boolean logBatchErrorDetails;
   // End configuration settings.
 
   protected static class BatchErrors {
@@ -243,9 +251,12 @@ class AsyncProcess {
       return !throwables.isEmpty();
     }
 
-    private synchronized RetriesExhaustedWithDetailsException makeException() {
-      return new RetriesExhaustedWithDetailsException(
-          new ArrayList<Throwable>(throwables),
+    private synchronized RetriesExhaustedWithDetailsException makeException(boolean logDetails) {
+      if (logDetails) {
+        LOG.error("Exception occurred! Exception details: " + throwables + ";\nActions: "
+            + actions);
+      }
+      return new RetriesExhaustedWithDetailsException(new ArrayList<Throwable>(throwables),
           new ArrayList<Row>(actions), new ArrayList<String>(addresses));
     }
 
@@ -266,7 +277,7 @@ class AsyncProcess {
       RpcRetryingCallerFactory rpcCaller, boolean useGlobalErrors,
       RpcControllerFactory rpcFactory) {
     if (hc == null) {
-      throw new IllegalArgumentException("HConnection cannot be null.");
+      throw new IllegalArgumentException("ClusterConnection cannot be null.");
     }
 
     this.connection = hc;
@@ -320,6 +331,7 @@ class AsyncProcess {
 
     this.rpcCallerFactory = rpcCaller;
     this.rpcFactory = rpcFactory;
+    this.logBatchErrorDetails = conf.getBoolean(LOG_DETAILS_FOR_BATCH_ERROR, false);
   }
 
   /**
@@ -1666,7 +1678,7 @@ class AsyncProcess {
         synchronized (actionsInProgress) {
           if (actionsInProgress.get() == 0) break;
           if (!hasWait) {
-            actionsInProgress.wait(100);
+            actionsInProgress.wait(10);
           } else {
             long waitMicroSecond = Math.min(100000L, (cutoff - now * 1000L));
             TimeUnit.MICROSECONDS.timedWait(actionsInProgress, waitMicroSecond);
@@ -1688,7 +1700,7 @@ class AsyncProcess {
 
     @Override
     public RetriesExhaustedWithDetailsException getErrors() {
-      return errors.makeException();
+      return errors.makeException(logBatchErrorDetails);
     }
 
     @Override
@@ -1707,10 +1719,11 @@ class AsyncProcess {
     for (Map.Entry<byte[], MultiResponse.RegionResult> regionStats : results.entrySet()) {
       byte[] regionName = regionStats.getKey();
       ClientProtos.RegionLoadStats stat = regionStats.getValue().getStat();
+      RegionLoadStats regionLoadstats = ProtobufUtil.createRegionLoadStats(stat);
       ResultStatsUtil.updateStats(AsyncProcess.this.connection.getStatisticsTracker(), server,
-          regionName, stat);
+          regionName, regionLoadstats);
       ResultStatsUtil.updateStats(AsyncProcess.this.connection.getConnectionMetrics(),
-          server, regionName, stat);
+          server, regionName, regionLoadstats);
     }
   }
 
@@ -1757,9 +1770,16 @@ class AsyncProcess {
 
   /** Wait until the async does not have more than max tasks in progress. */
   private void waitForMaximumCurrentTasks(int max) throws InterruptedIOException {
+    waitForMaximumCurrentTasks(max, tasksInProgress, id);
+  }
+
+  // Break out this method so testable
+  @VisibleForTesting
+  static void waitForMaximumCurrentTasks(int max, final AtomicLong tasksInProgress, final long id)
+  throws InterruptedIOException {
     long lastLog = EnvironmentEdgeManager.currentTime();
     long currentInProgress, oldInProgress = Long.MAX_VALUE;
-    while ((currentInProgress = this.tasksInProgress.get()) > max) {
+    while ((currentInProgress = tasksInProgress.get()) > max) {
       if (oldInProgress != currentInProgress) { // Wait for in progress to change.
         long now = EnvironmentEdgeManager.currentTime();
         if (now > lastLog + 10000) {
@@ -1770,9 +1790,10 @@ class AsyncProcess {
       }
       oldInProgress = currentInProgress;
       try {
-        synchronized (this.tasksInProgress) {
-          if (tasksInProgress.get() != oldInProgress) break;
-          this.tasksInProgress.wait(100);
+        synchronized (tasksInProgress) {
+          if (tasksInProgress.get() == oldInProgress) {
+            tasksInProgress.wait(10);
+          }
         }
       } catch (InterruptedException e) {
         throw new InterruptedIOException("#" + id + ", interrupted." +
@@ -1808,7 +1829,7 @@ class AsyncProcess {
     if (failedRows != null) {
       failedRows.addAll(globalErrors.actions);
     }
-    RetriesExhaustedWithDetailsException result = globalErrors.makeException();
+    RetriesExhaustedWithDetailsException result = globalErrors.makeException(logBatchErrorDetails);
     globalErrors.clear();
     return result;
   }

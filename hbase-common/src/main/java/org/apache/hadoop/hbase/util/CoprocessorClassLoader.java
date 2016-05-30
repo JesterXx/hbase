@@ -177,8 +177,10 @@ public class CoprocessorClassLoader extends ClassLoaderBase {
         if (m.matches()) {
           File file = new File(parentDirStr, "." + pathPrefix + "."
             + path.getName() + "." + System.currentTimeMillis() + "." + m.group(1));
-          IOUtils.copyBytes(jarFile.getInputStream(entry),
-            new FileOutputStream(file), conf, true);
+          try (FileOutputStream outStream = new FileOutputStream(file)) {
+            IOUtils.copyBytes(jarFile.getInputStream(entry),
+              outStream, conf, true);
+          }
           file.deleteOnExit();
           addURL(file.toURI().toURL());
         }
@@ -264,8 +266,13 @@ public class CoprocessorClassLoader extends ClassLoaderBase {
   @Override
   public Class<?> loadClass(String name)
       throws ClassNotFoundException {
+    return loadClass(name, null);
+  }
+
+  public Class<?> loadClass(String name, String[] includedClassPrefixes)
+      throws ClassNotFoundException {
     // Delegate to the parent immediately if this class is exempt
-    if (isClassExempt(name)) {
+    if (isClassExempt(name, includedClassPrefixes)) {
       if (LOG.isDebugEnabled()) {
         LOG.debug("Skipping exempt class " + name +
             " - delegating directly to parent");
@@ -344,7 +351,14 @@ public class CoprocessorClassLoader extends ClassLoaderBase {
    * @return true if the class should *not* be loaded by this ClassLoader;
    * false otherwise.
    */
-  protected boolean isClassExempt(String name) {
+  protected boolean isClassExempt(String name, String[] includedClassPrefixes) {
+    if (includedClassPrefixes != null) {
+      for (String clsName : includedClassPrefixes) {
+        if (name.startsWith(clsName)) {
+          return false;
+        }
+      }
+    }
     for (String exemptPrefix : CLASS_PREFIX_EXEMPTIONS) {
       if (name.startsWith(exemptPrefix)) {
         return true;

@@ -60,12 +60,12 @@ import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagRewriteCell;
 import org.apache.hadoop.hbase.TagUtil;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Increment;
+import org.apache.hadoop.hbase.client.MasterSwitchType;
 import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Query;
@@ -1005,8 +1005,10 @@ public class AccessController extends BaseMasterAndRegionObserver
   }
 
   @Override
-  public void postCreateTableHandler(final ObserverContext<MasterCoprocessorEnvironment> c,
-      HTableDescriptor desc, HRegionInfo[] regions) throws IOException {
+  public void postCompletedCreateTableAction(
+      final ObserverContext<MasterCoprocessorEnvironment> c,
+      final HTableDescriptor desc,
+      final HRegionInfo[] regions) throws IOException {
     // When AC is used, it should be configured as the 1st CP.
     // In Master, the table operations like create, are handled by a Thread pool but the max size
     // for this pool is 1. So if multiple CPs create tables on startup, these creations will happen
@@ -1262,14 +1264,14 @@ public class AccessController extends BaseMasterAndRegionObserver
 
   @Override
   public boolean preSetSplitOrMergeEnabled(final ObserverContext<MasterCoprocessorEnvironment> ctx,
-      final boolean newValue, final Admin.MasterSwitchType switchType) throws IOException {
+      final boolean newValue, final MasterSwitchType switchType) throws IOException {
     requirePermission("setSplitOrMergeEnabled", Action.ADMIN);
     return false;
   }
 
   @Override
   public void postSetSplitOrMergeEnabled(final ObserverContext<MasterCoprocessorEnvironment> ctx,
-      final boolean newValue, final Admin.MasterSwitchType switchType) throws IOException {
+      final boolean newValue, final MasterSwitchType switchType) throws IOException {
   }
 
   @Override

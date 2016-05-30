@@ -19,6 +19,7 @@
  */
 package org.apache.hadoop.hbase.client;
 
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.Test;
@@ -54,4 +55,43 @@ public class TestConnectionUtils {
     assertTrue(retyTimeSet.size() > (retries.length * 0.80));
   }
 
+  @Test
+  public void testAddJitter() {
+    long basePause = 10000;
+    long maxTimeExpected = (long) (basePause * 1.25f);
+    long minTimeExpected = (long) (basePause * 0.75f);
+    int testTries = 100;
+
+    Set<Long> timeSet = new TreeSet<Long>();
+    for (int i = 0; i < testTries; i++) {
+      long withJitter = ConnectionUtils.addJitter(basePause, 0.5f);
+      assertTrue(withJitter >= minTimeExpected);
+      assertTrue(withJitter <= maxTimeExpected);
+      // Add the long to the set
+      timeSet.add(withJitter);
+    }
+
+    //Make sure that most are unique.  some overlap will happen
+    assertTrue(timeSet.size() > (testTries * 0.90));
+  }
+
+  @Test
+  public void testGetPauseTime() {
+    long pauseTime;
+    long baseTime = 100;
+    pauseTime = ConnectionUtils.getPauseTime(baseTime, -1);
+    assertTrue(pauseTime >= (baseTime * HConstants.RETRY_BACKOFF[0]));
+    assertTrue(pauseTime <= (baseTime * HConstants.RETRY_BACKOFF[0] * 1.01f));
+
+    for (int i = 0; i < HConstants.RETRY_BACKOFF.length; i++) {
+      pauseTime = ConnectionUtils.getPauseTime(baseTime, i);
+      assertTrue(pauseTime >= (baseTime * HConstants.RETRY_BACKOFF[i]));
+      assertTrue(pauseTime <= (baseTime * HConstants.RETRY_BACKOFF[i] * 1.01f));
+    }
+
+    int length = HConstants.RETRY_BACKOFF.length;
+    pauseTime = ConnectionUtils.getPauseTime(baseTime, length);
+    assertTrue(pauseTime >= (baseTime * HConstants.RETRY_BACKOFF[length - 1]));
+    assertTrue(pauseTime <= (baseTime * HConstants.RETRY_BACKOFF[length - 1] * 1.01f));
+  }
 }

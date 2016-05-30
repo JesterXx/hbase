@@ -24,7 +24,6 @@ java_import org.apache.hadoop.hbase.util.RegionSplitter
 java_import org.apache.hadoop.hbase.util.Bytes
 java_import org.apache.hadoop.hbase.ServerName
 java_import org.apache.hadoop.hbase.TableName
-java_import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos::SnapshotDescription
 
 # Wrapper for org.apache.hadoop.hbase.client.HBaseAdmin
 
@@ -68,9 +67,9 @@ module Hbase
       end
       compact_type = nil
       if type == "NORMAL"
-        compact_type = org.apache.hadoop.hbase.client.Admin::CompactType::NORMAL
+        compact_type = org.apache.hadoop.hbase.client.CompactType::NORMAL
       elsif type == "MOB"
-        compact_type = org.apache.hadoop.hbase.client.Admin::CompactType::MOB
+        compact_type = org.apache.hadoop.hbase.client.CompactType::MOB
       else
         raise ArgumentError, "only NORMAL or MOB accepted for type!"
       end
@@ -96,9 +95,9 @@ module Hbase
       end
       compact_type = nil
       if type == "NORMAL"
-        compact_type = org.apache.hadoop.hbase.client.Admin::CompactType::NORMAL
+        compact_type = org.apache.hadoop.hbase.client.CompactType::NORMAL
       elsif type == "MOB"
-        compact_type = org.apache.hadoop.hbase.client.Admin::CompactType::MOB
+        compact_type = org.apache.hadoop.hbase.client.CompactType::MOB
       else
         raise ArgumentError, "only NORMAL or MOB accepted for type!"
       end
@@ -434,8 +433,10 @@ module Hbase
     # If server name is nil, we presume region_name is full region name (HRegionInfo.getRegionName).
     # If server name is not nil, we presume it is the region's encoded name (HRegionInfo.getEncodedName)
     def close_region(region_name, server)
-      if (server == nil || !closeEncodedRegion?(region_name, server))
-      	@admin.closeRegion(region_name, server)
+      if (region_name.end_with? ".")
+        @admin.closeRegion(region_name, server)
+      else
+        closeEncodedRegion?(region_name, server)
       end
     end
 
@@ -719,7 +720,7 @@ module Hbase
         puts("version %s" % [ status.getHBaseVersion() ])
         # Put regions in transition first because usually empty
         puts("%d regionsInTransition" % status.getRegionsInTransition().size())
-        for k, v in status.getRegionsInTransition()
+        for v in status.getRegionsInTransition()
           puts("    %s" % [v])
         end
         master = status.getMaster()
@@ -854,6 +855,7 @@ module Hbase
       family.setScope(JInteger.valueOf(arg.delete(org.apache.hadoop.hbase.HColumnDescriptor::REPLICATION_SCOPE))) if arg.include?(org.apache.hadoop.hbase.HColumnDescriptor::REPLICATION_SCOPE)
       family.setCacheDataOnWrite(JBoolean.valueOf(arg.delete(org.apache.hadoop.hbase.HColumnDescriptor::CACHE_DATA_ON_WRITE))) if arg.include?(org.apache.hadoop.hbase.HColumnDescriptor::CACHE_DATA_ON_WRITE)
       family.setInMemory(JBoolean.valueOf(arg.delete(org.apache.hadoop.hbase.HColumnDescriptor::IN_MEMORY))) if arg.include?(org.apache.hadoop.hbase.HColumnDescriptor::IN_MEMORY)
+      family.setCompacted(JBoolean.valueOf(arg.delete(org.apache.hadoop.hbase.HColumnDescriptor::IN_MEMORY_COMPACTION))) if arg.include?(org.apache.hadoop.hbase.HColumnDescriptor::IN_MEMORY_COMPACTION)
       family.setTimeToLive(arg.delete(org.apache.hadoop.hbase.HColumnDescriptor::TTL)) if arg.include?(org.apache.hadoop.hbase.HColumnDescriptor::TTL)
       family.setDataBlockEncoding(org.apache.hadoop.hbase.io.encoding.DataBlockEncoding.valueOf(arg.delete(org.apache.hadoop.hbase.HColumnDescriptor::DATA_BLOCK_ENCODING))) if arg.include?(org.apache.hadoop.hbase.HColumnDescriptor::DATA_BLOCK_ENCODING)
       family.setBlocksize(JInteger.valueOf(arg.delete(org.apache.hadoop.hbase.HColumnDescriptor::BLOCKSIZE))) if arg.include?(org.apache.hadoop.hbase.HColumnDescriptor::BLOCKSIZE)
@@ -955,7 +957,7 @@ module Hbase
          args.each do |arg|
             if arg[SKIP_FLUSH] == true
               @admin.snapshot(snapshot_name, table_name,
-                              SnapshotDescription::Type::SKIPFLUSH)
+                              org.apache.hadoop.hbase.client.SnapshotType::SKIPFLUSH)
             else
                @admin.snapshot(snapshot_name, table_name)
             end
@@ -1004,6 +1006,47 @@ module Hbase
     def list_table_snapshots(tableNameRegex, snapshotNameRegex = ".*")
       @admin.listTableSnapshots(tableNameRegex, snapshotNameRegex).to_a
     end
+
+    #----------------------------------------------------------------------------------------------
+    # Returns a list of regionservers
+    def getRegionServers()
+      return @admin.getClusterStatus.getServers.map { |serverName| serverName }
+    end
+
+    #----------------------------------------------------------------------------------------------
+    # Returns a list of servernames
+    def getServerNames(servers)
+      regionservers = getRegionServers()
+      servernames = []
+
+      if servers.length == 0
+        # if no servers were specified as arguments, get a list of all servers
+        servernames = regionservers
+      else
+        # Strings replace with ServerName objects in servers array
+        i = 0
+        while (i < servers.length)
+          server = servers[i]
+
+          if ServerName.isFullServerName(server)
+            servernames.push(ServerName.valueOf(server))
+          else
+            name_list = server.split(",")
+            j = 0
+            while (j < regionservers.length)
+              sn = regionservers[j]
+              if name_list[0] == sn.hostname and (name_list[1] == nil ? true : (name_list[1] == sn.port.to_s) )
+                servernames.push(sn)
+              end
+              j += 1
+            end
+          end
+          i += 1
+        end
+      end
+
+      return servernames
+    end 
 
     # Apply config specific to a table/column to its descriptor
     def set_descriptor_config(descriptor, config)

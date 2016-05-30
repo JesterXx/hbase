@@ -913,7 +913,7 @@ public class ZKUtil {
       if (superUsers != null) {
         List<String> groups = new ArrayList<String>();
         for (String user : superUsers) {
-          if (user.startsWith(AuthUtil.GROUP_PREFIX)) {
+          if (AuthUtil.isGroupPrincipal(user)) {
             // TODO: Set node ACL for groups when ZK supports this feature
             groups.add(user);
           } else {
@@ -922,7 +922,7 @@ public class ZKUtil {
         }
         if (!groups.isEmpty()) {
           LOG.warn("Znode ACL setting for group " + groups
-              + " is skipped, Zookeeper doesn't support this feature presently.");
+              + " is skipped, ZooKeeper doesn't support this feature presently.");
         }
       }
       // Certain znodes are accessed directly by the client,
@@ -1392,7 +1392,7 @@ public class ZKUtil {
     }
     List<ZKUtilOp> ops = new ArrayList<ZKUtil.ZKUtilOp>();
     for (String eachRoot : pathRoots) {
-      // Zookeeper Watches are one time triggers; When children of parent nodes are deleted
+      // ZooKeeper Watches are one time triggers; When children of parent nodes are deleted
       // recursively, must set another watch, get notified of delete node
       List<String> children = listChildrenBFSAndWatchThem(zkw, eachRoot);
       // Delete the leaves first and eventually get rid of the root
@@ -1926,27 +1926,27 @@ public class ZKUtil {
     int port = sp.length > 1 ? Integer.parseInt(sp[1])
         : HConstants.DEFAULT_ZOOKEPER_CLIENT_PORT;
 
-    Socket socket = new Socket();
     InetSocketAddress sockAddr = new InetSocketAddress(host, port);
-    socket.connect(sockAddr, timeout);
+    try (Socket socket = new Socket()) {
+      socket.connect(sockAddr, timeout);
 
-    socket.setSoTimeout(timeout);
-    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-    BufferedReader in = new BufferedReader(new InputStreamReader(
-      socket.getInputStream()));
-    out.println("stat");
-    out.flush();
-    ArrayList<String> res = new ArrayList<String>();
-    while (true) {
-      String line = in.readLine();
-      if (line != null) {
-        res.add(line);
-      } else {
-        break;
+      socket.setSoTimeout(timeout);
+      PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+      BufferedReader in = new BufferedReader(new InputStreamReader(
+        socket.getInputStream()));
+      out.println("stat");
+      out.flush();
+      ArrayList<String> res = new ArrayList<String>();
+      while (true) {
+        String line = in.readLine();
+        if (line != null) {
+          res.add(line);
+        } else {
+          break;
+        }
       }
+      return res.toArray(new String[res.size()]);
     }
-    socket.close();
-    return res.toArray(new String[res.size()]);
   }
 
   private static void logRetrievedMsg(final ZooKeeperWatcher zkw,

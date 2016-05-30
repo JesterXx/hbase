@@ -88,6 +88,7 @@ import org.apache.hadoop.hbase.ipc.RpcServer.BlockingServiceAndInterface;
 import org.apache.hadoop.hbase.ipc.RpcServerInterface;
 import org.apache.hadoop.hbase.ipc.ServerNotRunningYetException;
 import org.apache.hadoop.hbase.ipc.ServerRpcController;
+import org.apache.hadoop.hbase.ipc.TimeLimitedRpcController;
 import org.apache.hadoop.hbase.master.MasterRpcServices;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.RequestConverter;
@@ -1032,7 +1033,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
     }
     priority = createPriority();
     String name = rs.getProcessName() + "/" + initialIsa.toString();
-    // Set how many times to retry talking to another server over HConnection.
+    // Set how many times to retry talking to another server over Connection.
     ConnectionUtils.setServerSideHConnectionRetriesConfig(rs.conf, name, LOG);
     try {
       rpcServer = new RpcServer(rs, name, getServices(),
@@ -1180,7 +1181,8 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
    * @throws IOException if the specifier is not null,
    *    but failed to find the region
    */
-  Region getRegion(
+  @VisibleForTesting
+  public Region getRegion(
       final RegionSpecifier regionSpecifier) throws IOException {
     ByteString value = regionSpecifier.getValue();
     RegionSpecifierType type = regionSpecifier.getType();
@@ -2181,7 +2183,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
 
     RegionScanner scanner = null;
     try {
-      scanner = region.getScanner(scan, false);
+      scanner = region.getScanner(scan);
       scanner.next(results);
     } finally {
       if (scanner != null) {
@@ -2530,7 +2532,6 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
       boolean moreResults = true;
       boolean closeScanner = false;
       boolean isSmallScan = false;
-      RegionScanner actualRegionScanner = null;
       ScanResponse.Builder builder = ScanResponse.newBuilder();
       if (request.hasCloseScanner()) {
         closeScanner = request.getCloseScanner();
@@ -2542,9 +2543,14 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
       if (request.hasScannerId()) {
         rsh = scanners.get(scannerName);
         if (rsh == null) {
-          LOG.info("Client tried to access missing scanner " + scannerName);
+          LOG.warn("Client tried to access missing scanner " + scannerName);
           throw new UnknownScannerException(
-            "Name: " + scannerName + ", already closed?");
+            "Unknown scanner '" + scannerName + "'. This can happen due to any of the following "
+                + "reasons: a) Scanner id given is wrong, b) Scanner lease expired because of "
+                + "long wait between consecutive client checkins, c) Server may be closing down, "
+                + "d) RegionServer restart during upgrade.\nIf the issue is due to reason (b), a "
+                + "possible fix would be increasing the value of"
+                + "'hbase.client.scanner.timeout.period' configuration.");
         }
         scanner = rsh.s;
         HRegionInfo hri = scanner.getRegionInfo();
@@ -2575,20 +2581,10 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
           scanner = region.getCoprocessorHost().preScannerOpen(scan);
         }
         if (scanner == null) {
-          scanner = ((HRegion)region).getScanner(scan, false);
+          scanner = region.getScanner(scan);
         }
-        actualRegionScanner =  scanner;
         if (region.getCoprocessorHost() != null) {
           scanner = region.getCoprocessorHost().postScannerOpen(scan, scanner);
-        }
-        if (actualRegionScanner != scanner) {
-          // It means the RegionScanner has been wrapped
-          if (actualRegionScanner instanceof RegionScannerImpl) {
-            // Copy the results when nextRaw is called from the CP so that
-            // CP can have a cloned version of the results without bothering
-            // about the eviction. Ugly, yes!!!
-            ((RegionScannerImpl) actualRegionScanner).setCopyCellsFromSharedMem(true);
-          }
         }
         scannerId = this.scannerIdGen.incrementAndGet();
         scannerName = String.valueOf(scannerId);
@@ -2702,6 +2698,14 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
                   } else {
                     timeLimitDelta =
                         scannerLeaseTimeoutPeriod > 0 ? scannerLeaseTimeoutPeriod : rpcTimeout;
+                  }
+                  if (controller instanceof TimeLimitedRpcController) {
+                    TimeLimitedRpcController timeLimitedRpcController =
+                        (TimeLimitedRpcController)controller;
+                    if (timeLimitedRpcController.getCallTimeout() > 0) {
+                      timeLimitDelta = Math.min(timeLimitDelta,
+                          timeLimitedRpcController.getCallTimeout());
+                    }
                   }
                   // Use half of whichever timeout value was more restrictive... But don't allow
                   // the time limit to be less than the allowable minimum (could cause an

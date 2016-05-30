@@ -1,6 +1,5 @@
 /**
  *
-
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -69,6 +68,7 @@ import org.apache.hadoop.hbase.SplitLogCounters;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Waiter;
 import org.apache.hadoop.hbase.client.ClusterConnection;
+import org.apache.hadoop.hbase.client.CompactionState;
 import org.apache.hadoop.hbase.client.ConnectionUtils;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
@@ -87,7 +87,6 @@ import org.apache.hadoop.hbase.exceptions.RegionInRecoveryException;
 import org.apache.hadoop.hbase.ipc.ServerNotRunningYetException;
 import org.apache.hadoop.hbase.master.SplitLogManager.TaskBatch;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
-import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoResponse.CompactionState;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.Region;
@@ -101,7 +100,8 @@ import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.JVMClusterUtil.MasterThread;
 import org.apache.hadoop.hbase.util.JVMClusterUtil.RegionServerThread;
 import org.apache.hadoop.hbase.util.Threads;
-import org.apache.hadoop.hbase.wal.DefaultWALProvider;
+import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
+import org.apache.hadoop.hbase.wal.FSHLogProvider;
 import org.apache.hadoop.hbase.wal.WAL;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.wal.WALSplitter;
@@ -213,7 +213,7 @@ public class TestDistributedLogSplitting {
     startCluster(NUM_RS);
 
     final int NUM_LOG_LINES = 1000;
-    final SplitLogManager slm = master.getMasterFileSystem().splitLogManager;
+    final SplitLogManager slm = master.getMasterWalManager().getSplitLogManager();
     // turn off load balancing to prevent regions from moving around otherwise
     // they will consume recovered.edits
     master.balanceSwitch(false);
@@ -241,7 +241,7 @@ public class TestDistributedLogSplitting {
         }
         if (foundRs) break;
       }
-      final Path logDir = new Path(rootdir, DefaultWALProvider.getWALDirectoryName(hrs
+      final Path logDir = new Path(rootdir, AbstractFSWALProvider.getWALDirectoryName(hrs
           .getServerName().toString()));
 
       LOG.info("#regions = " + regions.size());
@@ -680,7 +680,7 @@ public class TestDistributedLogSplitting {
     final ZooKeeperWatcher zkw = master.getZooKeeper();
     Table ht = installTable(zkw, "table", "family", 40);
     try {
-      final SplitLogManager slm = master.getMasterFileSystem().splitLogManager;
+      final SplitLogManager slm = master.getMasterWalManager().getSplitLogManager();
 
       Set<HRegionInfo> regionSet = new HashSet<HRegionInfo>();
       HRegionInfo region = null;
@@ -929,7 +929,7 @@ public class TestDistributedLogSplitting {
     final ZooKeeperWatcher zkw = new ZooKeeperWatcher(conf, "table-creation", null);
     Table ht = installTable(zkw, "table", "family", NUM_REGIONS_TO_CREATE);
     try {
-      final SplitLogManager slm = master.getMasterFileSystem().splitLogManager;
+      final SplitLogManager slm = master.getMasterWalManager().getSplitLogManager();
 
       Set<HRegionInfo> regionSet = new HashSet<HRegionInfo>();
       HRegionInfo region = null;
@@ -1004,14 +1004,14 @@ public class TestDistributedLogSplitting {
     LOG.info("testWorkerAbort");
     startCluster(3);
     final int NUM_LOG_LINES = 10000;
-    final SplitLogManager slm = master.getMasterFileSystem().splitLogManager;
+    final SplitLogManager slm = master.getMasterWalManager().getSplitLogManager();
     FileSystem fs = master.getMasterFileSystem().getFileSystem();
 
     final List<RegionServerThread> rsts = cluster.getLiveRegionServerThreads();
     HRegionServer hrs = findRSToKill(false, "table");
     Path rootdir = FSUtils.getRootDir(conf);
     final Path logDir = new Path(rootdir,
-        DefaultWALProvider.getWALDirectoryName(hrs.getServerName().toString()));
+      AbstractFSWALProvider.getWALDirectoryName(hrs.getServerName().toString()));
 
     Table t = installTable(new ZooKeeperWatcher(conf, "table-creation", null),
         "table", "family", 40);
@@ -1123,7 +1123,7 @@ public class TestDistributedLogSplitting {
   public void testDelayedDeleteOnFailure() throws Exception {
     LOG.info("testDelayedDeleteOnFailure");
     startCluster(1);
-    final SplitLogManager slm = master.getMasterFileSystem().splitLogManager;
+    final SplitLogManager slm = master.getMasterWalManager().getSplitLogManager();
     final FileSystem fs = master.getMasterFileSystem().getFileSystem();
     final Path logDir = new Path(FSUtils.getRootDir(conf), "x");
     fs.mkdirs(logDir);
@@ -1204,10 +1204,10 @@ public class TestDistributedLogSplitting {
     LOG.info("#regions = " + regions.size());
     Set<HRegionInfo> tmpRegions = new HashSet<HRegionInfo>();
     tmpRegions.add(HRegionInfo.FIRST_META_REGIONINFO);
-    master.getMasterFileSystem().prepareLogReplay(hrs.getServerName(), tmpRegions);
+    master.getMasterWalManager().prepareLogReplay(hrs.getServerName(), tmpRegions);
     Set<HRegionInfo> userRegionSet = new HashSet<HRegionInfo>();
     userRegionSet.addAll(regions);
-    master.getMasterFileSystem().prepareLogReplay(hrs.getServerName(), userRegionSet);
+    master.getMasterWalManager().prepareLogReplay(hrs.getServerName(), userRegionSet);
     boolean isMetaRegionInRecovery = false;
     List<String> recoveringRegions =
         zkw.getRecoverableZooKeeper().getChildren(zkw.recoveringRegionsZNode, false);
@@ -1219,7 +1219,7 @@ public class TestDistributedLogSplitting {
     }
     assertTrue(isMetaRegionInRecovery);
 
-    master.getMasterFileSystem().splitMetaLog(hrs.getServerName());
+    master.getMasterWalManager().splitMetaLog(hrs.getServerName());
 
     isMetaRegionInRecovery = false;
     recoveringRegions =
@@ -1421,7 +1421,8 @@ public class TestDistributedLogSplitting {
       TEST_UTIL.waitFor(30000, 200, new Waiter.Predicate<Exception>() {
         @Override
         public boolean evaluate() throws Exception {
-          return (TEST_UTIL.getHBaseAdmin().getCompactionState(tableName) == CompactionState.NONE);
+          return (TEST_UTIL.getHBaseAdmin()
+              .getCompactionState(tableName) == CompactionState.NONE);
         }
       });
 

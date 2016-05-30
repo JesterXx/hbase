@@ -33,12 +33,12 @@ import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.MasterSwitchType;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Result;
@@ -80,6 +80,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -109,7 +110,6 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
 
     conf.setInt("hbase.htable.threads.max", POOL_SIZE);
     conf.setInt("hbase.hconnection.threads.max", 2 * POOL_SIZE);
-    conf.setInt("hbase.hconnection.threads.core", POOL_SIZE);
     conf.setInt("hbase.hbck.close.timeout", 2 * REGION_ONLINE_TIMEOUT);
     conf.setInt(HConstants.HBASE_RPC_TIMEOUT_KEY, 8 * REGION_ONLINE_TIMEOUT);
     TEST_UTIL.startMiniCluster(1);
@@ -610,7 +610,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
       hbck.close();
     }
   }
-  
+
   @Test (timeout=180000)
   public void testHbckAfterRegionMerge() throws Exception {
     TableName table = TableName.valueOf("testMergeRegionFilesInHdfs");
@@ -1472,7 +1472,8 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
         TableLockManager.DEFAULT_TABLE_LOCK_EXPIRE_TIMEOUT_MS)); // let table lock expire
 
     hbck = doFsck(conf, false);
-    assertErrors(hbck, new HBaseFsck.ErrorReporter.ERROR_CODE[] {HBaseFsck.ErrorReporter.ERROR_CODE.EXPIRED_TABLE_LOCK});
+    assertErrors(hbck, new HBaseFsck.ErrorReporter.ERROR_CODE[] {
+        HBaseFsck.ErrorReporter.ERROR_CODE.EXPIRED_TABLE_LOCK});
 
     final CountDownLatch latch = new CountDownLatch(1);
     new Thread() {
@@ -1496,24 +1497,27 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     Threads.sleep(300); // wait some more to ensure writeLock.acquire() is called
 
     hbck = doFsck(conf, false);
+    // still one expired, one not-expired
     assertErrors(hbck, new HBaseFsck.ErrorReporter.ERROR_CODE[] {
-        HBaseFsck.ErrorReporter.ERROR_CODE.EXPIRED_TABLE_LOCK}); // still one expired, one not-expired
+        HBaseFsck.ErrorReporter.ERROR_CODE.EXPIRED_TABLE_LOCK});
 
     edge.incrementTime(conf.getLong(TableLockManager.TABLE_LOCK_EXPIRE_TIMEOUT,
         TableLockManager.DEFAULT_TABLE_LOCK_EXPIRE_TIMEOUT_MS)); // let table lock expire
 
     hbck = doFsck(conf, false);
-    assertErrors(hbck, new HBaseFsck.ErrorReporter.ERROR_CODE[] {HBaseFsck.ErrorReporter.ERROR_CODE.EXPIRED_TABLE_LOCK,
+    assertErrors(hbck, new HBaseFsck.ErrorReporter.ERROR_CODE[] {
+        HBaseFsck.ErrorReporter.ERROR_CODE.EXPIRED_TABLE_LOCK,
         HBaseFsck.ErrorReporter.ERROR_CODE.EXPIRED_TABLE_LOCK}); // both are expired
 
-    conf.setLong(TableLockManager.TABLE_LOCK_EXPIRE_TIMEOUT, 1);
+    Configuration localConf = new Configuration(conf);
     // reaping from ZKInterProcessWriteLock uses znode cTime,
     // which is not injectable through EnvironmentEdge
+    localConf.setLong(TableLockManager.TABLE_LOCK_EXPIRE_TIMEOUT, 1);
 
     Threads.sleep(10);
-    hbck = doFsck(conf, true); // now fix both cases
+    hbck = doFsck(localConf, true); // now fix both cases
 
-    hbck = doFsck(conf, false);
+    hbck = doFsck(localConf, false);
     assertNoErrors(hbck);
 
     // ensure that locks are deleted
@@ -1528,7 +1532,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     // check no errors
     HBaseFsck hbck = doFsck(conf, false);
     assertNoErrors(hbck);
-    
+
     // create peer
     ReplicationAdmin replicationAdmin = new ReplicationAdmin(conf);
     Assert.assertEquals(0, replicationAdmin.getPeersCount());
@@ -1539,7 +1543,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     replicationAdmin.addPeer("1", rpc, null);
     replicationAdmin.getPeersCount();
     Assert.assertEquals(1, replicationAdmin.getPeersCount());
-    
+
     // create replicator
     ZooKeeperWatcher zkw = new ZooKeeperWatcher(conf, "Test Hbase Fsck", connection);
     ReplicationQueues repQueues =
@@ -1551,7 +1555,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     Assert.assertEquals(2, repQueues.getAllQueues().size());
     hbck = doFsck(conf, false);
     assertNoErrors(hbck);
-    
+
     // queues for removed peer
     repQueues.addLog("2", "file1");
     repQueues.addLog("2-server2", "file1");
@@ -1560,7 +1564,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     assertErrors(hbck, new HBaseFsck.ErrorReporter.ERROR_CODE[] {
         HBaseFsck.ErrorReporter.ERROR_CODE.UNDELETED_REPLICATION_QUEUE,
         HBaseFsck.ErrorReporter.ERROR_CODE.UNDELETED_REPLICATION_QUEUE });
-    
+
     // fix the case
     hbck = doFsck(conf, true);
     hbck = doFsck(conf, false);
@@ -1569,7 +1573,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     Assert.assertEquals(2, repQueues.getAllQueues().size());
     Assert.assertNull(repQueues.getLogsInQueue("2"));
     Assert.assertNull(repQueues.getLogsInQueue("2-sever2"));
-    
+
     replicationAdmin.removePeer("1");
     repQueues.removeAllQueues();
     zkw.close();
@@ -1679,8 +1683,7 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
       st.prepare();
       st.stepsBeforePONR(regionServer, regionServer, false);
       AssignmentManager am = cluster.getMaster().getAssignmentManager();
-      Map<String, RegionState> regionsInTransition = am.getRegionStates().getRegionsInTransition();
-      for (RegionState state : regionsInTransition.values()) {
+      for (RegionState state : am.getRegionStates().getRegionsInTransition()) {
         am.regionOffline(state.getRegion());
       }
       Map<HRegionInfo, ServerName> regionsMap = new HashMap<HRegionInfo, ServerName>();
@@ -1856,9 +1859,9 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
   @Test
   public void testSplitOrMergeStatWhenHBCKAbort() throws Exception {
     admin.setSplitOrMergeEnabled(true, false, true,
-      Admin.MasterSwitchType.SPLIT, Admin.MasterSwitchType.MERGE);
-    boolean oldSplit = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.SPLIT);
-    boolean oldMerge = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.MERGE);
+      MasterSwitchType.SPLIT, MasterSwitchType.MERGE);
+    boolean oldSplit = admin.isSplitOrMergeEnabled(MasterSwitchType.SPLIT);
+    boolean oldMerge = admin.isSplitOrMergeEnabled(MasterSwitchType.MERGE);
 
     assertTrue(oldSplit);
     assertTrue(oldMerge);
@@ -1880,8 +1883,8 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     spiedHbck.onlineHbck();
     spiedHbck.close();
 
-    boolean split = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.SPLIT);
-    boolean merge = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.MERGE);
+    boolean split = admin.isSplitOrMergeEnabled(MasterSwitchType.SPLIT);
+    boolean merge = admin.isSplitOrMergeEnabled(MasterSwitchType.MERGE);
     assertFalse(split);
     assertFalse(merge);
 
@@ -1892,8 +1895,8 @@ public class TestHBaseFsckOneRS extends BaseTestHBaseFsck {
     hbck.onlineHbck();
     hbck.close();
 
-    split = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.SPLIT);
-    merge = admin.isSplitOrMergeEnabled(Admin.MasterSwitchType.MERGE);
+    split = admin.isSplitOrMergeEnabled(MasterSwitchType.SPLIT);
+    merge = admin.isSplitOrMergeEnabled(MasterSwitchType.MERGE);
 
     assertTrue(split);
     assertTrue(merge);

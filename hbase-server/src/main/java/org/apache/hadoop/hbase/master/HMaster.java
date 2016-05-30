@@ -84,7 +84,7 @@ import org.apache.hadoop.hbase.TableNotDisabledException;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.UnknownRegionException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.MasterSwitchType;
 import org.apache.hadoop.hbase.client.RegionReplicaUtil;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.TableState;
@@ -92,6 +92,7 @@ import org.apache.hadoop.hbase.coprocessor.BypassCoprocessorException;
 import org.apache.hadoop.hbase.coprocessor.CoprocessorHost;
 import org.apache.hadoop.hbase.exceptions.DeserializationException;
 import org.apache.hadoop.hbase.executor.ExecutorType;
+import org.apache.hadoop.hbase.ipc.CoprocessorRpcUtils;
 import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.ipc.ServerNotRunningYetException;
 import org.apache.hadoop.hbase.master.MasterRpcServices.BalanceSwitchMode;
@@ -260,7 +261,7 @@ public class HMaster extends HRegionServer implements MasterServices {
   LoadBalancerTracker loadBalancerTracker;
 
   // Tracker for split and merge state
-  SplitOrMergeTracker splitOrMergeTracker;
+  private SplitOrMergeTracker splitOrMergeTracker;
 
   // Tracker for region normalizer state
   private RegionNormalizerTracker regionNormalizerTracker;
@@ -271,12 +272,13 @@ public class HMaster extends HRegionServer implements MasterServices {
   final MetricsMaster metricsMaster;
   // file system manager for the master FS operations
   private MasterFileSystem fileSystemManager;
+  private MasterWalManager walManager;
 
   // server manager to deal with region server info
-  volatile ServerManager serverManager;
+  private volatile ServerManager serverManager;
 
   // manager of assignment nodes in zookeeper
-  AssignmentManager assignmentManager;
+  private AssignmentManager assignmentManager;
 
   // buffer for "fatal error" notices from region servers
   // in the cluster. This is only used for assisting
@@ -298,7 +300,7 @@ public class HMaster extends HRegionServer implements MasterServices {
   private final ProcedureEvent serverCrashProcessingEnabled =
     new ProcedureEvent("server crash processing");
 
-  LoadBalancer balancer;
+  private LoadBalancer balancer;
   private RegionNormalizer normalizer;
   private BalancerChore balancerChore;
   private RegionNormalizerChore normalizerChore;
@@ -660,7 +662,8 @@ public class HMaster extends HRegionServer implements MasterServices {
 
     this.masterActiveTime = System.currentTimeMillis();
     // TODO: Do this using Dependency Injection, using PicoContainer, Guice or Spring.
-    this.fileSystemManager = new MasterFileSystem(this, this);
+    this.fileSystemManager = new MasterFileSystem(this);
+    this.walManager = new MasterWalManager(this);
 
     // enable table descriptors cache
     this.tableDescriptors.setCacheOn();
@@ -719,7 +722,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     // we recover hbase:meta region servers inside master initialization and
     // handle other failed servers in SSH in order to start up master node ASAP
     Set<ServerName> previouslyFailedServers =
-      this.fileSystemManager.getFailedServersFromLogFolders();
+      this.walManager.getFailedServersFromLogFolders();
 
     // log splitting for hbase:meta server
     ServerName oldMetaServerLocation = metaTableLocator.getMetaRegionLocation(this.getZooKeeper());
@@ -944,16 +947,17 @@ public class HMaster extends HRegionServer implements MasterServices {
       assigned++;
     }
 
-    if (replicaId == HRegionInfo.DEFAULT_REPLICA_ID)
+    if (replicaId == HRegionInfo.DEFAULT_REPLICA_ID) {
+      // TODO: should we prevent from using state manager before meta was initialized?
+      // tableStateManager.start();
       getTableStateManager().setTableState(TableName.META_TABLE_NAME, TableState.State.ENABLED);
-    // TODO: should we prevent from using state manager before meta was initialized?
-    // tableStateManager.start();
+    }
 
-    if ((RecoveryMode.LOG_REPLAY == this.getMasterFileSystem().getLogRecoveryMode())
+    if ((RecoveryMode.LOG_REPLAY == this.getMasterWalManager().getLogRecoveryMode())
         && (!previouslyFailedMetaRSs.isEmpty())) {
       // replay WAL edits mode need new hbase:meta RS is assigned firstly
       status.setStatus("replaying log for Meta Region");
-      this.fileSystemManager.splitMetaLog(previouslyFailedMetaRSs);
+      this.walManager.splitMetaLog(previouslyFailedMetaRSs);
     }
 
     this.assignmentManager.setEnabledTable(TableName.META_TABLE_NAME);
@@ -988,14 +992,14 @@ public class HMaster extends HRegionServer implements MasterServices {
   }
 
   private void splitMetaLogBeforeAssignment(ServerName currentMetaServer) throws IOException {
-    if (RecoveryMode.LOG_REPLAY == this.getMasterFileSystem().getLogRecoveryMode()) {
+    if (RecoveryMode.LOG_REPLAY == this.getMasterWalManager().getLogRecoveryMode()) {
       // In log replay mode, we mark hbase:meta region as recovering in ZK
       Set<HRegionInfo> regions = new HashSet<HRegionInfo>();
       regions.add(HRegionInfo.FIRST_META_REGIONINFO);
-      this.fileSystemManager.prepareLogReplay(currentMetaServer, regions);
+      this.walManager.prepareLogReplay(currentMetaServer, regions);
     } else {
       // In recovered.edits mode: create recovered edits file for hbase:meta server
-      this.fileSystemManager.splitMetaLog(currentMetaServer);
+      this.walManager.splitMetaLog(currentMetaServer);
     }
   }
 
@@ -1049,6 +1053,11 @@ public class HMaster extends HRegionServer implements MasterServices {
   }
 
   @Override
+  public MasterWalManager getMasterWalManager() {
+    return this.walManager;
+  }
+
+  @Override
   public TableStateManager getTableStateManager() {
     return tableStateManager;
   }
@@ -1077,7 +1086,7 @@ public class HMaster extends HRegionServer implements MasterServices {
    // at a time.  To do concurrency, would need fencing of enable/disable of
    // tables.
    // Any time changing this maxThreads to > 1, pls see the comment at
-   // AccessController#postCreateTableHandler
+   // AccessController#postCompletedCreateTableAction
    this.service.startExecutorService(ExecutorType.MASTER_TABLE_OPERATIONS, 1);
    startProcedureExecutor();
 
@@ -1085,8 +1094,8 @@ public class HMaster extends HRegionServer implements MasterServices {
    int cleanerInterval = conf.getInt("hbase.master.cleaner.interval", 60 * 1000);
    this.logCleaner =
       new LogCleaner(cleanerInterval,
-         this, conf, getMasterFileSystem().getFileSystem(),
-         getMasterFileSystem().getOldLogDir());
+         this, conf, getMasterWalManager().getFileSystem(),
+         getMasterWalManager().getOldLogDir());
     getChoreService().scheduleChore(logCleaner);
 
    //start the hfile archive cleaner thread
@@ -1135,6 +1144,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     if (this.activeMasterManager != null) this.activeMasterManager.stop();
     if (this.serverManager != null) this.serverManager.stop();
     if (this.assignmentManager != null) this.assignmentManager.stop();
+    if (this.walManager != null) this.walManager.stop();
     if (this.fileSystemManager != null) this.fileSystemManager.stop();
     if (this.mpmHost != null) this.mpmHost.stop("server shutting down.");
   }
@@ -1244,7 +1254,7 @@ public class HMaster extends HRegionServer implements MasterServices {
       if (!this.loadBalancerTracker.isBalancerOn()) return false;
       // Only allow one balance run at at time.
       if (this.assignmentManager.getRegionStates().isRegionsInTransition()) {
-        Map<String, RegionState> regionsInTransition =
+        Set<RegionState> regionsInTransition =
           this.assignmentManager.getRegionStates().getRegionsInTransition();
         // if hbase:meta region is in transition, result of assignment cannot be recorded
         // ignore the force flag in that case
@@ -2087,8 +2097,7 @@ public class HMaster extends HRegionServer implements MasterServices {
     if (!MetaTableAccessor.tableExists(getConnection(), tableName)) {
       throw new TableNotFoundException(tableName);
     }
-    if (!getAssignmentManager().getTableStateManager().
-        isTableState(tableName, TableState.State.DISABLED)) {
+    if (!getTableStateManager().isTableState(tableName, TableState.State.DISABLED)) {
       throw new TableNotDisabledException(tableName);
     }
   }
@@ -2143,7 +2152,7 @@ public class HMaster extends HRegionServer implements MasterServices {
 
     String clusterId = fileSystemManager != null ?
       fileSystemManager.getClusterId().toString() : null;
-    Map<String, RegionState> regionsInTransition = assignmentManager != null ?
+    Set<RegionState> regionsInTransition = assignmentManager != null ?
       assignmentManager.getRegionStates().getRegionsInTransition() : null;
     String[] coprocessors = cpHost != null ? getMasterCoprocessors() : null;
     boolean balancerOn = loadBalancerTracker != null ?
@@ -2411,16 +2420,17 @@ public class HMaster extends HRegionServer implements MasterServices {
      * No stacking of instances is allowed for a single service name
      */
     Descriptors.ServiceDescriptor serviceDesc = instance.getDescriptorForType();
-    if (coprocessorServiceHandlers.containsKey(serviceDesc.getFullName())) {
-      LOG.error("Coprocessor service "+serviceDesc.getFullName()+
+    String serviceName = CoprocessorRpcUtils.getServiceName(serviceDesc);
+    if (coprocessorServiceHandlers.containsKey(serviceName)) {
+      LOG.error("Coprocessor service "+serviceName+
           " already registered, rejecting request from "+instance
       );
       return false;
     }
 
-    coprocessorServiceHandlers.put(serviceDesc.getFullName(), instance);
+    coprocessorServiceHandlers.put(serviceName, instance);
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Registered master coprocessor service: service="+serviceDesc.getFullName());
+      LOG.debug("Registered master coprocessor service: service="+serviceName);
     }
     return true;
   }
@@ -2821,10 +2831,10 @@ public class HMaster extends HRegionServer implements MasterServices {
   /**
    * Queries the state of the {@link SplitOrMergeTracker}. If it is not initialized,
    * false is returned. If switchType is illegal, false will return.
-   * @param switchType see {@link org.apache.hadoop.hbase.client.Admin.MasterSwitchType}
+   * @param switchType see {@link org.apache.hadoop.hbase.client.MasterSwitchType}
    * @return The state of the switch
    */
-  public boolean isSplitOrMergeEnabled(Admin.MasterSwitchType switchType) {
+  public boolean isSplitOrMergeEnabled(MasterSwitchType switchType) {
     if (null == splitOrMergeTracker) {
       return false;
     }

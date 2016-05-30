@@ -18,6 +18,12 @@
  */
 package org.apache.hadoop.hbase.wal;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
+import com.google.protobuf.ServiceException;
+import com.google.protobuf.TextFormat;
+
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -70,11 +76,11 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.ConnectionUtils;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
-import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.TableState;
@@ -99,8 +105,7 @@ import org.apache.hadoop.hbase.protobuf.generated.WALProtos.CompactionDescriptor
 import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.SplitLogTask.RecoveryMode;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.LastSequenceId;
-// imports for things that haven't moved from regionserver.wal yet.
-import org.apache.hadoop.hbase.regionserver.wal.FSHLog;
+import org.apache.hadoop.hbase.regionserver.wal.AbstractFSWAL;
 import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALCellCodec;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
@@ -118,12 +123,6 @@ import org.apache.hadoop.hbase.wal.WALProvider.Writer;
 import org.apache.hadoop.hbase.zookeeper.ZKSplitLog;
 import org.apache.hadoop.io.MultipleIOException;
 import org.apache.hadoop.ipc.RemoteException;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.protobuf.ServiceException;
-import com.google.protobuf.TextFormat;
 
 /**
  * This class is responsible for splitting up a bunch of regionserver commit log
@@ -318,7 +317,7 @@ public class WALSplitter {
       outputSinkStarted = true;
       Entry entry;
       Long lastFlushedSequenceId = -1L;
-      ServerName serverName = DefaultWALProvider.getServerNameFromWALDirectoryName(logPath);
+      ServerName serverName = AbstractFSWALProvider.getServerNameFromWALDirectoryName(logPath);
       failedServerName = (serverName == null) ? "" : serverName.getServerName();
       while ((entry = getNextLogLine(in, logPath, skipErrors)) != null) {
         byte[] region = entry.getKey().getEncodedRegionName();
@@ -500,7 +499,7 @@ public class WALSplitter {
     }
 
     for (Path p : processedLogs) {
-      Path newPath = FSHLog.getWALArchivePath(oldLogDir, p);
+      Path newPath = AbstractFSWAL.getWALArchivePath(oldLogDir, p);
       if (fs.exists(p)) {
         if (!FSUtils.renameAndSetModifyTime(fs, p, newPath)) {
           LOG.warn("Unable to move  " + p + " to " + newPath);
@@ -1695,29 +1694,28 @@ public class WALSplitter {
     private static final double BUFFER_THRESHOLD = 0.35;
     private static final String KEY_DELIMITER = "#";
 
-    private long waitRegionOnlineTimeOut;
+    private final long waitRegionOnlineTimeOut;
     private final Set<String> recoveredRegions = Collections.synchronizedSet(new HashSet<String>());
-    private final Map<String, RegionServerWriter> writers =
-        new ConcurrentHashMap<String, RegionServerWriter>();
+    private final Map<String, RegionServerWriter> writers = new ConcurrentHashMap<>();
     // online encoded region name -> region location map
     private final Map<String, HRegionLocation> onlineRegions =
         new ConcurrentHashMap<String, HRegionLocation>();
 
-    private Map<TableName, HConnection> tableNameToHConnectionMap = Collections
-        .synchronizedMap(new TreeMap<TableName, HConnection>());
+    private final Map<TableName, ClusterConnection> tableNameToHConnectionMap = Collections
+        .synchronizedMap(new TreeMap<TableName, ClusterConnection>());
     /**
      * Map key -> value layout
      * {@literal <servername>:<table name> -> Queue<Row>}
      */
-    private Map<String, List<Pair<HRegionLocation, Entry>>> serverToBufferQueueMap =
-        new ConcurrentHashMap<String, List<Pair<HRegionLocation, Entry>>>();
-    private List<Throwable> thrown = new ArrayList<Throwable>();
+    private final Map<String, List<Pair<HRegionLocation, Entry>>> serverToBufferQueueMap =
+        new ConcurrentHashMap<>();
+    private final List<Throwable> thrown = new ArrayList<>();
 
     // The following sink is used in distrubitedLogReplay mode for entries of regions in a disabling
     // table. It's a limitation of distributedLogReplay. Because log replay needs a region is
     // assigned and online before it can replay wal edits while regions of disabling/disabled table
     // won't be assigned by AM. We can retire this code after HBASE-8234.
-    private LogRecoveredEditsOutputSink logRecoveredEditsOutputSink;
+    private final LogRecoveredEditsOutputSink logRecoveredEditsOutputSink;
     private boolean hasEditsInDisablingOrDisabledTables = false;
 
     public LogReplayOutputSink(PipelineController controller, EntryBuffers entryBuffers,
@@ -1810,8 +1808,8 @@ public class WALSplitter {
         HRegionLocation loc = null;
         String locKey = null;
         List<Cell> cells = edit.getCells();
-        List<Cell> skippedCells = new ArrayList<Cell>();
-        HConnection hconn = this.getConnectionByTableName(table);
+        List<Cell> skippedCells = new ArrayList<>();
+        ClusterConnection cconn = this.getConnectionByTableName(table);
 
         for (Cell cell : cells) {
           byte[] row = CellUtil.cloneRow(cell);
@@ -1839,7 +1837,7 @@ public class WALSplitter {
 
           try {
             loc =
-                locateRegionAndRefreshLastFlushedSequenceId(hconn, table, row,
+                locateRegionAndRefreshLastFlushedSequenceId(cconn, table, row,
                   encodeRegionNameStr);
             // skip replaying the compaction if the region is gone
             if (isCompactionEntry && !encodeRegionNameStr.equalsIgnoreCase(
@@ -1913,13 +1911,13 @@ public class WALSplitter {
      * destination region is online for replay.
      * @throws IOException
      */
-    private HRegionLocation locateRegionAndRefreshLastFlushedSequenceId(HConnection hconn,
+    private HRegionLocation locateRegionAndRefreshLastFlushedSequenceId(ClusterConnection cconn,
         TableName table, byte[] row, String originalEncodedRegionName) throws IOException {
       // fetch location from cache
       HRegionLocation loc = onlineRegions.get(originalEncodedRegionName);
       if(loc != null) return loc;
       // fetch location from hbase:meta directly without using cache to avoid hit old dead server
-      loc = hconn.getRegionLocation(table, row, true);
+      loc = cconn.getRegionLocation(table, row, true);
       if (loc == null) {
         throw new IOException("Can't locate location for row:" + Bytes.toString(row)
             + " of table:" + table);
@@ -1932,7 +1930,7 @@ public class WALSplitter {
         if (tmpLoc != null) return tmpLoc;
       }
 
-      Long lastFlushedSequenceId = -1l;
+      Long lastFlushedSequenceId = -1L;
       AtomicBoolean isRecovering = new AtomicBoolean(true);
       loc = waitUntilRegionOnline(loc, row, this.waitRegionOnlineTimeOut, isRecovering);
       if (!isRecovering.get()) {
@@ -2011,11 +2009,11 @@ public class WALSplitter {
       while (endTime > EnvironmentEdgeManager.currentTime()) {
         try {
           // Try and get regioninfo from the hosting server.
-          HConnection hconn = getConnectionByTableName(tableName);
+          ClusterConnection cconn = getConnectionByTableName(tableName);
           if(reloadLocation) {
-            loc = hconn.getRegionLocation(tableName, row, true);
+            loc = cconn.getRegionLocation(tableName, row, true);
           }
-          BlockingInterface remoteSvr = hconn.getAdmin(loc.getServerName());
+          BlockingInterface remoteSvr = cconn.getAdmin(loc.getServerName());
           HRegionInfo region = loc.getRegionInfo();
           try {
             GetRegionInfoRequest request =
@@ -2147,12 +2145,12 @@ public class WALSplitter {
 
           // close connections
           synchronized (this.tableNameToHConnectionMap) {
-            for (Map.Entry<TableName,HConnection> entry :
+            for (Map.Entry<TableName, ClusterConnection> entry :
                     this.tableNameToHConnectionMap.entrySet()) {
-              HConnection hconn = entry.getValue();
+              ClusterConnection cconn = entry.getValue();
               try {
-                hconn.clearRegionCache();
-                hconn.close();
+                cconn.clearRegionCache();
+                cconn.close();
               } catch (IOException ioe) {
                 result.add(ioe);
               }
@@ -2166,7 +2164,7 @@ public class WALSplitter {
 
     @Override
     public Map<byte[], Long> getOutputCounts() {
-      TreeMap<byte[], Long> ret = new TreeMap<byte[], Long>(Bytes.BYTES_COMPARATOR);
+      TreeMap<byte[], Long> ret = new TreeMap<>(Bytes.BYTES_COMPARATOR);
       synchronized (writers) {
         for (Map.Entry<String, RegionServerWriter> entry : writers.entrySet()) {
           ret.put(Bytes.toBytes(entry.getKey()), entry.getValue().editsWritten);
@@ -2216,7 +2214,7 @@ public class WALSplitter {
         throw new IOException("Invalid location string:" + loc + " found. Replay aborted.");
       }
 
-      HConnection hconn = getConnectionByTableName(tableName);
+      ClusterConnection hconn = getConnectionByTableName(tableName);
       synchronized (writers) {
         ret = writers.get(loc);
         if (ret == null) {
@@ -2227,18 +2225,18 @@ public class WALSplitter {
       return ret;
     }
 
-    private HConnection getConnectionByTableName(final TableName tableName) throws IOException {
-      HConnection hconn = this.tableNameToHConnectionMap.get(tableName);
-      if (hconn == null) {
+    private ClusterConnection getConnectionByTableName(final TableName tableName) throws IOException {
+      ClusterConnection cconn = this.tableNameToHConnectionMap.get(tableName);
+      if (cconn == null) {
         synchronized (this.tableNameToHConnectionMap) {
-          hconn = this.tableNameToHConnectionMap.get(tableName);
-          if (hconn == null) {
-            hconn = (HConnection) ConnectionFactory.createConnection(conf);
-            this.tableNameToHConnectionMap.put(tableName, hconn);
+          cconn = this.tableNameToHConnectionMap.get(tableName);
+          if (cconn == null) {
+            cconn = (ClusterConnection) ConnectionFactory.createConnection(conf);
+            this.tableNameToHConnectionMap.put(tableName, cconn);
           }
         }
       }
-      return hconn;
+      return cconn;
     }
     private TableName getTableFromLocationStr(String loc) {
       /**
@@ -2259,7 +2257,7 @@ public class WALSplitter {
   private final static class RegionServerWriter extends SinkWriter {
     final WALEditsReplaySink sink;
 
-    RegionServerWriter(final Configuration conf, final TableName tableName, final HConnection conn)
+    RegionServerWriter(final Configuration conf, final TableName tableName, final ClusterConnection conn)
         throws IOException {
       this.sink = new WALEditsReplaySink(conf, tableName, conn);
     }

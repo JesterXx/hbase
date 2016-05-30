@@ -468,7 +468,7 @@ public class HMobStore extends HStore {
     // If it's major compaction, try to find whether there's a sweeper is running
     // If yes, mark the major compaction as retainDeleteMarkers
     if (compaction.getRequest().isAllFiles()) {
-      // Use the Zookeeper to coordinate.
+      // Use the ZooKeeper to coordinate.
       // 1. Acquire a operation lock.
       //   1.1. If no, mark the major compaction as retainDeleteMarkers and continue the compaction.
       //   1.2. If the lock is obtained, search the node of sweeping.
@@ -518,6 +518,10 @@ public class HMobStore extends HStore {
   }
 
   @Override public void finalizeFlush() {
+  }
+
+  @Override public MemStore getMemStore() {
+    return null;
   }
 
   public void updateCellsCountCompactedToMob(long count) {

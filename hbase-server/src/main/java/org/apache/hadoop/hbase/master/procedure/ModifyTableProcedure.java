@@ -298,7 +298,7 @@ public class ModifyTableProcedure
     this.unmodifiedHTableDescriptor =
         env.getMasterServices().getTableDescriptors().get(getTableName());
 
-    if (env.getMasterServices().getAssignmentManager().getTableStateManager()
+    if (env.getMasterServices().getTableStateManager()
         .isTableState(getTableName(), TableState.State.ENABLED)) {
       // We only execute this procedure with table online if online schema change config is set.
       if (!MasterDDLOperationHelper.isOnlineSchemaChangeAllowed(env)) {
@@ -437,7 +437,7 @@ public class ModifyTableProcedure
    */
   private void reOpenAllRegionsIfTableIsOnline(final MasterProcedureEnv env) throws IOException {
     // This operation only run when the table is enabled.
-    if (!env.getMasterServices().getAssignmentManager().getTableStateManager()
+    if (!env.getMasterServices().getTableStateManager()
         .isTableState(getTableName(), TableState.State.ENABLED)) {
       return;
     }
@@ -477,10 +477,10 @@ public class ModifyTableProcedure
         public Void run() throws Exception {
           switch (state) {
           case MODIFY_TABLE_PRE_OPERATION:
-            cpHost.preModifyTableHandler(getTableName(), modifiedHTableDescriptor);
+            cpHost.preModifyTableAction(getTableName(), modifiedHTableDescriptor);
             break;
           case MODIFY_TABLE_POST_OPERATION:
-            cpHost.postModifyTableHandler(getTableName(), modifiedHTableDescriptor);
+            cpHost.postCompletedModifyTableAction(getTableName(), modifiedHTableDescriptor);
             break;
           default:
             throw new UnsupportedOperationException(this + " unhandled state=" + state);

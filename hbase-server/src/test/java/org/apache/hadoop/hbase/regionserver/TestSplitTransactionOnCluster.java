@@ -31,6 +31,7 @@ import java.io.InterruptedIOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -148,29 +149,12 @@ public class TestSplitTransactionOnCluster {
     this.admin.close();
   }
 
-  private HRegionInfo getAndCheckSingleTableRegion(final List<HRegion> regions) {
+  private HRegionInfo getAndCheckSingleTableRegion(final List<HRegion> regions)
+      throws IOException, InterruptedException {
     assertEquals(1, regions.size());
     HRegionInfo hri = regions.get(0).getRegionInfo();
-    return waitOnRIT(hri);
-  }
-
-  /**
-   * Often region has not yet fully opened.  If we try to use it -- do a move for instance -- it
-   * will fail silently if the region is not yet opened.
-   * @param hri Region to check if in Regions In Transition... wait until out of transition before
-   * returning
-   * @return Passed in <code>hri</code>
-   */
-  private HRegionInfo waitOnRIT(final HRegionInfo hri) {
-    // Close worked but we are going to open the region elsewhere.  Before going on, make sure
-    // this completes.
-    while (TESTING_UTIL.getHBaseCluster().getMaster().getAssignmentManager().
-        getRegionStates().isRegionInTransition(hri)) {
-      LOG.info("Waiting on region in transition: " +
-        TESTING_UTIL.getHBaseCluster().getMaster().getAssignmentManager().getRegionStates().
-          getRegionTransitionState(hri));
-      Threads.sleep(10);
-    }
+    TESTING_UTIL.getMiniHBaseCluster().getMaster().getAssignmentManager()
+      .waitOnRegionToClearRegionsInTransition(hri, 600000);
     return hri;
   }
 
@@ -209,14 +193,7 @@ public class TestSplitTransactionOnCluster {
       observer.latch.await();
 
       LOG.info("Waiting for region to come out of RIT");
-      TESTING_UTIL.waitFor(60000, 1000, new Waiter.Predicate<Exception>() {
-        @Override
-        public boolean evaluate() throws Exception {
-          RegionStates regionStates = cluster.getMaster().getAssignmentManager().getRegionStates();
-          Map<String, RegionState> rit = regionStates.getRegionsInTransition();
-          return !rit.containsKey(hri.getEncodedName());
-        }
-      });
+      cluster.getMaster().getAssignmentManager().waitOnRegionToClearRegionsInTransition(hri, 60000);
     } finally {
       admin.setBalancerRunning(true, false);
       cluster.getMaster().setCatalogJanitorEnabled(true);
@@ -657,7 +634,7 @@ public class TestSplitTransactionOnCluster {
       tableExists = MetaTableAccessor.tableExists(regionServer.getConnection(),
         tableName);
       assertEquals("The specified table should present.", true, tableExists);
-      Map<String, RegionState> rit = cluster.getMaster().getAssignmentManager().getRegionStates()
+      Set<RegionState> rit = cluster.getMaster().getAssignmentManager().getRegionStates()
           .getRegionsInTransition();
       assertTrue(rit.size() == 3);
       cluster.getMaster().getAssignmentManager().regionOffline(st.getFirstDaughter());
@@ -1311,7 +1288,7 @@ public class TestSplitTransactionOnCluster {
       if (enabled.get() && req.getTransition(0).getTransitionCode().equals(
           TransitionCode.READY_TO_SPLIT) && !resp.hasErrorMessage()) {
         RegionStates regionStates = myMaster.getAssignmentManager().getRegionStates();
-        for (RegionState regionState: regionStates.getRegionsInTransition().values()) {
+        for (RegionState regionState: regionStates.getRegionsInTransition()) {
           // Find the merging_new region and remove it
           if (regionState.isSplittingNew()) {
             regionStates.deleteRegion(regionState.getRegion());

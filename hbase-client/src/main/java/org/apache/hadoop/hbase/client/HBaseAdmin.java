@@ -18,6 +18,10 @@
  */
 package org.apache.hadoop.hbase.client;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.ServiceException;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -53,6 +57,7 @@ import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.NotServingRegionException;
 import org.apache.hadoop.hbase.ProcedureInfo;
+import org.apache.hadoop.hbase.ProcedureUtil;
 import org.apache.hadoop.hbase.RegionLocations;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableExistsException;
@@ -73,6 +78,7 @@ import org.apache.hadoop.hbase.ipc.RegionServerCoprocessorRpcChannel;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.RequestConverter;
+import org.apache.hadoop.hbase.protobuf.generated.AdminProtos;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.AdminService;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.CloseRegionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.CloseRegionResponse;
@@ -80,7 +86,6 @@ import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.CompactRegionReque
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.FlushRegionRequest;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoRequest;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoResponse;
-import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.GetRegionInfoResponse.CompactionState;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.RollWALWriterRequest;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.RollWALWriterResponse;
 import org.apache.hadoop.hbase.protobuf.generated.AdminProtos.StopServerRequest;
@@ -89,7 +94,6 @@ import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.NameStringPair;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.ProcedureDescription;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.RegionSpecifier.RegionSpecifierType;
-import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.TableSchema;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProtos.AbortProcedureRequest;
@@ -176,10 +180,6 @@ import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.zookeeper.KeeperException;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.ServiceException;
-
 /**
  * HBaseAdmin is no longer a client API. It is marked InterfaceAudience.Private indicating that
  * this is an HBase-internal class as defined in
@@ -215,6 +215,7 @@ public class HBaseAdmin implements Admin {
   private final int syncWaitTimeout;
   private boolean aborted;
   private int operationTimeout;
+  private int rpcTimeout;
 
   private RpcRetryingCallerFactory rpcCallerFactory;
   private RpcControllerFactory rpcControllerFactory;
@@ -239,6 +240,8 @@ public class HBaseAdmin implements Admin {
         "hbase.client.retries.longer.multiplier", 10);
     this.operationTimeout = this.conf.getInt(HConstants.HBASE_CLIENT_OPERATION_TIMEOUT,
         HConstants.DEFAULT_HBASE_CLIENT_OPERATION_TIMEOUT);
+    this.rpcTimeout = this.conf.getInt(HConstants.HBASE_RPC_TIMEOUT_KEY,
+        HConstants.DEFAULT_HBASE_RPC_TIMEOUT);
     this.syncWaitTimeout = this.conf.getInt(
       "hbase.client.sync.wait.timeout.msec", 10 * 60000); // 10min
 
@@ -310,9 +313,9 @@ public class HBaseAdmin implements Admin {
     }
   }
 
-  /** @return HConnection used by this object. */
+  /** @return Connection used by this object. */
   @Override
-  public HConnection getConnection() {
+  public Connection getConnection() {
     return connection;
   }
 
@@ -401,13 +404,13 @@ public class HBaseAdmin implements Admin {
 
   @Override
   public HTableDescriptor getTableDescriptor(final TableName tableName) throws IOException {
-     return getTableDescriptor(tableName, getConnection(), rpcCallerFactory, rpcControllerFactory,
-       operationTimeout);
+    return getTableDescriptor(tableName, getConnection(), rpcCallerFactory, rpcControllerFactory,
+       operationTimeout, rpcTimeout);
   }
 
-  static HTableDescriptor getTableDescriptor(final TableName tableName, HConnection connection,
+  static HTableDescriptor getTableDescriptor(final TableName tableName, Connection connection,
       RpcRetryingCallerFactory rpcCallerFactory, final RpcControllerFactory rpcControllerFactory,
-      int operationTimeout) throws IOException {
+      int operationTimeout, int rpcTimeout) throws IOException {
       if (tableName == null) return null;
       HTableDescriptor htd = executeCallable(new MasterCallable<HTableDescriptor>(connection) {
         @Override
@@ -424,7 +427,7 @@ public class HBaseAdmin implements Admin {
           }
           return null;
         }
-      }, rpcCallerFactory, operationTimeout);
+      }, rpcCallerFactory, operationTimeout, rpcTimeout);
       if (htd != null) {
         return htd;
       }
@@ -585,7 +588,7 @@ public class HBaseAdmin implements Admin {
     protected Void postOperationResult(final Void result, final long deadlineTs)
         throws IOException, TimeoutException {
       // Delete cached information to prevent clients from using old locations
-      getAdmin().getConnection().clearRegionCache(getTableName());
+      ((ClusterConnection) getAdmin().getConnection()).clearRegionCache(getTableName());
       return super.postOperationResult(result, deadlineTs);
     }
   }
@@ -840,7 +843,7 @@ public class HBaseAdmin implements Admin {
 
   @Override
   public boolean isTableAvailable(TableName tableName) throws IOException {
-    return connection.isTableAvailable(tableName);
+    return connection.isTableAvailable(tableName, null);
   }
 
   @Override
@@ -1698,7 +1701,7 @@ public class HBaseAdmin implements Admin {
    * @param regionName Name of a region.
    * @return a pair of HRegionInfo and ServerName if <code>regionName</code> is
    *  a verified region name (we call {@link
-   *  MetaTableAccessor#getRegionLocation(HConnection, byte[])}
+   *  MetaTableAccessor#getRegionLocation(Connection, byte[])}
    *  else null.
    * Throw IllegalArgumentException if <code>regionName</code> is null.
    * @throws IOException
@@ -1845,7 +1848,7 @@ public class HBaseAdmin implements Admin {
         PayloadCarryingRpcController controller = rpcControllerFactory.newController();
         controller.setCallTimeout(callTimeout);
         GetClusterStatusRequest req = RequestConverter.buildGetClusterStatusRequest();
-        return ClusterStatus.convert(master.getClusterStatus(controller, req).getClusterStatus());
+        return ProtobufUtil.convert(master.getClusterStatus(controller, req).getClusterStatus());
       }
     });
   }
@@ -2011,7 +2014,7 @@ public class HBaseAdmin implements Admin {
               controller, ListProceduresRequest.newBuilder().build()).getProcedureList();
             ProcedureInfo[] procInfoList = new ProcedureInfo[procList.size()];
             for (int i = 0; i < procList.size(); i++) {
-              procInfoList[i] = ProcedureInfo.convert(procList.get(i));
+              procInfoList[i] = ProcedureUtil.convert(procList.get(i));
             }
             return procInfoList;
           }
@@ -2262,7 +2265,10 @@ public class HBaseAdmin implements Admin {
       PayloadCarryingRpcController controller = rpcControllerFactory.newController();
       // TODO: this does not do retries, it should. Set priority and timeout in controller
       GetRegionInfoResponse response = admin.getRegionInfo(controller, request);
-      return response.getCompactionState();
+      if (response.getCompactionState() != null) {
+        return ProtobufUtil.createCompactionState(response.getCompactionState());
+      }
+      return null;
     } catch (ServiceException se) {
       throw ProtobufUtil.getRemoteException(se);
     }
@@ -2272,33 +2278,30 @@ public class HBaseAdmin implements Admin {
   public void snapshot(final String snapshotName,
                        final TableName tableName) throws IOException,
       SnapshotCreationException, IllegalArgumentException {
-    snapshot(snapshotName, tableName, SnapshotDescription.Type.FLUSH);
+    snapshot(snapshotName, tableName, SnapshotType.FLUSH);
   }
 
   @Override
   public void snapshot(final byte[] snapshotName, final TableName tableName)
       throws IOException, SnapshotCreationException, IllegalArgumentException {
-    snapshot(Bytes.toString(snapshotName), tableName, SnapshotDescription.Type.FLUSH);
+    snapshot(Bytes.toString(snapshotName), tableName, SnapshotType.FLUSH);
   }
 
   @Override
   public void snapshot(final String snapshotName, final TableName tableName,
-      SnapshotDescription.Type type)
+      SnapshotType type)
       throws IOException, SnapshotCreationException, IllegalArgumentException {
-    SnapshotDescription.Builder builder = SnapshotDescription.newBuilder();
-    builder.setTable(tableName.getNameAsString());
-    builder.setName(snapshotName);
-    builder.setType(type);
-    snapshot(builder.build());
+    snapshot(new SnapshotDescription(snapshotName, tableName.getNameAsString(), type));
   }
 
   @Override
-  public void snapshot(SnapshotDescription snapshot) throws IOException, SnapshotCreationException,
-      IllegalArgumentException {
+  public void snapshot(SnapshotDescription snapshotDesc)
+      throws IOException, SnapshotCreationException, IllegalArgumentException {
     // actually take the snapshot
-    SnapshotResponse response = takeSnapshotAsync(snapshot);
-    final IsSnapshotDoneRequest request = IsSnapshotDoneRequest.newBuilder().setSnapshot(snapshot)
-        .build();
+    HBaseProtos.SnapshotDescription snapshot = createHBaseProtosSnapshotDesc(snapshotDesc);
+    SnapshotResponse response = asyncSnapshot(snapshot);
+    final IsSnapshotDoneRequest request =
+        IsSnapshotDoneRequest.newBuilder().setSnapshot(snapshot).build();
     IsSnapshotDoneResponse done = null;
     long start = EnvironmentEdgeManager.currentTime();
     long max = response.getExpectedTimeout();
@@ -2331,13 +2334,42 @@ public class HBaseAdmin implements Admin {
     }
     if (!done.getDone()) {
       throw new SnapshotCreationException("Snapshot '" + snapshot.getName()
-          + "' wasn't completed in expectedTime:" + max + " ms", snapshot);
+          + "' wasn't completed in expectedTime:" + max + " ms", snapshotDesc);
     }
   }
 
   @Override
-  public SnapshotResponse takeSnapshotAsync(SnapshotDescription snapshot) throws IOException,
+  public void takeSnapshotAsync(SnapshotDescription snapshotDesc) throws IOException,
       SnapshotCreationException {
+    HBaseProtos.SnapshotDescription snapshot = createHBaseProtosSnapshotDesc(snapshotDesc);
+    asyncSnapshot(snapshot);
+  }
+
+  private HBaseProtos.SnapshotDescription
+      createHBaseProtosSnapshotDesc(SnapshotDescription snapshotDesc) {
+    HBaseProtos.SnapshotDescription.Builder builder = HBaseProtos.SnapshotDescription.newBuilder();
+    if (snapshotDesc.getTable() != null) {
+      builder.setTable(snapshotDesc.getTable());
+    }
+    if (snapshotDesc.getName() != null) {
+      builder.setName(snapshotDesc.getName());
+    }
+    if (snapshotDesc.getOwner() != null) {
+      builder.setOwner(snapshotDesc.getOwner());
+    }
+    if (snapshotDesc.getCreationTime() != -1) {
+      builder.setCreationTime(snapshotDesc.getCreationTime());
+    }
+    if (snapshotDesc.getVersion() != -1) {
+      builder.setVersion(snapshotDesc.getVersion());
+    }
+    builder.setType(ProtobufUtil.createProtosSnapShotDescType(snapshotDesc.getType()));
+    HBaseProtos.SnapshotDescription snapshot = builder.build();
+    return snapshot;
+  }
+
+  private SnapshotResponse asyncSnapshot(HBaseProtos.SnapshotDescription snapshot)
+      throws IOException {
     ClientSnapshotDescriptionUtils.assertSnapshotRequestIsValid(snapshot);
     final SnapshotRequest request = SnapshotRequest.newBuilder().setSnapshot(snapshot)
         .build();
@@ -2353,9 +2385,9 @@ public class HBaseAdmin implements Admin {
   }
 
   @Override
-  public boolean isSnapshotFinished(final SnapshotDescription snapshot)
+  public boolean isSnapshotFinished(final SnapshotDescription snapshotDesc)
       throws IOException, HBaseSnapshotException, UnknownSnapshotException {
-
+    final HBaseProtos.SnapshotDescription snapshot = createHBaseProtosSnapshotDesc(snapshotDesc);
     return executeCallable(new MasterCallable<IsSnapshotDoneResponse>(getConnection()) {
       @Override
       public IsSnapshotDoneResponse call(int callTimeout) throws ServiceException {
@@ -2640,7 +2672,7 @@ public class HBaseAdmin implements Admin {
   private Future<Void> internalRestoreSnapshotAsync(
       final String snapshotName,
       final TableName tableName) throws IOException, RestoreSnapshotException {
-    final SnapshotDescription snapshot = SnapshotDescription.newBuilder()
+    final HBaseProtos.SnapshotDescription snapshot = HBaseProtos.SnapshotDescription.newBuilder()
         .setName(snapshotName).setTable(tableName.getNameAsString()).build();
 
     // actually restore the snapshot
@@ -2668,7 +2700,7 @@ public class HBaseAdmin implements Admin {
   private static class RestoreSnapshotFuture extends TableFuture<Void> {
     public RestoreSnapshotFuture(
         final HBaseAdmin admin,
-        final SnapshotDescription snapshot,
+        final HBaseProtos.SnapshotDescription snapshot,
         final TableName tableName,
         final RestoreSnapshotResponse response) {
       super(admin, tableName,
@@ -2699,8 +2731,16 @@ public class HBaseAdmin implements Admin {
       public List<SnapshotDescription> call(int callTimeout) throws ServiceException {
         PayloadCarryingRpcController controller = rpcControllerFactory.newController();
         controller.setCallTimeout(callTimeout);
-        return master.getCompletedSnapshots(controller,
-          GetCompletedSnapshotsRequest.newBuilder().build()).getSnapshotsList();
+        List<HBaseProtos.SnapshotDescription> snapshotsList = master
+            .getCompletedSnapshots(controller, GetCompletedSnapshotsRequest.newBuilder().build())
+            .getSnapshotsList();
+        List<SnapshotDescription> result = new ArrayList<SnapshotDescription>(snapshotsList.size());
+        for (HBaseProtos.SnapshotDescription snapshot : snapshotsList) {
+          result.add(new SnapshotDescription(snapshot.getName(), snapshot.getTable(),
+              ProtobufUtil.createSnapshotType(snapshot.getType()), snapshot.getOwner(),
+              snapshot.getCreationTime(), snapshot.getVersion()));
+        }
+        return result;
       }
     });
   }
@@ -2762,7 +2802,9 @@ public class HBaseAdmin implements Admin {
         controller.setCallTimeout(callTimeout);
         master.deleteSnapshot(controller,
           DeleteSnapshotRequest.newBuilder().
-            setSnapshot(SnapshotDescription.newBuilder().setName(snapshotName).build()).build()
+              setSnapshot(
+                HBaseProtos.SnapshotDescription.newBuilder().setName(snapshotName).build())
+              .build()
         );
         return null;
       }
@@ -2795,7 +2837,7 @@ public class HBaseAdmin implements Admin {
         PayloadCarryingRpcController controller = rpcControllerFactory.newController();
         controller.setCallTimeout(callTimeout);
         this.master.deleteSnapshot(controller, DeleteSnapshotRequest.newBuilder()
-          .setSnapshot(snapshot).build());
+          .setSnapshot(createHBaseProtosSnapshotDesc(snapshot)).build());
         return null;
       }
     });
@@ -2841,12 +2883,13 @@ public class HBaseAdmin implements Admin {
 
   private <C extends RetryingCallable<V> & Closeable, V> V executeCallable(C callable)
       throws IOException {
-    return executeCallable(callable, rpcCallerFactory, operationTimeout);
+    return executeCallable(callable, rpcCallerFactory, operationTimeout, rpcTimeout);
   }
 
-  private static <C extends RetryingCallable<V> & Closeable, V> V executeCallable(C callable,
-             RpcRetryingCallerFactory rpcCallerFactory, int operationTimeout) throws IOException {
-    RpcRetryingCaller<V> caller = rpcCallerFactory.newCaller();
+  static private <C extends RetryingCallable<V> & Closeable, V> V executeCallable(C callable,
+             RpcRetryingCallerFactory rpcCallerFactory, int operationTimeout,
+      int rpcTimeout) throws IOException {
+    RpcRetryingCaller<V> caller = rpcCallerFactory.newCaller(rpcTimeout);
     try {
       return caller.callWithRetries(callable, operationTimeout);
     } finally {
@@ -2998,7 +3041,8 @@ public class HBaseAdmin implements Admin {
   @Override
   public CompactionState getCompactionState(TableName tableName,
     CompactType compactType) throws IOException {
-    CompactionState state = CompactionState.NONE;
+    AdminProtos.GetRegionInfoResponse.CompactionState state =
+        AdminProtos.GetRegionInfoResponse.CompactionState.NONE;
     checkTableExists(tableName);
     PayloadCarryingRpcController controller = rpcControllerFactory.newController();
     switch (compactType) {
@@ -3040,16 +3084,16 @@ public class HBaseAdmin implements Admin {
                 case MAJOR_AND_MINOR:
                   return CompactionState.MAJOR_AND_MINOR;
                 case MAJOR:
-                  if (state == CompactionState.MINOR) {
+                  if (state == AdminProtos.GetRegionInfoResponse.CompactionState.MINOR) {
                     return CompactionState.MAJOR_AND_MINOR;
                   }
-                  state = CompactionState.MAJOR;
+                  state = AdminProtos.GetRegionInfoResponse.CompactionState.MAJOR;
                   break;
                 case MINOR:
-                  if (state == CompactionState.MAJOR) {
+                  if (state == AdminProtos.GetRegionInfoResponse.CompactionState.MAJOR) {
                     return CompactionState.MAJOR_AND_MINOR;
                   }
-                  state = CompactionState.MINOR;
+                  state = AdminProtos.GetRegionInfoResponse.CompactionState.MINOR;
                   break;
                 case NONE:
                 default: // nothing, continue
@@ -3080,7 +3124,10 @@ public class HBaseAdmin implements Admin {
         }
         break;
     }
-    return state;
+    if(state != null) {
+      return ProtobufUtil.createCompactionState(state);
+    }
+    return null;
   }
 
   /**

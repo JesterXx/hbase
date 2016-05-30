@@ -85,7 +85,6 @@ import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.ipc.CoprocessorRpcChannel;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
-import org.apache.hadoop.hbase.protobuf.generated.AdminProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutationProto;
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutationProto.MutationType;
 import org.apache.hadoop.hbase.protobuf.generated.MultiRowMutationProtos.MultiRowMutationService;
@@ -278,7 +277,7 @@ public class TestFromClientSide {
        @Override
        public boolean evaluate() throws IOException {
          return TEST_UTIL.getHBaseAdmin().getCompactionState(TABLENAME) ==
-             AdminProtos.GetRegionInfoResponse.CompactionState.NONE;
+             CompactionState.NONE;
        }
      });
 
@@ -4037,7 +4036,7 @@ public class TestFromClientSide {
 
   /**
    * simple test that just executes parts of the client
-   * API that accept a pre-created HConnection instance
+   * API that accept a pre-created Connection instance
    *
    * @throws IOException
    */
@@ -5430,7 +5429,7 @@ public class TestFromClientSide {
       table.put(put);
     }
 
-    // nomal scan
+    // normal scan
     ResultScanner scanner = table.getScanner(new Scan());
     int count = 0;
     for (Result r : scanner) {

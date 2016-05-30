@@ -31,6 +31,8 @@ public class CallQueueTooBigException extends IOException {
     super();
   }
 
+  // Absence of this constructor prevents proper unwrapping of
+  // remote exception on the client side
   public CallQueueTooBigException(String message) {
     super(message);
   }

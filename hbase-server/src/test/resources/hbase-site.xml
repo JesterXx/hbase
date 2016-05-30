@@ -52,7 +52,7 @@
   </property>
   <property>
     <name>hbase.regionserver.metahandler.count</name>
-    <value>5</value>
+    <value>6</value>
   </property>
   <property>
       <name>hbase.ipc.server.read.threadpool.size</name>
@@ -161,10 +161,6 @@
     <description>
       Enable replay sanity checks on procedure tests.
     </description>
-  </property>
-  <property>
-    <name>hbase.hconnection.meta.lookup.threads.core</name>
-    <value>4</value>
   </property>
   <property>
     <name>hbase.hconnection.threads.keepalivetime</name>

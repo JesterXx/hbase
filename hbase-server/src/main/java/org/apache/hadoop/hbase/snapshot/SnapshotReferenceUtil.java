@@ -40,6 +40,7 @@ import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.mob.MobUtils;
+import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.protobuf.generated.SnapshotProtos.SnapshotRegionManifest;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
@@ -168,7 +169,7 @@ public final class SnapshotReferenceUtil {
       final SnapshotManifest manifest) throws IOException {
     final SnapshotDescription snapshotDesc = manifest.getSnapshotDescription();
     final Path snapshotDir = manifest.getSnapshotDir();
-    concurrentVisitReferencedFiles(conf, fs, manifest, new StoreFileVisitor() {
+    concurrentVisitReferencedFiles(conf, fs, manifest, "VerifySnapshot", new StoreFileVisitor() {
       @Override
       public void storeFile(final HRegionInfo regionInfo, final String family,
           final SnapshotRegionManifest.StoreFile storeFile) throws IOException {
@@ -178,7 +179,28 @@ public final class SnapshotReferenceUtil {
   }
 
   public static void concurrentVisitReferencedFiles(final Configuration conf, final FileSystem fs,
-      final SnapshotManifest manifest, final StoreFileVisitor visitor) throws IOException {
+      final SnapshotManifest manifest, final String desc, final StoreFileVisitor visitor)
+      throws IOException {
+
+    final Path snapshotDir = manifest.getSnapshotDir();
+    List<SnapshotRegionManifest> regionManifests = manifest.getRegionManifests();
+    if (regionManifests == null || regionManifests.size() == 0) {
+      LOG.debug("No manifest files present: " + snapshotDir);
+      return;
+    }
+
+    ExecutorService exec = SnapshotManifest.createExecutor(conf, desc);
+
+    try {
+      concurrentVisitReferencedFiles(conf, fs, manifest, exec, visitor);
+    } finally {
+      exec.shutdown();
+    }
+  }
+
+  public static void concurrentVisitReferencedFiles(final Configuration conf, final FileSystem fs,
+      final SnapshotManifest manifest, final ExecutorService exec, final StoreFileVisitor visitor)
+      throws IOException {
     final SnapshotDescription snapshotDesc = manifest.getSnapshotDescription();
     final Path snapshotDir = manifest.getSnapshotDir();
 
@@ -188,36 +210,32 @@ public final class SnapshotReferenceUtil {
       return;
     }
 
-    ExecutorService exec = SnapshotManifest.createExecutor(conf, "VerifySnapshot");
     final ExecutorCompletionService<Void> completionService =
       new ExecutorCompletionService<Void>(exec);
+
+    for (final SnapshotRegionManifest regionManifest : regionManifests) {
+      completionService.submit(new Callable<Void>() {
+        @Override public Void call() throws IOException {
+          visitRegionStoreFiles(regionManifest, visitor);
+          return null;
+        }
+      });
+    }
     try {
-      for (final SnapshotRegionManifest regionManifest: regionManifests) {
-        completionService.submit(new Callable<Void>() {
-          @Override
-          public Void call() throws IOException {
-            visitRegionStoreFiles(regionManifest, visitor);
-            return null;
-          }
-        });
+      for (int i = 0; i < regionManifests.size(); ++i) {
+        completionService.take().get();
       }
-      try {
-        for (int i = 0; i < regionManifests.size(); ++i) {
-          completionService.take().get();
-        }
-      } catch (InterruptedException e) {
-        throw new InterruptedIOException(e.getMessage());
-      } catch (ExecutionException e) {
-        if (e.getCause() instanceof CorruptedSnapshotException) {
-          throw new CorruptedSnapshotException(e.getCause().getMessage(), snapshotDesc);
-        } else {
-          IOException ex = new IOException();
-          ex.initCause(e.getCause());
-          throw ex;
-        }
+    } catch (InterruptedException e) {
+      throw new InterruptedIOException(e.getMessage());
+    } catch (ExecutionException e) {
+      if (e.getCause() instanceof CorruptedSnapshotException) {
+        throw new CorruptedSnapshotException(e.getCause().getMessage(),
+            ProtobufUtil.createSnapshotDesc(snapshotDesc));
+      } else {
+        IOException ex = new IOException();
+        ex.initCause(e.getCause());
+        throw ex;
       }
-    } finally {
-      exec.shutdown();
     }
   }
 
@@ -248,8 +266,9 @@ public final class SnapshotReferenceUtil {
       String refRegion = refPath.getParent().getParent().getName();
       refPath = HFileLink.createPath(table, refRegion, family, refPath.getName());
       if (!HFileLink.buildFromHFileLinkPattern(conf, refPath).exists(fs)) {
-        throw new CorruptedSnapshotException("Missing parent hfile for: " + fileName +
-          " path=" + refPath, snapshot);
+        throw new CorruptedSnapshotException(
+            "Missing parent hfile for: " + fileName + " path=" + refPath,
+            ProtobufUtil.createSnapshotDesc(snapshot));
       }
 
       if (storeFile.hasReference()) {
@@ -285,14 +304,16 @@ public final class SnapshotReferenceUtil {
         String msg = "hfile: " + fileName + " size does not match with the expected one. " +
           " found=" + fstat.getLen() + " expected=" + storeFile.getFileSize();
         LOG.error(msg);
-        throw new CorruptedSnapshotException(msg, snapshot);
+        throw new CorruptedSnapshotException(msg,
+          ProtobufUtil.createSnapshotDesc(snapshot));
       }
     } catch (FileNotFoundException e) {
       String msg = "Can't find hfile: " + fileName + " in the real (" +
           link.getOriginPath() + ") or archive (" + link.getArchivePath()
           + ") directory for the primary table.";
       LOG.error(msg);
-      throw new CorruptedSnapshotException(msg, snapshot);
+      throw new CorruptedSnapshotException(msg,
+        ProtobufUtil.createSnapshotDesc(snapshot));
     }
   }
 

@@ -41,6 +41,7 @@ import org.apache.hadoop.hbase.exceptions.DeserializationException;
 import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos;
 import org.apache.hadoop.hbase.replication.ReplicationPeer.PeerState;
 import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.zookeeper.ZKConfig;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil.ZKUtilOp;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
@@ -48,7 +49,7 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.KeeperException.NoNodeException;
 
 /**
- * This class provides an implementation of the ReplicationPeers interface using Zookeeper. The
+ * This class provides an implementation of the ReplicationPeers interface using ZooKeeper. The
  * peers znode contains a list of all peer replication clusters and the current replication state of
  * those clusters. It has one child peer znode for each peer cluster. The peer znode is named with
  * the cluster id provided by the user in the HBase shell. The value of the peer znode contains the
@@ -114,6 +115,14 @@ public class ReplicationPeersZKImpl extends ReplicationStateZKBase implements Re
 
       if(id.contains("-")){
         throw new IllegalArgumentException("Found invalid peer name:" + id);
+      }
+
+      if (peerConfig.getClusterKey() != null) {
+        try {
+          ZKConfig.validateClusterKey(peerConfig.getClusterKey());
+        } catch (IOException ioe) {
+          throw new IllegalArgumentException(ioe.getMessage());
+        }
       }
 
       checkQueuesDeleted(id);

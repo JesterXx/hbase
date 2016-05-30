@@ -160,7 +160,8 @@ public class StoreFile {
     Bytes.toBytes("BULKLOAD_TIMESTAMP");
 
   /**
-   * Map of the metadata entries in the corresponding HFile
+   * Map of the metadata entries in the corresponding HFile. Populated when Reader is opened
+   * after which it is not modified again.
    */
   private Map<byte[], byte[]> metadataMap;
 
@@ -240,6 +241,7 @@ public class StoreFile {
     this.fileInfo = other.fileInfo;
     this.cacheConf = other.cacheConf;
     this.cfBloomType = other.cfBloomType;
+    this.metadataMap = other.metadataMap;
   }
 
   /**
@@ -373,7 +375,7 @@ public class StoreFile {
     if (startPos != -1) {
       bulkLoadedHFile = true;
     }
-    return bulkLoadedHFile || metadataMap.containsKey(BULKLOAD_TIME_KEY);
+    return bulkLoadedHFile || (metadataMap != null && metadataMap.containsKey(BULKLOAD_TIME_KEY));
   }
 
   @VisibleForTesting
