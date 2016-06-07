@@ -441,7 +441,6 @@ class MetricsRegionServerWrapperImpl
     @Override
     synchronized public void run() {
       initBlockCache();
-      cacheStats = blockCache.getStats();
 
       HDFSBlocksDistribution hdfsBlocksDistribution =
           new HDFSBlocksDistribution();
