@@ -432,6 +432,7 @@ public class TestRegionServerMetrics {
 
       region.getTableDesc().getFamily(cf).setMobThreshold(100);
       // metrics are reset by the region initialization
+      ((HRegion) region).close();
       ((HRegion) region).initialize();
       region.compact(true);
       metricsRegionServer.getRegionServerWrapper().forceRecompute();
@@ -441,6 +442,7 @@ public class TestRegionServerMetrics {
       scanner = table.getScanner(scan);
       scanner.next(100);
       numScanNext++;  // this is an ugly construct
+      scanner.close();
       metricsRegionServer.getRegionServerWrapper().forceRecompute();
       assertCounter("mobScanCellsCount", 0);
 
@@ -452,6 +454,7 @@ public class TestRegionServerMetrics {
       }
       region.getTableDesc().getFamily(cf).setMobThreshold(0);
       // metrics are reset by the region initialization
+      ((HRegion) region).close();
       ((HRegion) region).initialize();
       region.compact(true);
       metricsRegionServer.getRegionServerWrapper().forceRecompute();
