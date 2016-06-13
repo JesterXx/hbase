@@ -5634,22 +5634,28 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         scanners.addAll(additionalScanners);
       }
 
-      for (Map.Entry<byte[], NavigableSet<byte[]>> entry : scan.getFamilyMap().entrySet()) {
-        Store store = stores.get(entry.getKey());
-        KeyValueScanner scanner;
-        try {
-          scanner = store.getScanner(scan, entry.getValue(), this.readPt);
-        } catch (FileNotFoundException e) {
-          throw handleFileNotFound(e);
+      try {
+        for (Map.Entry<byte[], NavigableSet<byte[]>> entry : scan.getFamilyMap().entrySet()) {
+          Store store = stores.get(entry.getKey());
+          KeyValueScanner scanner;
+          try {
+            scanner = store.getScanner(scan, entry.getValue(), this.readPt);
+          } catch (FileNotFoundException e) {
+            throw handleFileNotFound(e);
+          }
+          if (this.filter == null || !scan.doLoadColumnFamiliesOnDemand()
+            || this.filter.isFamilyEssential(entry.getKey())) {
+            scanners.add(scanner);
+          } else {
+            joinedScanners.add(scanner);
+          }
         }
-        if (this.filter == null || !scan.doLoadColumnFamiliesOnDemand()
-          || this.filter.isFamilyEssential(entry.getKey())) {
-          scanners.add(scanner);
-        } else {
-          joinedScanners.add(scanner);
-        }
+        initializeKVHeap(scanners, joinedScanners, region);
+      } catch (IOException e) {
+        // remove the readPt from scannerReadPoints
+        scannerReadPoints.remove(this);
+        throw e;
       }
-      initializeKVHeap(scanners, joinedScanners, region);
     }
 
     protected void initializeKVHeap(List<KeyValueScanner> scanners,
