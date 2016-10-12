@@ -498,7 +498,7 @@ public class TestMobCompactor {
         Result result = table.get(get);
         assertTrue(Arrays.equals(result.getValue(fam, qualifier), mobVal));
       } catch (IOException e) {
-        assertTrue("This should not happen", false);
+        assertTrue("The MOB file doesn't exist", false);
       }
     } finally {
       TEST_UTIL.deleteTable(hdt.getTableName());
