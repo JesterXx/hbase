@@ -19,6 +19,7 @@
 package org.apache.hadoop.hbase.mob.compactions;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.security.Key;
@@ -63,17 +64,23 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
+import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
+import org.apache.hadoop.hbase.coprocessor.ObserverContext;
+import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.io.crypto.KeyProviderForTesting;
 import org.apache.hadoop.hbase.io.crypto.aes.AES;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
+import org.apache.hadoop.hbase.master.cleaner.TimeToLiveHFileCleaner;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.regionserver.BloomType;
 import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileInfo;
+import org.apache.hadoop.hbase.regionserver.compactions.CompactionRequest;
 import org.apache.hadoop.hbase.security.EncryptionUtil;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
@@ -457,6 +464,103 @@ public class TestMobCompactor {
     assertEquals("After compaction: mob value", "new", Bytes.toString(CellUtil.cloneValue(cell)));
   }
 
+  /**
+   * This test case tries to test the following mob compaction and normal compaction scenario:
+   *   After mob compaction, the mob reference in new bulkloaded hfile will win even after it
+   *   is compacted with some other normal hfiles. This is to make sure that mvcc is included
+   *   after compaction for mob enabled store files.
+   * @throws Exception
+   */
+  @Test
+  public void testMobCompaction() throws Exception {
+    resetConf();
+    conf.setLong(TimeToLiveHFileCleaner.TTL_CONF_KEY, 0);
+    String famStr = "f1";
+    byte[] fam = Bytes.toBytes(famStr);
+    byte[] qualifier = Bytes.toBytes("q1");
+    byte[] mobVal = Bytes.toBytes("01234567890");
+    HTableDescriptor hdt = new HTableDescriptor(TableName.valueOf("testMobCompaction"));
+    hdt.addCoprocessor(CompactTwoLatestHfilesCopro.class.getName());
+    HColumnDescriptor hcd = new HColumnDescriptor(fam);
+    hcd.setMobEnabled(true);
+    hcd.setMobThreshold(10);
+    hcd.setMaxVersions(1);
+    hdt.addFamily(hcd);
+    try {
+      Table table = TEST_UTIL.createTable(hdt, null);
+      HRegion r = TEST_UTIL.getMiniHBaseCluster().getRegions(hdt.getTableName()).get(0);
+      Put p = new Put(Bytes.toBytes("r1"));
+      p.addColumn(fam, qualifier, mobVal);
+      table.put(p);
+      // Create mob file mob1 and reference file ref1
+      TEST_UTIL.flush(table.getName());
+      // Make sure that it is flushed.
+      FileSystem fs = r.getRegionFileSystem().getFileSystem();
+      Path path = r.getRegionFileSystem().getStoreDir(famStr);
+      waitUntilFilesShowup(fs, path, 1);
+
+      p = new Put(Bytes.toBytes("r2"));
+      p.addColumn(fam, qualifier, mobVal);
+      table.put(p);
+      // Create mob file mob2 and reference file ref2
+      TEST_UTIL.flush(table.getName());
+      waitUntilFilesShowup(fs, path, 2);
+      // Do mob compaction to create mob3 and ref3
+      TEST_UTIL.getAdmin().compact(hdt.getTableName(), fam, CompactType.MOB);
+      waitUntilFilesShowup(fs, path, 3);
+
+      // Compact ref3 and ref2 into ref4
+      TEST_UTIL.getAdmin().compact(hdt.getTableName(), fam);
+      waitUntilFilesShowup(fs, path, 2);
+
+      // Sleep for some time, since TimeToLiveHFileCleaner is 0, the next run of
+      // clean chore is guaranteed to clean up files in archive
+      Thread.sleep(100);
+      // Run cleaner to make sure that files in archive directory are cleaned up
+      TEST_UTIL.getMiniHBaseCluster().getMaster().getHFileCleaner().choreForTesting();
+
+      // Get "r2"
+      Get get = new Get(Bytes.toBytes("r2"));
+      try {
+        Result result = table.get(get);
+        assertTrue(Arrays.equals(result.getValue(fam, qualifier), mobVal));
+      } catch (IOException e) {
+        assertTrue("This should not happen", false);
+      }
+    } finally {
+      TEST_UTIL.deleteTable(hdt.getTableName());
+    }
+  }
+
+  private void waitUntilFilesShowup(final FileSystem fs, final Path path, final int num)
+    throws InterruptedException, IOException {
+    FileStatus[] fileList = fs.listStatus(path);
+    while (fileList.length != num) {
+      Thread.sleep(50);
+      fileList = fs.listStatus(path);
+    }
+  }
+
+  /**
+   * This copro overwrites the default compaction policy. It always chooses two latest
+   * hfiles and compacts them into a new one.
+   */
+  public static class CompactTwoLatestHfilesCopro extends BaseRegionObserver {
+    @Override
+    public void preCompactSelection(final ObserverContext<RegionCoprocessorEnvironment> c,
+      final Store store, final List<StoreFile> candidates, final CompactionRequest request)
+      throws IOException {
+
+      int count = candidates.size();
+      if (count >= 2) {
+        for (int i = 0; i < count - 2; i++) {
+          candidates.remove(0);
+        }
+        c.bypass();
+      }
+    }
+  }
+
   private void waitUntilCompactionFinished(TableName tableName) throws IOException,
     InterruptedException {
     long finished = EnvironmentEdgeManager.currentTime() + 60000;
@@ -755,5 +859,6 @@ public class TestMobCompactor {
       MobConstants.DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD);
     conf.setInt(MobConstants.MOB_COMPACTION_BATCH_SIZE,
       MobConstants.DEFAULT_MOB_COMPACTION_BATCH_SIZE);
+    conf.setLong(TimeToLiveHFileCleaner.TTL_CONF_KEY, TimeToLiveHFileCleaner.DEFAULT_TTL);
   }
 }
