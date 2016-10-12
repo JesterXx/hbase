@@ -438,51 +438,21 @@ public class TestMobCompactor {
       .getName());
   }
 
-  @Test(timeout = 300000)
-  public void testScannerAfterCompactions() throws Exception {
-    resetConf();
-    setUp("testScannerAfterCompactions");
-    long ts = EnvironmentEdgeManager.currentTime();
-    byte[] key0 = Bytes.toBytes("k0");
-    byte[] key1 = Bytes.toBytes("k1");
-    String value = "mobValue"; // larger than threshold
-    String newValue = "new";
-    Put put0 = new Put(key0);
-    put0.addColumn(Bytes.toBytes(family1), Bytes.toBytes(qf1), ts, Bytes.toBytes(value));
-    loadData(admin, bufMut, tableName, new Put[] { put0 });
-    Put put1 = new Put(key1);
-    put1.addColumn(Bytes.toBytes(family1), Bytes.toBytes(qf1), ts, Bytes.toBytes(value));
-    loadData(admin, bufMut, tableName, new Put[] { put1 });
-    put1 = new Put(key1);
-    put1.addColumn(Bytes.toBytes(family1), Bytes.toBytes(qf1), ts, Bytes.toBytes(newValue));
-    loadData(admin, bufMut, tableName, new Put[] { put1 }); // now two mob files
-    admin.majorCompact(tableName);
-    waitUntilCompactionFinished(tableName);
-    admin.majorCompact(tableName, hcd1.getName(), CompactType.MOB);
-    waitUntilMobCompactionFinished(tableName);
-    // read the latest cell of key1.
-    Get get = new Get(key1);
-    Result result = table.get(get);
-    Cell cell = result.getColumnLatestCell(hcd1.getName(), Bytes.toBytes(qf1));
-    assertEquals("After compaction: mob value", "new", Bytes.toString(CellUtil.cloneValue(cell)));
-  }
-
   /**
-   * This test case tries to test the following mob compaction and normal compaction scenario:
-   *   After mob compaction, the mob reference in new bulkloaded hfile will win even after it
-   *   is compacted with some other normal hfiles. This is to make sure that mvcc is included
-   *   after compaction for mob enabled store files.
-   * @throws Exception
+   * This case tests the following mob compaction and normal compaction scenario,
+   * after mob compaction, the mob reference in new bulkloaded hfile will win even after it
+   * is compacted with some other normal hfiles. This is to make sure the mvcc is included
+   * after compaction for mob enabled store files.
    */
   @Test
-  public void testMobCompaction() throws Exception {
+  public void testGetAfterCompaction() throws Exception {
     resetConf();
     conf.setLong(TimeToLiveHFileCleaner.TTL_CONF_KEY, 0);
     String famStr = "f1";
     byte[] fam = Bytes.toBytes(famStr);
     byte[] qualifier = Bytes.toBytes("q1");
     byte[] mobVal = Bytes.toBytes("01234567890");
-    HTableDescriptor hdt = new HTableDescriptor(TableName.valueOf("testMobCompaction"));
+    HTableDescriptor hdt = new HTableDescriptor(TableName.valueOf("testGetAfterCompaction"));
     hdt.addCoprocessor(CompactTwoLatestHfilesCopro.class.getName());
     HColumnDescriptor hcd = new HColumnDescriptor(fam);
     hcd.setMobEnabled(true);
