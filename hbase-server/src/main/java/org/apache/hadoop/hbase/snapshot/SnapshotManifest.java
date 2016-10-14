@@ -250,6 +250,9 @@ public final class SnapshotManifest {
     boolean isMobRegion = MobUtils.isMobRegionInfo(regionInfo);
     try {
       // Open the RegionFS
+      if (isMobRegion) {
+        tableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), regionInfo.getTable());
+      }
       HRegionFileSystem regionFs = HRegionFileSystem.openRegionFromFileSystem(conf, fs,
             tableDir, regionInfo, true);
       monitor.rethrowException();
