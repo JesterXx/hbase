@@ -115,7 +115,7 @@ public class EnabledTableSnapshotHandler extends TakeSnapshotHandler {
         }
       }
       if (mobEnabled) {
-        LOG.info("Taking snapshot for mob-enabled table " + htd.getTableName());
+        LOG.info("Taking snapshot for mob files in table " + htd.getTableName());
         // snapshot the mob files as a offline region.
         HRegionInfo mobRegionInfo = MobUtils.getMobRegionInfo(htd.getTableName());
         snapshotDisabledRegion(mobRegionInfo);
