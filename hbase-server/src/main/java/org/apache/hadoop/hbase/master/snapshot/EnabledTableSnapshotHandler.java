@@ -118,7 +118,7 @@ public class EnabledTableSnapshotHandler extends TakeSnapshotHandler {
         LOG.info("Taking snapshot for mob files in table " + htd.getTableName());
         // snapshot the mob files as a offline region.
         HRegionInfo mobRegionInfo = MobUtils.getMobRegionInfo(htd.getTableName());
-        snapshotDisabledRegion(mobRegionInfo);
+        snapshotMobRegion(mobRegionInfo);
       }
     } catch (InterruptedException e) {
       ForeignException ee =
@@ -128,5 +128,16 @@ public class EnabledTableSnapshotHandler extends TakeSnapshotHandler {
     } catch (ForeignException e) {
       monitor.receive(e);
     }
+  }
+
+  /**
+   * Takes a snapshot of the mob region
+   */
+  private void snapshotMobRegion(final HRegionInfo regionInfo)
+      throws IOException {
+    snapshotManifest.addMobRegion(regionInfo);
+    monitor.rethrowException();
+    status.setStatus("Completed referencing HFiles for mob files " +
+        " of table: " + snapshotTable);
   }
 }
