@@ -28,6 +28,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
+import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.client.RegionReplicaUtil;
@@ -83,11 +84,20 @@ public class DisabledTableSnapshotHandler extends TakeSnapshotHandler {
         if (RegionReplicaUtil.isDefaultReplica(hri)) {
           regions.add(hri);
         }
-        // if it's the first region, add the mob region
-        if (Bytes.equals(hri.getStartKey(), HConstants.EMPTY_START_ROW)) {
-          HRegionInfo mobRegion = MobUtils.getMobRegionInfo(hri.getTable());
-          regions.add(mobRegion);
+      }
+      // handle the mob files if any.
+      HColumnDescriptor[] hcds = htd.getColumnFamilies();
+      boolean mobEnabled = false;
+      for (HColumnDescriptor hcd : hcds) {
+        if (hcd.isMobEnabled()) {
+          mobEnabled = true;
+          break;
         }
+      }
+      if (mobEnabled) {
+        // snapshot the mob files as a offline region.
+        HRegionInfo mobRegionInfo = MobUtils.getMobRegionInfo(htd.getTableName());
+        regions.add(mobRegionInfo);
       }
 
       // 2. for each region, write all the info to disk
