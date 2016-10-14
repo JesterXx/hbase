@@ -249,12 +249,13 @@ public final class SnapshotManifest {
 
     boolean isMobRegion = MobUtils.isMobRegionInfo(regionInfo);
     try {
+      Path baseDir = tableDir;
       // Open the RegionFS
       if (isMobRegion) {
-        tableDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), regionInfo.getTable());
+        baseDir = FSUtils.getTableDir(MobUtils.getMobHome(conf), regionInfo.getTable());
       }
       HRegionFileSystem regionFs = HRegionFileSystem.openRegionFromFileSystem(conf, fs,
-            tableDir, regionInfo, true);
+        baseDir, regionInfo, true);
       monitor.rethrowException();
 
       // 1. dump region meta info into the snapshot directory
