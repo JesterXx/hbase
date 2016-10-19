@@ -18,6 +18,16 @@
  */
 package org.apache.hadoop.hbase.client;
 
+import static org.apache.hadoop.hbase.client.ConnectionUtils.checkHasFamilies;
+
+import com.google.common.annotations.VisibleForTesting;
+// DO NOT MAKE USE OF THESE IMPORTS! THEY ARE HERE FOR COPROCESSOR ENDPOINTS ONLY.
+// Internally, we use shaded protobuf. This below are part of our public API.
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.Message;
+import com.google.protobuf.Service;
+import com.google.protobuf.ServiceException;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
@@ -49,8 +59,8 @@ import org.apache.hadoop.hbase.client.coprocessor.Batch.Callback;
 import org.apache.hadoop.hbase.filter.BinaryComparator;
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
 import org.apache.hadoop.hbase.ipc.CoprocessorRpcChannel;
-import org.apache.hadoop.hbase.client.RegionCoprocessorRpcChannel;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
+//SEE ABOVE NOTE!
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.shaded.protobuf.RequestConverter;
 import org.apache.hadoop.hbase.shaded.protobuf.ResponseConverter;
@@ -64,15 +74,6 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.hadoop.hbase.util.Threads;
-
-import com.google.common.annotations.VisibleForTesting;
-// DO NOT MAKE USE OF THESE IMPORTS! THEY ARE HERE FOR COPROCESSOR ENDPOINTS ONLY.
-// Internally, we use shaded protobuf. This below are part of our public API.
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.Message;
-import com.google.protobuf.Service;
-import com.google.protobuf.ServiceException;
-// SEE ABOVE NOTE!
 
 /**
  * An implementation of {@link Table}. Used to communicate with a single HBase table.
@@ -441,7 +442,7 @@ public class HTable implements Table {
     RpcRetryingCallerWithReadReplicas callable = new RpcRetryingCallerWithReadReplicas(
         rpcControllerFactory, tableName, this.connection, get, pool,
         connConfiguration.getRetriesNumber(),
-        operationTimeout,
+        operationTimeout, readRpcTimeout,
         connConfiguration.getPrimaryCallTimeoutMicroSecond());
     return callable.call(operationTimeout);
   }
@@ -479,15 +480,10 @@ public class HTable implements Table {
     batch(actions, results, -1);
   }
 
-  public void batch(final List<? extends Row> actions, final Object[] results, int timeout)
+  public void batch(final List<? extends Row> actions, final Object[] results, int rpcTimeout)
       throws InterruptedException, IOException {
-    AsyncRequestFuture ars = null;
-    if (timeout != -1) {
-      ars = multiAp.submitAll(pool, tableName, actions, null, results, null, timeout);
-    } else {
-      // use default timeout in AP
-      ars = multiAp.submitAll(pool, tableName, actions, null, results);
-    }
+    AsyncRequestFuture ars = multiAp.submitAll(pool, tableName, actions, null, results, null,
+        rpcTimeout);
     ars.waitUntilDone();
     if (ars.hasError()) {
       throw ars.getErrors();
@@ -523,7 +519,8 @@ public class HTable implements Table {
   throws IOException {
     CancellableRegionServerCallable<SingleResponse> callable =
         new CancellableRegionServerCallable<SingleResponse>(
-            connection, getName(), delete.getRow(), this.rpcControllerFactory.newController()) {
+            connection, getName(), delete.getRow(), this.rpcControllerFactory.newController(),
+            writeRpcTimeout, new RetryingTimeTracker().start()) {
       @Override
       protected SingleResponse rpcCall() throws Exception {
         MutateRequest request = RequestConverter.buildMutateRequest(
@@ -535,7 +532,7 @@ public class HTable implements Table {
     List<Row> rows = new ArrayList<Row>();
     rows.add(delete);
     AsyncRequestFuture ars = multiAp.submitAll(pool, tableName, rows,
-        null, null, callable, operationTimeout);
+        null, null, callable, writeRpcTimeout);
     ars.waitUntilDone();
     if (ars.hasError()) {
       throw ars.getErrors();
@@ -593,7 +590,7 @@ public class HTable implements Table {
   public void mutateRow(final RowMutations rm) throws IOException {
     CancellableRegionServerCallable<MultiResponse> callable =
       new CancellableRegionServerCallable<MultiResponse>(this.connection, getName(), rm.getRow(),
-          rpcControllerFactory.newController()) {
+          rpcControllerFactory.newController(), writeRpcTimeout, new RetryingTimeTracker().start()){
       @Override
       protected MultiResponse rpcCall() throws Exception {
         RegionAction.Builder regionMutationBuilder = RequestConverter.buildRegionAction(
@@ -614,16 +611,10 @@ public class HTable implements Table {
       }
     };
     AsyncRequestFuture ars = multiAp.submitAll(pool, tableName, rm.getMutations(),
-        null, null, callable, operationTimeout);
+        null, null, callable, writeRpcTimeout);
     ars.waitUntilDone();
     if (ars.hasError()) {
       throw ars.getErrors();
-    }
-  }
-
-  private static void checkHasFamilies(final Mutation mutation) throws IOException {
-    if (mutation.numFamilies() == 0) {
-      throw new IOException("Invalid arguments to " + mutation + ", zero columns specified");
     }
   }
 
@@ -798,7 +789,8 @@ public class HTable implements Table {
   throws IOException {
     CancellableRegionServerCallable<SingleResponse> callable =
         new CancellableRegionServerCallable<SingleResponse>(
-            this.connection, getName(), row, this.rpcControllerFactory.newController()) {
+            this.connection, getName(), row, this.rpcControllerFactory.newController(),
+            writeRpcTimeout, new RetryingTimeTracker().start()) {
       @Override
       protected SingleResponse rpcCall() throws Exception {
         CompareType compareType = CompareType.valueOf(compareOp.name());
@@ -814,7 +806,7 @@ public class HTable implements Table {
 
     Object[] results = new Object[1];
     AsyncRequestFuture ars = multiAp.submitAll(pool, tableName, rows,
-        null, results, callable, operationTimeout);
+        null, results, callable, -1);
     ars.waitUntilDone();
     if (ars.hasError()) {
       throw ars.getErrors();
@@ -831,7 +823,7 @@ public class HTable implements Table {
     throws IOException {
     CancellableRegionServerCallable<MultiResponse> callable =
       new CancellableRegionServerCallable<MultiResponse>(connection, getName(), rm.getRow(),
-        rpcControllerFactory.newController()) {
+        rpcControllerFactory.newController(), writeRpcTimeout, new RetryingTimeTracker().start()) {
         @Override
         protected MultiResponse rpcCall() throws Exception {
           CompareType compareType = CompareType.valueOf(compareOp.name());
@@ -858,7 +850,7 @@ public class HTable implements Table {
      * */
     Object[] results = new Object[rm.getMutations().size()];
     AsyncRequestFuture ars = multiAp.submitAll(pool, tableName, rm.getMutations(),
-      null, results, callable, operationTimeout);
+      null, results, callable, -1);
     ars.waitUntilDone();
     if (ars.hasError()) {
       throw ars.getErrors();
@@ -1117,6 +1109,10 @@ public class HTable implements Table {
   @Override
   public void setOperationTimeout(int operationTimeout) {
     this.operationTimeout = operationTimeout;
+    if (mutator != null) {
+      mutator.setOperationTimeout(operationTimeout);
+    }
+    multiAp.setOperationTimeout(operationTimeout);
   }
 
   @Override
@@ -1133,8 +1129,8 @@ public class HTable implements Table {
   @Override
   @Deprecated
   public void setRpcTimeout(int rpcTimeout) {
-    this.readRpcTimeout = rpcTimeout;
-    this.writeRpcTimeout = rpcTimeout;
+    setReadRpcTimeout(rpcTimeout);
+    setWriteRpcTimeout(rpcTimeout);
   }
 
   @Override
@@ -1145,6 +1141,10 @@ public class HTable implements Table {
   @Override
   public void setWriteRpcTimeout(int writeRpcTimeout) {
     this.writeRpcTimeout = writeRpcTimeout;
+    if (mutator != null) {
+      mutator.setRpcTimeout(writeRpcTimeout);
+    }
+    multiAp.setRpcTimeout(writeRpcTimeout);
   }
 
   @Override
@@ -1229,7 +1229,8 @@ public class HTable implements Table {
     AsyncProcess asyncProcess =
         new AsyncProcess(connection, configuration, pool,
             RpcRetryingCallerFactory.instantiate(configuration, connection.getStatisticsTracker()),
-            true, RpcControllerFactory.instantiate(configuration), readRpcTimeout);
+            true, RpcControllerFactory.instantiate(configuration), readRpcTimeout,
+            operationTimeout);
 
     AsyncRequestFuture future = asyncProcess.submitAll(null, tableName, execs,
         new Callback<ClientProtos.CoprocessorServiceResult>() {
@@ -1281,6 +1282,8 @@ public class HTable implements Table {
               .maxKeyValueSize(connConfiguration.getMaxKeyValueSize())
       );
     }
+    mutator.setRpcTimeout(writeRpcTimeout);
+    mutator.setOperationTimeout(operationTimeout);
     return mutator;
   }
 }

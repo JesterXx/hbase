@@ -24,8 +24,6 @@ import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -40,8 +38,9 @@ import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.master.TableLockManager;
 import org.apache.hadoop.hbase.master.TableLockManager.TableLock;
 import org.apache.hadoop.hbase.master.procedure.TableProcedureInterface.TableOperationType;
+import org.apache.hadoop.hbase.procedure2.AbstractProcedureScheduler;
 import org.apache.hadoop.hbase.procedure2.Procedure;
-import org.apache.hadoop.hbase.procedure2.ProcedureRunnableSet;
+import org.apache.hadoop.hbase.procedure2.ProcedureEventQueue;
 import org.apache.hadoop.hbase.util.AvlUtil.AvlKeyComparator;
 import org.apache.hadoop.hbase.util.AvlUtil.AvlIterableList;
 import org.apache.hadoop.hbase.util.AvlUtil.AvlLinkedNode;
@@ -49,8 +48,8 @@ import org.apache.hadoop.hbase.util.AvlUtil.AvlTree;
 import org.apache.hadoop.hbase.util.AvlUtil.AvlTreeIterator;
 
 /**
- * ProcedureRunnableSet for the Master Procedures.
- * This RunnableSet tries to provide to the ProcedureExecutor procedures
+ * ProcedureScheduler for the Master Procedures.
+ * This ProcedureScheduler tries to provide to the ProcedureExecutor procedures
  * that can be executed without having to wait on a lock.
  * Most of the master operations can be executed concurrently, if they
  * are operating on different tables (e.g. two create table can be performed
@@ -65,12 +64,10 @@ import org.apache.hadoop.hbase.util.AvlUtil.AvlTreeIterator;
  */
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
-public class MasterProcedureScheduler implements ProcedureRunnableSet {
+public class MasterProcedureScheduler extends AbstractProcedureScheduler {
   private static final Log LOG = LogFactory.getLog(MasterProcedureScheduler.class);
 
   private final TableLockManager lockManager;
-  private final ReentrantLock schedLock = new ReentrantLock();
-  private final Condition schedWaitCond = schedLock.newCondition();
 
   private final static NamespaceQueueKeyComparator NAMESPACE_QUEUE_KEY_COMPARATOR =
       new NamespaceQueueKeyComparator();
@@ -90,10 +87,6 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
   private final int userTablePriority;
   private final int sysTablePriority;
 
-  // TODO: metrics
-  private long pollCalls = 0;
-  private long nullPollCalls = 0;
-
   public MasterProcedureScheduler(final Configuration conf, final TableLockManager lockManager) {
     this.lockManager = lockManager;
 
@@ -104,44 +97,23 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
   }
 
   @Override
-  public void addFront(Procedure proc) {
-    doAdd(proc, true);
-  }
-
-  @Override
-  public void addBack(Procedure proc) {
-    doAdd(proc, false);
-  }
-
-  @Override
   public void yield(final Procedure proc) {
-    doAdd(proc, isTableProcedure(proc));
+    push(proc, isTableProcedure(proc), true);
   }
 
-  private void doAdd(final Procedure proc, final boolean addFront) {
-    doAdd(proc, addFront, true);
-  }
-
-  private void doAdd(final Procedure proc, final boolean addFront, final boolean notify) {
-    schedLock.lock();
-    try {
-      if (isTableProcedure(proc)) {
-        doAdd(tableRunQueue, getTableQueue(getTableName(proc)), proc, addFront);
-      } else if (isServerProcedure(proc)) {
-        doAdd(serverRunQueue, getServerQueue(getServerName(proc)), proc, addFront);
-      } else {
-        // TODO: at the moment we only have Table and Server procedures
-        // if you are implementing a non-table/non-server procedure, you have two options: create
-        // a group for all the non-table/non-server procedures or try to find a key for your
-        // non-table/non-server procedures and implement something similar to the TableRunQueue.
-        throw new UnsupportedOperationException(
-          "RQs for non-table/non-server procedures are not implemented yet: " + proc);
-      }
-      if (notify) {
-        schedWaitCond.signal();
-      }
-    } finally {
-      schedLock.unlock();
+  @Override
+  protected void enqueue(final Procedure proc, final boolean addFront) {
+    if (isTableProcedure(proc)) {
+      doAdd(tableRunQueue, getTableQueue(getTableName(proc)), proc, addFront);
+    } else if (isServerProcedure(proc)) {
+      doAdd(serverRunQueue, getServerQueue(getServerName(proc)), proc, addFront);
+    } else {
+      // TODO: at the moment we only have Table and Server procedures
+      // if you are implementing a non-table/non-server procedure, you have two options: create
+      // a group for all the non-table/non-server procedures or try to find a key for your
+      // non-table/non-server procedures and implement something similar to the TableRunQueue.
+      throw new UnsupportedOperationException(
+        "RQs for non-table/non-server procedures are not implemented yet: " + proc);
     }
   }
 
@@ -150,68 +122,35 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
     if (proc.isSuspended()) return;
 
     queue.add(proc, addFront);
-    if (!(queue.isSuspended() ||
-        (queue.hasExclusiveLock() && !queue.isLockOwner(proc.getProcId())))) {
-      // the queue is not suspended or removed from the fairq (run-queue)
-      // because someone has an xlock on it.
-      // so, if the queue is not-linked we should add it
-      if (queue.size() == 1 && !AvlIterableList.isLinked(queue)) {
-        fairq.add(queue);
-      }
+    if (!queue.hasExclusiveLock() || queue.isLockOwner(proc.getProcId())) {
+      // if the queue was not remove for an xlock execution
+      // or the proc is the lock owner, put the queue back into execution
+      addToRunQueue(fairq, queue);
     } else if (queue.hasParentLock(proc)) {
       assert addFront : "expected to add a child in the front";
       assert !queue.isSuspended() : "unexpected suspended state for the queue";
       // our (proc) parent has the xlock,
       // so the queue is not in the fairq (run-queue)
       // add it back to let the child run (inherit the lock)
-      if (!AvlIterableList.isLinked(queue)) {
-        fairq.add(queue);
-      }
+      addToRunQueue(fairq, queue);
     }
   }
 
   @Override
-  public Procedure poll() {
-    return poll(-1);
+  protected boolean queueHasRunnables() {
+    return tableRunQueue.hasRunnables() || serverRunQueue.hasRunnables();
   }
 
-  @edu.umd.cs.findbugs.annotations.SuppressWarnings("WA_AWAIT_NOT_IN_LOOP")
-  protected Procedure poll(long waitNsec) {
-    Procedure pollResult = null;
-    schedLock.lock();
-    try {
-      if (!hasRunnables()) {
-        if (waitNsec < 0) {
-          schedWaitCond.await();
-        } else {
-          schedWaitCond.awaitNanos(waitNsec);
-        }
-        if (!hasRunnables()) {
-          return null;
-        }
-      }
-
-      // For now, let server handling have precedence over table handling; presumption is that it
-      // is more important handling crashed servers than it is running the
-      // enabling/disabling tables, etc.
-      pollResult = doPoll(serverRunQueue);
-      if (pollResult == null) {
-        pollResult = doPoll(tableRunQueue);
-      }
-
-      // update metrics
-      pollCalls++;
-      nullPollCalls += (pollResult == null) ? 1 : 0;
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    } finally {
-      schedLock.unlock();
+  @Override
+  protected Procedure dequeue() {
+    // For now, let server handling have precedence over table handling; presumption is that it
+    // is more important handling crashed servers than it is running the
+    // enabling/disabling tables, etc.
+    Procedure pollResult = doPoll(serverRunQueue);
+    if (pollResult == null) {
+      pollResult = doPoll(tableRunQueue);
     }
     return pollResult;
-  }
-
-  private boolean hasRunnables() {
-    return tableRunQueue.hasRunnables() || serverRunQueue.hasRunnables();
   }
 
   private <T extends Comparable<T>> Procedure doPoll(final FairQueue<T> fairq) {
@@ -245,24 +184,22 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
   }
 
   @Override
-  public void clear() {
-    // NOTE: USED ONLY FOR TESTING
-    schedLock.lock();
-    try {
-      // Remove Servers
-      for (int i = 0; i < serverBuckets.length; ++i) {
-        clear(serverBuckets[i], serverRunQueue, SERVER_QUEUE_KEY_COMPARATOR);
-        serverBuckets[i] = null;
-      }
-
-      // Remove Tables
-      clear(tableMap, tableRunQueue, TABLE_QUEUE_KEY_COMPARATOR);
-      tableMap = null;
-
-      assert size() == 0 : "expected queue size to be 0, got " + size();
-    } finally {
-      schedLock.unlock();
+  public void clearQueue() {
+    // Remove Servers
+    for (int i = 0; i < serverBuckets.length; ++i) {
+      clear(serverBuckets[i], serverRunQueue, SERVER_QUEUE_KEY_COMPARATOR);
+      serverBuckets[i] = null;
     }
+
+    // Remove Namespaces
+    clear(namespaceMap, null, NAMESPACE_QUEUE_KEY_COMPARATOR);
+    namespaceMap = null;
+
+    // Remove Tables
+    clear(tableMap, tableRunQueue, TABLE_QUEUE_KEY_COMPARATOR);
+    tableMap = null;
+
+    assert size() == 0 : "expected queue size to be 0, got " + size();
   }
 
   private <T extends Comparable<T>, TNode extends Queue<T>> void clear(TNode treeMap,
@@ -271,52 +208,29 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
       Queue<T> node = AvlTree.getFirst(treeMap);
       assert !node.isSuspended() : "can't clear suspended " + node.getKey();
       treeMap = AvlTree.remove(treeMap, node.getKey(), comparator);
-      removeFromRunQueue(fairq, node);
-    }
-  }
-
-  private void wakePollIfNeeded(final int waitingCount) {
-    if (waitingCount > 1) {
-      schedWaitCond.signalAll();
-    } else if (waitingCount > 0) {
-      schedWaitCond.signal();
+      if (fairq != null) removeFromRunQueue(fairq, node);
     }
   }
 
   @Override
-  public void signalAll() {
-    schedLock.lock();
-    try {
-      schedWaitCond.signalAll();
-    } finally {
-      schedLock.unlock();
-    }
-  }
+  protected int queueSize() {
+    int count = 0;
 
-  @Override
-  public int size() {
-    schedLock.lock();
-    try {
-      int count = 0;
-
-      // Server queues
-      final AvlTreeIterator<ServerQueue> serverIter = new AvlTreeIterator<ServerQueue>();
-      for (int i = 0; i < serverBuckets.length; ++i) {
-        serverIter.seekFirst(serverBuckets[i]);
-        while (serverIter.hasNext()) {
-          count += serverIter.next().size();
-        }
+    // Server queues
+    final AvlTreeIterator<ServerQueue> serverIter = new AvlTreeIterator<ServerQueue>();
+    for (int i = 0; i < serverBuckets.length; ++i) {
+      serverIter.seekFirst(serverBuckets[i]);
+      while (serverIter.hasNext()) {
+        count += serverIter.next().size();
       }
-
-      // Table queues
-      final AvlTreeIterator<TableQueue> tableIter = new AvlTreeIterator<TableQueue>(tableMap);
-      while (tableIter.hasNext()) {
-        count += tableIter.next().size();
-      }
-      return count;
-    } finally {
-      schedLock.unlock();
     }
+
+    // Table queues
+    final AvlTreeIterator<TableQueue> tableIter = new AvlTreeIterator<TableQueue>(tableMap);
+    while (tableIter.hasNext()) {
+      count += tableIter.next().size();
+    }
+    return count;
   }
 
   @Override
@@ -348,328 +262,15 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
   }
 
   private <T extends Comparable<T>> void addToRunQueue(FairQueue<T> fairq, Queue<T> queue) {
-    if (AvlIterableList.isLinked(queue)) return;
-    if (!queue.isEmpty())  {
+    if (!AvlIterableList.isLinked(queue) &&
+        !queue.isEmpty() && !queue.isSuspended())  {
       fairq.add(queue);
     }
   }
 
   private <T extends Comparable<T>> void removeFromRunQueue(FairQueue<T> fairq, Queue<T> queue) {
-    if (!AvlIterableList.isLinked(queue)) return;
-    fairq.remove(queue);
-  }
-
-  // ============================================================================
-  //  TODO: Metrics
-  // ============================================================================
-  public long getPollCalls() {
-    return pollCalls;
-  }
-
-  public long getNullPollCalls() {
-    return nullPollCalls;
-  }
-
-  // ============================================================================
-  //  Event Helpers
-  // ============================================================================
-  /**
-   * Suspend the procedure if the event is not ready yet.
-   * @param event the event to wait on
-   * @param procedure the procedure waiting on the event
-   * @return true if the procedure has to wait for the event to be ready, false otherwise.
-   */
-  public boolean waitEvent(final ProcedureEvent event, final Procedure procedure) {
-    return waitEvent(event, procedure, false);
-  }
-
-  /**
-   * Suspend the procedure if the event is not ready yet.
-   * @param event the event to wait on
-   * @param procedure the procedure waiting on the event
-   * @param suspendQueue true if the entire queue of the procedure should be suspended
-   * @return true if the procedure has to wait for the event to be ready, false otherwise.
-   */
-  public boolean waitEvent(final ProcedureEvent event, final Procedure procedure,
-      final boolean suspendQueue) {
-    return waitEvent(event, /* lockEvent= */false, procedure, suspendQueue);
-  }
-
-  private boolean waitEvent(final ProcedureEvent event, final boolean lockEvent,
-      final Procedure procedure, final boolean suspendQueue) {
-    synchronized (event) {
-      if (event.isReady()) {
-        if (lockEvent) {
-          event.setReady(false);
-        }
-        return false;
-      }
-
-      if (!suspendQueue) {
-        suspendProcedure(event, procedure);
-      } else if (isTableProcedure(procedure)) {
-        waitTableEvent(event, procedure);
-      } else if (isServerProcedure(procedure)) {
-        waitServerEvent(event, procedure);
-      } else {
-        // TODO: at the moment we only have Table and Server procedures
-        // if you are implementing a non-table/non-server procedure, you have two options: create
-        // a group for all the non-table/non-server procedures or try to find a key for your
-        // non-table/non-server procedures and implement something similar to the TableRunQueue.
-        throw new UnsupportedOperationException(
-          "RQs for non-table/non-server procedures are not implemented yet: " + procedure);
-      }
-    }
-    return true;
-  }
-
-  private void waitTableEvent(final ProcedureEvent event, final Procedure procedure) {
-    final TableName tableName = getTableName(procedure);
-    final boolean isDebugEnabled = LOG.isDebugEnabled();
-
-    schedLock.lock();
-    try {
-      TableQueue queue = getTableQueue(tableName);
-      queue.addFront(procedure);
-      if (queue.isSuspended()) return;
-
-      if (isDebugEnabled) {
-        LOG.debug("Suspend table queue " + tableName);
-      }
-      queue.setSuspended(true);
-      removeFromRunQueue(tableRunQueue, queue);
-      event.suspendTableQueue(queue);
-    } finally {
-      schedLock.unlock();
-    }
-  }
-
-  private void waitServerEvent(final ProcedureEvent event, final Procedure procedure) {
-    final ServerName serverName = getServerName(procedure);
-    final boolean isDebugEnabled = LOG.isDebugEnabled();
-
-    schedLock.lock();
-    try {
-      // TODO: This will change once we have the new AM
-      ServerQueue queue = getServerQueue(serverName);
-      queue.addFront(procedure);
-      if (queue.isSuspended()) return;
-
-      if (isDebugEnabled) {
-        LOG.debug("Suspend server queue " + serverName);
-      }
-      queue.setSuspended(true);
-      removeFromRunQueue(serverRunQueue, queue);
-      event.suspendServerQueue(queue);
-    } finally {
-      schedLock.unlock();
-    }
-  }
-
-  /**
-   * Mark the event has not ready.
-   * procedures calling waitEvent() will be suspended.
-   * @param event the event to mark as suspended/not ready
-   */
-  public void suspendEvent(final ProcedureEvent event) {
-    final boolean isTraceEnabled = LOG.isTraceEnabled();
-    synchronized (event) {
-      event.setReady(false);
-      if (isTraceEnabled) {
-        LOG.trace("Suspend event " + event);
-      }
-    }
-  }
-
-  /**
-   * Wake every procedure waiting for the specified event
-   * (By design each event has only one "wake" caller)
-   * @param event the event to wait
-   */
-  public void wakeEvent(final ProcedureEvent event) {
-    final boolean isTraceEnabled = LOG.isTraceEnabled();
-    synchronized (event) {
-      event.setReady(true);
-      if (isTraceEnabled) {
-        LOG.trace("Wake event " + event);
-      }
-
-      schedLock.lock();
-      try {
-        final int waitingCount = popEventWaitingObjects(event);
-        wakePollIfNeeded(waitingCount);
-      } finally {
-        schedLock.unlock();
-      }
-    }
-  }
-
-  /**
-   * Wake every procedure waiting for the specified events.
-   * (By design each event has only one "wake" caller)
-   * @param events the list of events to wake
-   * @param count the number of events in the array to wake
-   */
-  public void wakeEvents(final ProcedureEvent[] events, final int count) {
-    final boolean isTraceEnabled = LOG.isTraceEnabled();
-    schedLock.lock();
-    try {
-      int waitingCount = 0;
-      for (int i = 0; i < count; ++i) {
-        final ProcedureEvent event = events[i];
-        synchronized (event) {
-          event.setReady(true);
-          if (isTraceEnabled) {
-            LOG.trace("Wake event " + event);
-          }
-          waitingCount += popEventWaitingObjects(event);
-        }
-      }
-      wakePollIfNeeded(waitingCount);
-    } finally {
-      schedLock.unlock();
-    }
-  }
-
-  private int popEventWaitingObjects(final ProcedureEvent event) {
-    int count = 0;
-    while (event.hasWaitingTables()) {
-      final Queue<TableName> queue = event.popWaitingTable();
-      queue.setSuspended(false);
-      addToRunQueue(tableRunQueue, queue);
-      count += queue.size();
-    }
-    // TODO: This will change once we have the new AM
-    while (event.hasWaitingServers()) {
-      final Queue<ServerName> queue = event.popWaitingServer();
-      queue.setSuspended(false);
-      addToRunQueue(serverRunQueue, queue);
-      count += queue.size();
-    }
-
-    while (event.hasWaitingProcedures()) {
-      wakeProcedure(event.popWaitingProcedure(false));
-      count++;
-    }
-    return count;
-  }
-
-  private void suspendProcedure(final BaseProcedureEvent event, final Procedure procedure) {
-    procedure.suspend();
-    event.suspendProcedure(procedure);
-  }
-
-  private void wakeProcedure(final Procedure procedure) {
-    procedure.resume();
-    doAdd(procedure, /* addFront= */ true, /* notify= */false);
-  }
-
-  private static abstract class BaseProcedureEvent {
-    private ArrayDeque<Procedure> waitingProcedures = null;
-
-    protected void suspendProcedure(final Procedure proc) {
-      if (waitingProcedures == null) {
-        waitingProcedures = new ArrayDeque<Procedure>();
-      }
-      waitingProcedures.addLast(proc);
-    }
-
-    protected boolean hasWaitingProcedures() {
-      return waitingProcedures != null;
-    }
-
-    protected Procedure popWaitingProcedure(final boolean popFront) {
-      // it will be nice to use IterableList on a procedure and avoid allocations...
-      Procedure proc = popFront ? waitingProcedures.removeFirst() : waitingProcedures.removeLast();
-      if (waitingProcedures.isEmpty()) {
-        waitingProcedures = null;
-      }
-      return proc;
-    }
-
-    @VisibleForTesting
-    protected synchronized int size() {
-      if (waitingProcedures != null) {
-        return waitingProcedures.size();
-      }
-      return 0;
-    }
-  }
-
-  public static class ProcedureEvent extends BaseProcedureEvent {
-    private final String description;
-
-    private Queue<ServerName> waitingServers = null;
-    private Queue<TableName> waitingTables = null;
-    private boolean ready = false;
-
-    protected ProcedureEvent() {
-      this(null);
-    }
-
-    public ProcedureEvent(final String description) {
-      this.description = description;
-    }
-
-    public synchronized boolean isReady() {
-      return ready;
-    }
-
-    private synchronized void setReady(boolean isReady) {
-      this.ready = isReady;
-    }
-
-    private void suspendTableQueue(Queue<TableName> queue) {
-      waitingTables = AvlIterableList.append(waitingTables, queue);
-    }
-
-    private void suspendServerQueue(Queue<ServerName> queue) {
-      waitingServers = AvlIterableList.append(waitingServers, queue);
-    }
-
-    private boolean hasWaitingTables() {
-      return waitingTables != null;
-    }
-
-    private Queue<TableName> popWaitingTable() {
-      Queue<TableName> node = waitingTables;
-      waitingTables = AvlIterableList.remove(waitingTables, node);
-      return node;
-    }
-
-    private boolean hasWaitingServers() {
-      return waitingServers != null;
-    }
-
-    private Queue<ServerName> popWaitingServer() {
-      Queue<ServerName> node = waitingServers;
-      waitingServers = AvlIterableList.remove(waitingServers, node);
-      return node;
-    }
-
-    protected String getDescription() {
-      if (description == null) {
-        // you should override this method if you are using the default constructor
-        throw new UnsupportedOperationException();
-      }
-      return description;
-    }
-
-    @VisibleForTesting
-    protected synchronized int size() {
-      int count = super.size();
-      if (waitingTables != null) {
-        count += waitingTables.size();
-      }
-      if (waitingServers != null) {
-        count += waitingServers.size();
-      }
-      return count;
-    }
-
-    @Override
-    public String toString() {
-      return String.format("%s(%s)", getClass().getSimpleName(), getDescription());
+    if (AvlIterableList.isLinked(queue)) {
+      fairq.remove(queue);
     }
   }
 
@@ -677,11 +278,11 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
   //  Table Queue Lookup Helpers
   // ============================================================================
   private TableQueue getTableQueueWithLock(TableName tableName) {
-    schedLock.lock();
+    schedLock();
     try {
       return getTableQueue(tableName);
     } finally {
-      schedLock.unlock();
+      schedUnlock();
     }
   }
 
@@ -732,11 +333,11 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
   //  Server Queue Lookup Helpers
   // ============================================================================
   private ServerQueue getServerQueueWithLock(ServerName serverName) {
-    schedLock.lock();
+    schedLock();
     try {
       return getServerQueue(serverName);
     } finally {
-      schedLock.unlock();
+      schedUnlock();
     }
   }
 
@@ -795,7 +396,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
     }
   }
 
-  private static class RegionEvent extends BaseProcedureEvent {
+  private static class RegionEvent extends ProcedureEventQueue {
     private final HRegionInfo regionInfo;
     private long exclusiveLockProcIdOwner = Long.MIN_VALUE;
 
@@ -828,7 +429,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
 
     @Override
     public String toString() {
-      return String.format("region %s event", regionInfo.getRegionNameAsString());
+      return "RegionEvent(" + regionInfo.getRegionNameAsString() + ")";
     }
   }
 
@@ -924,6 +525,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
         case MERGE:
         case ASSIGN:
         case UNASSIGN:
+        case REGION_EDIT:
           return false;
         default:
           break;
@@ -1050,33 +652,33 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
    * @return true if we were able to acquire the lock on the table, otherwise false.
    */
   public boolean tryAcquireTableExclusiveLock(final Procedure procedure, final TableName table) {
-    schedLock.lock();
+    schedLock();
     TableQueue queue = getTableQueue(table);
     if (!queue.getNamespaceQueue().trySharedLock()) {
-      schedLock.unlock();
+      schedUnlock();
       return false;
     }
 
     if (!queue.tryExclusiveLock(procedure)) {
       queue.getNamespaceQueue().releaseSharedLock();
-      schedLock.unlock();
+      schedUnlock();
       return false;
     }
 
     removeFromRunQueue(tableRunQueue, queue);
     boolean hasParentLock = queue.hasParentLock(procedure);
-    schedLock.unlock();
+    schedUnlock();
 
     boolean hasXLock = true;
     if (!hasParentLock) {
       // Zk lock is expensive...
       hasXLock = queue.tryZkExclusiveLock(lockManager, procedure.toString());
       if (!hasXLock) {
-        schedLock.lock();
+        schedLock();
         if (!hasParentLock) queue.releaseExclusiveLock();
         queue.getNamespaceQueue().releaseSharedLock();
         addToRunQueue(tableRunQueue, queue);
-        schedLock.unlock();
+        schedUnlock();
       }
     }
     return hasXLock;
@@ -1096,11 +698,11 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
       queue.releaseZkExclusiveLock(lockManager);
     }
 
-    schedLock.lock();
+    schedLock();
     if (!hasParentLock) queue.releaseExclusiveLock();
     queue.getNamespaceQueue().releaseSharedLock();
     addToRunQueue(tableRunQueue, queue);
-    schedLock.unlock();
+    schedUnlock();
   }
 
   /**
@@ -1116,7 +718,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
 
   private TableQueue tryAcquireTableQueueSharedLock(final Procedure procedure,
       final TableName table) {
-    schedLock.lock();
+    schedLock();
     TableQueue queue = getTableQueue(table);
     if (!queue.getNamespaceQueue().trySharedLock()) {
       return null;
@@ -1124,7 +726,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
 
     if (!queue.trySharedLock()) {
       queue.getNamespaceQueue().releaseSharedLock();
-      schedLock.unlock();
+      schedUnlock();
       return null;
     }
 
@@ -1133,11 +735,11 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
     if (!queue.tryZkSharedLock(lockManager, procedure.toString())) {
       queue.releaseSharedLock();
       queue.getNamespaceQueue().releaseSharedLock();
-      schedLock.unlock();
+      schedUnlock();
       return null;
     }
 
-    schedLock.unlock();
+    schedUnlock();
 
     return queue;
   }
@@ -1150,13 +752,15 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
   public void releaseTableSharedLock(final Procedure procedure, final TableName table) {
     final TableQueue queue = getTableQueueWithLock(table);
 
-    schedLock.lock();
+    schedLock();
     // Zk lock is expensive...
     queue.releaseZkSharedLock(lockManager);
 
-    queue.releaseSharedLock();
     queue.getNamespaceQueue().releaseSharedLock();
-    schedLock.unlock();
+    if (queue.releaseSharedLock()) {
+      addToRunQueue(tableRunQueue, queue);
+    }
+    schedUnlock();
   }
 
   /**
@@ -1170,8 +774,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
    */
   @VisibleForTesting
   protected boolean markTableAsDeleted(final TableName table, final Procedure procedure) {
-    final ReentrantLock l = schedLock;
-    l.lock();
+    schedLock();
     try {
       TableQueue queue = getTableQueue(table);
       if (queue == null) return true;
@@ -1195,7 +798,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
         return false;
       }
     } finally {
-      l.unlock();
+      schedUnlock();
     }
     return true;
   }
@@ -1300,7 +903,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
     }
 
     // awake procedures if any
-    schedLock.lock();
+    schedLock();
     try {
       for (int i = numProcs - 1; i >= 0; --i) {
         wakeProcedure(nextProcs[i]);
@@ -1314,7 +917,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
         releaseTableSharedLock(procedure, table);
       }
     } finally {
-      schedLock.unlock();
+      schedUnlock();
     }
   }
 
@@ -1329,7 +932,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
    * @return true if we were able to acquire the lock on the namespace, otherwise false.
    */
   public boolean tryAcquireNamespaceExclusiveLock(final Procedure procedure, final String nsName) {
-    schedLock.lock();
+    schedLock();
     try {
       TableQueue tableQueue = getTableQueue(TableName.NAMESPACE_TABLE_NAME);
       if (!tableQueue.trySharedLock()) return false;
@@ -1341,7 +944,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
       }
       return hasLock;
     } finally {
-      schedLock.unlock();
+      schedUnlock();
     }
   }
 
@@ -1352,15 +955,17 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
    * @param nsName the namespace that has the exclusive lock
    */
   public void releaseNamespaceExclusiveLock(final Procedure procedure, final String nsName) {
-    schedLock.lock();
+    schedLock();
     try {
-      TableQueue tableQueue = getTableQueue(TableName.NAMESPACE_TABLE_NAME);
-      tableQueue.releaseSharedLock();
+      final TableQueue tableQueue = getTableQueue(TableName.NAMESPACE_TABLE_NAME);
+      final NamespaceQueue queue = getNamespaceQueue(nsName);
 
-      NamespaceQueue queue = getNamespaceQueue(nsName);
       queue.releaseExclusiveLock();
+      if (tableQueue.releaseSharedLock()) {
+        addToRunQueue(tableRunQueue, tableQueue);
+      }
     } finally {
-      schedLock.unlock();
+      schedUnlock();
     }
   }
 
@@ -1376,7 +981,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
    */
   public boolean tryAcquireServerExclusiveLock(final Procedure procedure,
       final ServerName serverName) {
-    schedLock.lock();
+    schedLock();
     try {
       ServerQueue queue = getServerQueue(serverName);
       if (queue.tryExclusiveLock(procedure)) {
@@ -1384,7 +989,7 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
         return true;
       }
     } finally {
-      schedLock.unlock();
+      schedUnlock();
     }
     return false;
   }
@@ -1397,13 +1002,13 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
    */
   public void releaseServerExclusiveLock(final Procedure procedure,
       final ServerName serverName) {
-    schedLock.lock();
+    schedLock();
     try {
       ServerQueue queue = getServerQueue(serverName);
       queue.releaseExclusiveLock();
       addToRunQueue(serverRunQueue, queue);
     } finally {
-      schedLock.unlock();
+      schedUnlock();
     }
   }
 
@@ -1503,8 +1108,8 @@ public class MasterProcedureScheduler implements ProcedureRunnableSet {
       return true;
     }
 
-    public synchronized void releaseSharedLock() {
-      sharedLock--;
+    public synchronized boolean releaseSharedLock() {
+      return --sharedLock == 0;
     }
 
     protected synchronized boolean isSingleSharedLock() {

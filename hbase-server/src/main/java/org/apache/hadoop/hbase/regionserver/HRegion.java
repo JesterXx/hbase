@@ -64,6 +64,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.commons.logging.Log;
@@ -195,6 +196,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
   public static final String LOAD_CFS_ON_DEMAND_CONFIG_KEY =
     "hbase.hregion.scan.loadColumnFamiliesOnDemand";
+
+  /** Config key for using mvcc pre-assign feature for put */
+  public static final String HREGION_MVCC_PRE_ASSIGN = "hbase.hregion.mvcc.preassign";
+  public static final boolean DEFAULT_HREGION_MVCC_PRE_ASSIGN = true;
 
   /**
    * This is the global default value for durability. All tables/mutations not
@@ -355,9 +360,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     // We need to ensure that while we are calculating the smallestReadPoint
     // no new RegionScanners can grab a readPoint that we are unaware of.
     // We achieve this by synchronizing on the scannerReadPoints object.
-    synchronized(scannerReadPoints) {
+    synchronized (scannerReadPoints) {
       minimumReadPoint = mvcc.getReadPoint();
-      for (Long readPoint: this.scannerReadPoints.values()) {
+      for (Long readPoint : this.scannerReadPoints.values()) {
         if (readPoint < minimumReadPoint) {
           minimumReadPoint = readPoint;
         }
@@ -584,6 +589,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   // that has non-default scope
   private final NavigableMap<byte[], Integer> replicationScope = new TreeMap<byte[], Integer>(
       Bytes.BYTES_COMPARATOR);
+  // flag and lock for MVCC preassign
+  private final boolean mvccPreAssign;
+  private final ReentrantLock preAssignMvccLock;
 
   /**
    * HRegion constructor. This constructor should only be used for testing and
@@ -743,6 +751,14 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           false :
           conf.getBoolean(HConstants.ENABLE_CLIENT_BACKPRESSURE,
               HConstants.DEFAULT_ENABLE_CLIENT_BACKPRESSURE);
+
+    // get mvcc pre-assign flag and lock
+    this.mvccPreAssign = conf.getBoolean(HREGION_MVCC_PRE_ASSIGN, DEFAULT_HREGION_MVCC_PRE_ASSIGN);
+    if (this.mvccPreAssign) {
+      this.preAssignMvccLock = new ReentrantLock();
+    } else {
+      this.preAssignMvccLock = null;
+    }
   }
 
   void setHTableSpecificConf() {
@@ -925,8 +941,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           Future<HStore> future = completionService.take();
           HStore store = future.get();
           this.stores.put(store.getFamily().getName(), store);
-          MemStore memStore = store.getMemStore();
-          if(memStore != null && memStore.isSloppy()) {
+          if (store.isSloppyMemstore()) {
             hasSloppyStores = true;
           }
 
@@ -2544,7 +2559,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
     // If we get to here, the HStores have been written.
     for(Store storeToFlush :storesToFlush) {
-      storeToFlush.finalizeFlush();
+      ((HStore) storeToFlush).finalizeFlush();
     }
     if (wal != null) {
       wal.completeCacheFlush(this.getRegionInfo().getEncodedNameAsBytes());
@@ -3214,36 +3229,61 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       // STEP 4. Append the final edit to WAL and sync.
       Mutation mutation = batchOp.getMutation(firstIndex);
       WALKey walKey = null;
+      long txid;
       if (replay) {
         // use wal key from the original
         walKey = new ReplayHLogKey(this.getRegionInfo().getEncodedNameAsBytes(),
           this.htableDescriptor.getTableName(), WALKey.NO_SEQUENCE_ID, now,
           mutation.getClusterIds(), currentNonceGroup, currentNonce, mvcc);
         walKey.setOrigLogSeqNum(batchOp.getReplaySequenceId());
-      }
-      // Not sure what is going on here when replay is going on... does the below append get
-      // called for replayed edits? Am afraid to change it without test.
-      if (!walEdit.isEmpty()) {
-        if (!replay) {
-          // we use HLogKey here instead of WALKey directly to support legacy coprocessors.
-          walKey = new HLogKey(this.getRegionInfo().getEncodedNameAsBytes(),
-              this.htableDescriptor.getTableName(), WALKey.NO_SEQUENCE_ID, now,
-              mutation.getClusterIds(), currentNonceGroup, currentNonce, mvcc,
-              this.getReplicationScope());
+        if (!walEdit.isEmpty()) {
+          txid = this.wal.append(this.getRegionInfo(), walKey, walEdit, true);
+          if (txid != 0) {
+            sync(txid, durability);
+          }
         }
-        // TODO: Use the doAppend methods below... complicated by the replay stuff above.
+      } else {
         try {
-          long txid = this.wal.append(this.getRegionInfo(), walKey,
-              walEdit, true);
-          if (txid != 0) sync(txid, durability);
-          writeEntry = walKey.getWriteEntry();
+          if (!walEdit.isEmpty()) {
+            try {
+              if (this.mvccPreAssign) {
+                preAssignMvccLock.lock();
+                writeEntry = mvcc.begin();
+              }
+              // we use HLogKey here instead of WALKey directly to support legacy coprocessors.
+              walKey = new HLogKey(this.getRegionInfo().getEncodedNameAsBytes(),
+                  this.htableDescriptor.getTableName(), WALKey.NO_SEQUENCE_ID, now,
+                  mutation.getClusterIds(), currentNonceGroup, currentNonce, mvcc,
+                  this.getReplicationScope());
+              if (this.mvccPreAssign) {
+                walKey.setPreAssignedWriteEntry(writeEntry);
+              }
+              // TODO: Use the doAppend methods below... complicated by the replay stuff above.
+              txid = this.wal.append(this.getRegionInfo(), walKey, walEdit, true);
+            } finally {
+              if (mvccPreAssign) {
+                preAssignMvccLock.unlock();
+              }
+            }
+            if (txid != 0) {
+              sync(txid, durability);
+            }
+            if (writeEntry == null) {
+              // if MVCC not preassigned, wait here until assigned
+              writeEntry = walKey.getWriteEntry();
+            }
+          }
         } catch (IOException ioe) {
-          if (walKey != null) mvcc.complete(walKey.getWriteEntry());
+          if (walKey != null && writeEntry == null) {
+            // the writeEntry is not preassigned and error occurred during append or sync
+            mvcc.complete(walKey.getWriteEntry());
+          }
           throw ioe;
         }
       }
       if (walKey == null) {
-        // If no walKey, then skipping WAL or some such. Being an mvcc transaction so sequenceid.
+        // If no walKey, then not in replay and skipping WAL or some such. Begin an MVCC transaction
+        // to get sequence id.
         writeEntry = mvcc.begin();
       }
 
@@ -3266,7 +3306,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       // STEP 6. Complete mvcc.
       if (replay) {
         this.mvcc.advanceTo(batchOp.getReplaySequenceId());
-      } else if (writeEntry != null/*Can be null if in replay mode*/) {
+      } else {
+        // writeEntry won't be empty if not in replay mode
         mvcc.completeAndWait(writeEntry);
         writeEntry = null;
       }
@@ -3802,9 +3843,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     // Any change in how we update Store/MemStore needs to also be done in other applyToMemstore!!!!
     boolean upsert = delta && store.getFamily().getMaxVersions() == 1;
     if (upsert) {
-      return store.upsert(cells, getSmallestReadPoint());
+      return ((HStore) store).upsert(cells, getSmallestReadPoint());
     } else {
-      return store.add(cells);
+      return ((HStore) store).add(cells);
     }
   }
 
@@ -3819,7 +3860,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       checkFamily(CellUtil.cloneFamily(cell));
       // Unreachable because checkFamily will throw exception
     }
-    return store.add(cell);
+    return ((HStore) store).add(cell);
   }
 
   @Override
@@ -4060,7 +4101,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       long editsCount = 0;
       long intervalEdits = 0;
       WAL.Entry entry;
-      Store store = null;
+      HStore store = null;
       boolean reported_once = false;
       ServerNonceManager ng = this.rsServices == null ? null : this.rsServices.getNonceManager();
 
@@ -4156,7 +4197,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             }
             // Figure which store the edit is meant for.
             if (store == null || !CellUtil.matchingFamily(cell, store.getFamily().getName())) {
-              store = getStore(cell);
+              store = getHStore(cell);
             }
             if (store == null) {
               // This should never happen.  Perhaps schema was changed between
@@ -4283,7 +4324,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
       startRegionOperation(Operation.REPLAY_EVENT);
       try {
-        Store store = this.getStore(compaction.getFamilyName().toByteArray());
+        HStore store = this.getHStore(compaction.getFamilyName().toByteArray());
         if (store == null) {
           LOG.warn(getRegionInfo().getEncodedName() + " : "
               + "Found Compaction WAL edit for deleted family:"
@@ -4866,7 +4907,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         for (StoreDescriptor storeDescriptor : bulkLoadEvent.getStoresList()) {
           // stores of primary may be different now
           family = storeDescriptor.getFamilyName().toByteArray();
-          Store store = getStore(family);
+          HStore store = getHStore(family);
           if (store == null) {
             LOG.warn(getRegionInfo().getEncodedName() + " : "
                     + "Received a bulk load marker from primary, but the family is not found. "
@@ -5068,7 +5109,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * @param cell Cell to add.
    * @return True if we should flush.
    */
-  protected boolean restoreEdit(final Store s, final Cell cell) {
+  protected boolean restoreEdit(final HStore s, final Cell cell) {
     long kvSize = s.add(cell);
     if (this.rsAccounting != null) {
       rsAccounting.addAndGetRegionReplayEditsSize(getRegionInfo().getRegionName(), kvSize);
@@ -5106,19 +5147,23 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
   @Override
   public Store getStore(final byte[] column) {
-    return this.stores.get(column);
+    return getHStore(column);
+  }
+
+  public HStore getHStore(final byte[] column) {
+    return (HStore) this.stores.get(column);
   }
 
   /**
    * Return HStore instance. Does not do any copy: as the number of store is limited, we
    *  iterate on the list.
    */
-  private Store getStore(Cell cell) {
+  private HStore getHStore(Cell cell) {
     for (Map.Entry<byte[], Store> famStore : stores.entrySet()) {
       if (Bytes.equals(
           cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength(),
           famStore.getKey(), 0, famStore.getKey().length)) {
-        return famStore.getValue();
+        return (HStore) famStore.getValue();
       }
     }
 
@@ -5423,7 +5468,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         byte[] familyName = p.getFirst();
         String path = p.getSecond();
 
-        Store store = getStore(familyName);
+        HStore store = getHStore(familyName);
         if (store == null) {
           IOException ioe = new org.apache.hadoop.hbase.DoNotRetryIOException(
               "No such column family " + Bytes.toStringBinary(familyName));
@@ -5481,7 +5526,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       for (Pair<byte[], String> p : familyPaths) {
         byte[] familyName = p.getFirst();
         String path = p.getSecond();
-        Store store = getStore(familyName);
+        HStore store = getHStore(familyName);
         try {
           String finalPath = path;
           if (bulkLoadListener != null) {
@@ -6853,7 +6898,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     }
     long before =  EnvironmentEdgeManager.currentTime();
     Scan scan = new Scan(get);
-
+    if (scan.getLoadColumnFamiliesOnDemandValue() == null) {
+      scan.setLoadColumnFamiliesOnDemand(isLoadingCfsOnDemandDefault());
+    }
     RegionScanner scanner = null;
     try {
       scanner = getScanner(scan, null, nonceGroup, nonce);
@@ -7026,8 +7073,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
                 // If no WAL, need to stamp it here.
                 CellUtil.setSequenceId(cell, sequenceId);
               }
-              Store store = getStore(cell);
-              addedSize += applyToMemstore(store, cell);
+              addedSize += applyToMemstore(getHStore(cell), cell);
             }
           }
           // STEP 8. Complete mvcc.
@@ -7233,7 +7279,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         dropMemstoreContents();
       }
       // If results is null, then client asked that we not return the calculated results.
-      return results != null && returnResults? Result.create(results): null;
+      return results != null && returnResults? Result.create(results): Result.EMPTY_RESULT;
     } finally {
       // Call complete always, even on success. doDelta is doing a Get READ_UNCOMMITTED when it goes
       // to get current value under an exclusive lock so no need so no need to wait to return to
@@ -7571,9 +7617,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   public static final long FIXED_OVERHEAD = ClassSize.align(
       ClassSize.OBJECT +
       ClassSize.ARRAY +
-      49 * ClassSize.REFERENCE + 2 * Bytes.SIZEOF_INT +
+      50 * ClassSize.REFERENCE + 2 * Bytes.SIZEOF_INT +
       (14 * Bytes.SIZEOF_LONG) +
-      5 * Bytes.SIZEOF_BOOLEAN);
+      6 * Bytes.SIZEOF_BOOLEAN);
 
   // woefully out of date - currently missing:
   // 1 x HashMap - coprocessorServiceHandlers

@@ -107,8 +107,6 @@ import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -4451,6 +4449,30 @@ public class TestFromClientSide {
   }
 
   @Test
+  public void testBatchAppendWithReturnResultFalse() throws Exception {
+    LOG.info("Starting testBatchAppendWithReturnResultFalse");
+    final TableName TABLENAME = TableName.valueOf("testBatchAppend");
+    Table table = TEST_UTIL.createTable(TABLENAME, FAMILY);
+    Append append1 = new Append(Bytes.toBytes("row1"));
+    append1.setReturnResults(false);
+    append1.add(FAMILY, Bytes.toBytes("f1"), Bytes.toBytes("value1"));
+    Append append2 = new Append(Bytes.toBytes("row1"));
+    append2.setReturnResults(false);
+    append2.add(FAMILY, Bytes.toBytes("f1"), Bytes.toBytes("value2"));
+    List<Append> appends = new ArrayList<>();
+    appends.add(append1);
+    appends.add(append2);
+    Object[] results = new Object[2];
+    table.batch(appends, results);
+    assertTrue(results.length == 2);
+    for(Object r : results) {
+      Result result = (Result)r;
+      assertTrue(result.isEmpty());
+    }
+    table.close();
+  }
+
+  @Test
   public void testAppend() throws Exception {
     LOG.info("Starting testAppend");
     final TableName TABLENAME = TableName.valueOf("testAppend");
@@ -4464,7 +4486,7 @@ public class TestFromClientSide {
     a.add(FAMILY, QUALIFIERS[0], v1);
     a.add(FAMILY, QUALIFIERS[1], v2);
     a.setReturnResults(false);
-    assertNullResult(t.append(a));
+    assertEmptyResult(t.append(a));
 
     a = new Append(ROW);
     a.add(FAMILY, QUALIFIERS[0], v2);
@@ -5418,6 +5440,41 @@ public class TestFromClientSide {
 
     table.close();
     TEST_UTIL.deleteTable(TABLE);
+  }
+
+  @Test
+  public void testEmptyFilterList() throws Exception {
+    // Test Initialization.
+    TableName TABLE = TableName.valueOf("testEmptyFilterList");
+    Table table = TEST_UTIL.createTable(TABLE, FAMILY);
+
+    // Insert one row each region
+    Put put = new Put(Bytes.toBytes("row"));
+    put.addColumn(FAMILY, QUALIFIER, VALUE);
+    table.put(put);
+
+    List<Result> scanResults = new LinkedList<>();    
+    Scan scan = new Scan();
+    scan.setFilter(new FilterList());
+    try (ResultScanner scanner = table.getScanner(scan)) {
+      for (Result r : scanner) {
+        scanResults.add(r);
+      }
+    }
+    assertEquals(1, scanResults.size());
+    Get g = new Get(Bytes.toBytes("row"));
+    g.setFilter(new FilterList());
+    Result getResult = table.get(g);
+    Result scanResult = scanResults.get(0);
+    assertEquals(scanResult.rawCells().length, getResult.rawCells().length);
+    for (int i = 0; i != scanResult.rawCells().length; ++i) {
+      Cell scanCell = scanResult.rawCells()[i];
+      Cell getCell = getResult.rawCells()[i];
+      assertEquals(0, Bytes.compareTo(CellUtil.cloneRow(scanCell), CellUtil.cloneRow(getCell)));
+      assertEquals(0, Bytes.compareTo(CellUtil.cloneFamily(scanCell), CellUtil.cloneFamily(getCell)));
+      assertEquals(0, Bytes.compareTo(CellUtil.cloneQualifier(scanCell), CellUtil.cloneQualifier(getCell)));
+      assertEquals(0, Bytes.compareTo(CellUtil.cloneValue(scanCell), CellUtil.cloneValue(getCell)));
+    }
   }
 
   @Test

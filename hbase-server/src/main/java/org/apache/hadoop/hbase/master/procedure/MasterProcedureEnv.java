@@ -25,14 +25,15 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.conf.ConfigurationObserver;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
 import org.apache.hadoop.hbase.master.MasterServices;
-import org.apache.hadoop.hbase.master.procedure.MasterProcedureScheduler.ProcedureEvent;
 import org.apache.hadoop.hbase.procedure2.Procedure;
+import org.apache.hadoop.hbase.procedure2.ProcedureEvent;
 import org.apache.hadoop.hbase.procedure2.store.ProcedureStore;
 import org.apache.hadoop.hbase.procedure2.store.wal.WALProcedureStore;
 import org.apache.hadoop.hbase.security.User;
@@ -42,7 +43,7 @@ import org.apache.hadoop.hbase.util.FSUtils;
 
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
-public class MasterProcedureEnv {
+public class MasterProcedureEnv implements ConfigurationObserver {
   private static final Log LOG = LogFactory.getLog(MasterProcedureEnv.class);
 
   @InterfaceAudience.Private
@@ -121,7 +122,12 @@ public class MasterProcedureEnv {
     return master.getMasterCoprocessorHost();
   }
 
+  @Deprecated
   public MasterProcedureScheduler getProcedureQueue() {
+    return procSched;
+  }
+
+  public MasterProcedureScheduler getProcedureScheduler() {
     return procSched;
   }
 
@@ -155,5 +161,10 @@ public class MasterProcedureEnv {
     } else {
       procSched.suspendEvent(event);
     }
+  }
+
+  @Override
+  public void onConfigurationChange(Configuration conf) {
+    master.getMasterProcedureExecutor().refreshConfiguration(conf);
   }
 }

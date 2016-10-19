@@ -1348,7 +1348,11 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
       final String encodedRegionName = ProtobufUtil.getRegionEncodedName(request.getRegion());
 
       requestCount.increment();
-      LOG.info("Close " + encodedRegionName + ", moving to " + sn);
+      if (sn == null) {
+        LOG.info("Close " + encodedRegionName + " without moving");
+      } else {
+        LOG.info("Close " + encodedRegionName + ", moving to " + sn);
+      }
       boolean closed = regionServer.closeRegion(encodedRegionName, false, sn);
       CloseRegionResponse.Builder builder = CloseRegionResponse.newBuilder().setClosed(closed);
       return builder.build();
@@ -2250,7 +2254,9 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
     }
     long before = EnvironmentEdgeManager.currentTime();
     Scan scan = new Scan(get);
-
+    if (scan.getLoadColumnFamiliesOnDemandValue() == null) {
+      scan.setLoadColumnFamiliesOnDemand(region.isLoadingCfsOnDemandDefault());
+    }
     RegionScanner scanner = null;
     try {
       scanner = region.getScanner(scan);
