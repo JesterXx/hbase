@@ -137,6 +137,6 @@ public class EnabledTableSnapshotHandler extends TakeSnapshotHandler {
       throws IOException {
     snapshotManifest.addMobRegion(regionInfo);
     monitor.rethrowException();
-    status.setStatus("Completed referencing HFiles for mob files of table: " + snapshotTable);
+    status.setStatus("Completed referencing HFiles for the mob region of table: " + snapshotTable);
   }
 }
