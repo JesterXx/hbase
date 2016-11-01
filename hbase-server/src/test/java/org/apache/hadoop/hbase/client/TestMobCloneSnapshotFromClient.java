@@ -114,6 +114,8 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
     admin.deleteSnapshot(snapshotName3);
     super.testCloneLinksAfterDelete();
     verifyRowCount(TEST_UTIL, clonedTableName3, snapshot3Rows);
+    admin.disableTable(clonedTableName3);
+    admin.deleteTable(clonedTableName3);
   }
   
   @Override
