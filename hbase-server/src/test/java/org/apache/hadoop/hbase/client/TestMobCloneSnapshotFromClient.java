@@ -44,7 +44,7 @@ import org.junit.experimental.categories.Category;
 @Category({LargeTests.class, ClientTests.class})
 public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient {
 
-  private boolean delayFlush = false;
+  private static boolean delayFlush = false;
 
   protected static void setupConfiguration() {
     TestCloneSnapshotFromClient.setupConfiguration();
@@ -62,6 +62,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
     // create Table and disable it
     createMobTable(TEST_UTIL, tableName, SnapshotTestingUtils.getSplitKeys(), getNumReplicas(),
       FAMILY);
+    delayFlush = false;
     admin.disableTable(tableName);
 
     // take an empty snapshot
@@ -100,7 +101,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
   public void testCloneLinksAfterDelete() throws IOException, InterruptedException {
     // delay the flush to make sure 
     delayFlush = true;
-    SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 500, FAMILY);
+    SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 20, FAMILY);
     long tid = System.currentTimeMillis();
     byte[] snapshotName3 = Bytes.toBytes("snaptb3-" + tid);
     TableName clonedTableName3 = TableName.valueOf("clonedtb3-" + System.currentTimeMillis());
@@ -127,7 +128,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
   /**
    * This coprocessor is used to delay the flush.
    */
-  public class DelayFlushCoprocessor extends BaseRegionObserver {
+  public static class DelayFlushCoprocessor extends BaseRegionObserver {
     @Override
     public void preFlush(ObserverContext<RegionCoprocessorEnvironment> e) throws IOException {
       if (delayFlush) {
