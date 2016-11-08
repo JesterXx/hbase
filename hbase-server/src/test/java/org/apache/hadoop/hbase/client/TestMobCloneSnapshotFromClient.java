@@ -23,6 +23,7 @@ import java.io.IOException;
 
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
@@ -133,7 +134,10 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
     public void preFlush(ObserverContext<RegionCoprocessorEnvironment> e) throws IOException {
       if (delayFlush) {
         try {
-          Thread.sleep(50);
+          if (Bytes.compareTo(e.getEnvironment().getRegionInfo().getStartKey(),
+            HConstants.EMPTY_START_ROW) != 0) {
+            Thread.sleep(50);
+          }
         } catch (InterruptedException e1) {
           throw new IOException(e1);
         }
