@@ -29,6 +29,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
 import org.apache.hadoop.hbase.coprocessor.ObserverContext;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
+import org.apache.hadoop.hbase.master.cleaner.TimeToLiveHFileCleaner;
 import org.apache.hadoop.hbase.mob.MobConstants;
 import org.apache.hadoop.hbase.snapshot.MobSnapshotTestingUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotTestingUtils;
@@ -49,6 +50,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
 
   protected static void setupConfiguration() {
     TestCloneSnapshotFromClient.setupConfiguration();
+    TEST_UTIL.getConfiguration().setLong(TimeToLiveHFileCleaner.TTL_CONF_KEY, 0);
     TEST_UTIL.getConfiguration().setInt(MobConstants.MOB_FILE_CACHE_SIZE_KEY, 0);
   }
 
@@ -74,7 +76,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
     try {
       // enable table and insert data
       admin.enableTable(tableName);
-      SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 500, FAMILY);
+      SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 20, FAMILY);
       snapshot0Rows = MobSnapshotTestingUtils.countMobRows(table);
       admin.disableTable(tableName);
 
@@ -83,7 +85,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
 
       // enable table and insert more data
       admin.enableTable(tableName);
-      SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 500, FAMILY);
+      SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 20, FAMILY);
       snapshot1Rows = MobSnapshotTestingUtils.countMobRows(table);
       admin.disableTable(tableName);
 
