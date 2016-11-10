@@ -138,7 +138,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
         try {
           if (Bytes.compareTo(e.getEnvironment().getRegionInfo().getStartKey(),
             HConstants.EMPTY_START_ROW) != 0) {
-            Thread.sleep(50);
+            Thread.sleep(100);
           }
         } catch (InterruptedException e1) {
           throw new IOException(e1);
