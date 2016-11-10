@@ -34,7 +34,6 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
-import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
@@ -396,7 +395,6 @@ public class HMobStore extends HStore {
     long readPt, boolean readEmptyValueOnMobCellMiss) throws IOException {
     FileSystem fs = getFileSystem();
     Throwable throwable = null;
-    boolean retry = true;
     for (Path location : locations) {
       MobFile file = null;
       Path path = new Path(location, fileName);
@@ -409,10 +407,8 @@ public class HMobStore extends HStore {
         throwable = e;
         if ((e instanceof FileNotFoundException) ||
             (e.getCause() instanceof FileNotFoundException)) {
-          retry = false;
           LOG.warn("Fail to read the cell, the mob file " + path + " doesn't exist", e);
         } else if (e instanceof CorruptHFileException) {
-          retry = false;
           LOG.error("The mob file " + path + " is corrupt", e);
           break;
         } else {
@@ -436,8 +432,6 @@ public class HMobStore extends HStore {
       + " or it is corrupt");
     if (readEmptyValueOnMobCellMiss) {
       return null;
-    } else if (!retry) {
-      throw new DoNotRetryIOException(throwable);
     } else if (throwable instanceof IOException) {
       throw (IOException) throwable;
     } else {
