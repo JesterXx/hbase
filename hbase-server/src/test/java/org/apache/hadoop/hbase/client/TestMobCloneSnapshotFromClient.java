@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.client;
 import static org.junit.Assert.assertEquals;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
@@ -102,7 +103,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
   @Test
   @Override
   public void testCloneLinksAfterDelete() throws IOException, InterruptedException {
-    // delay the flush to make sure 
+    // delay the flush to make sure
     delayFlush = true;
     SnapshotTestingUtils.loadData(TEST_UTIL, tableName, 20, FAMILY);
     long tid = System.currentTimeMillis();
@@ -121,7 +122,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
     admin.disableTable(clonedTableName3);
     admin.deleteTable(clonedTableName3);
   }
-  
+
   @Override
   protected void verifyRowCount(final HBaseTestingUtility util, final TableName tableName,
       long expectedRows) throws IOException {
@@ -141,7 +142,7 @@ public class TestMobCloneSnapshotFromClient extends TestCloneSnapshotFromClient 
             Thread.sleep(100);
           }
         } catch (InterruptedException e1) {
-          throw new IOException(e1);
+          throw new InterruptedIOException(e1.getMessage());
         }
       }
       super.preFlush(e);
