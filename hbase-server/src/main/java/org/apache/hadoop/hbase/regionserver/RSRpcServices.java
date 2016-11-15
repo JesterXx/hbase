@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.regionserver;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.BindException;
@@ -80,6 +81,7 @@ import org.apache.hadoop.hbase.exceptions.OutOfOrderScannerNextException;
 import org.apache.hadoop.hbase.exceptions.ScannerResetException;
 import org.apache.hadoop.hbase.filter.ByteArrayComparable;
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
+import org.apache.hadoop.hbase.io.hfile.CorruptHFileException;
 import org.apache.hadoop.hbase.ipc.HBaseRPCErrorHandler;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController;
 import org.apache.hadoop.hbase.ipc.PriorityFunction;
@@ -2957,6 +2959,11 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
           // scanner is closed here
           scannerClosed = true;
 
+          // If it is a CorruptHFileException or a FileNotFoundException, directly throw it.
+          // This can avoid the retry in the client side.
+          if (e instanceof CorruptHFileException || e instanceof FileNotFoundException) {
+            throw e;
+          }
           // We closed the scanner already. Instead of throwing the IOException, and client
           // retrying with the same scannerId only to get USE on the next RPC, we directly throw
           // a special exception to save an RPC.
