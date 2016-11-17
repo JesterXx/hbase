@@ -36,7 +36,7 @@ import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
 import org.apache.hadoop.hbase.coprocessor.ObserverContext;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.io.hfile.CorruptHFileException;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -48,7 +48,7 @@ import org.junit.rules.TestName;
 /**
  * Tests a scanner on a corrupt hfile.
  */
-@Category(SmallTests.class)
+@Category(MediumTests.class)
 public class TestScannerWithCorruptHFile {
   @Rule public TestName name = new TestName();
   private static final byte[] FAMILY_NAME = Bytes.toBytes("f");
