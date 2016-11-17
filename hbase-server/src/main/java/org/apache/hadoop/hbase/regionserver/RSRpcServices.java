@@ -2962,7 +2962,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
           // If it is a CorruptHFileException or a FileNotFoundException, directly throw it.
           // This can avoid the retry in the client side.
           if (e instanceof CorruptHFileException || e instanceof FileNotFoundException) {
-            throw e;
+            throw new DoNotRetryIOException(e);
           }
           // We closed the scanner already. Instead of throwing the IOException, and client
           // retrying with the same scannerId only to get USE on the next RPC, we directly throw

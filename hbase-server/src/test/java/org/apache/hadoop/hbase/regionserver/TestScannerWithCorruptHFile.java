@@ -21,8 +21,7 @@ package org.apache.hadoop.hbase.regionserver;
 import java.io.IOException;
 import java.util.List;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
@@ -51,7 +50,6 @@ import org.junit.rules.TestName;
  */
 @Category(SmallTests.class)
 public class TestScannerWithCorruptHFile {
-  private static final Log LOG = LogFactory.getLog(TestScannerWithCorruptHFile.class);
   @Rule public TestName name = new TestName();
   private static final byte[] FAMILY_NAME = Bytes.toBytes("f");
   private final static HBaseTestingUtility TEST_UTIL = HBaseTestingUtility.createLocalHTU();
@@ -64,11 +62,7 @@ public class TestScannerWithCorruptHFile {
 
   @AfterClass
   public static void tearDown() throws Exception {
-    try {
-      TEST_UTIL.shutdownMiniCluster();
-    } catch (Exception e) {
-      LOG.warn("fail to shut down the cluster", e);
-    }
+    TEST_UTIL.shutdownMiniCluster();
   }
 
   public static class CorruptHFileCoprocessor extends BaseRegionObserver {
@@ -79,7 +73,7 @@ public class TestScannerWithCorruptHFile {
     }
   }
 
-  @Test(expected = CorruptHFileException.class)
+  @Test(expected = DoNotRetryIOException.class)
   public void testScanOnCorruptHFile() throws IOException {
     TableName tableName = TableName.valueOf(name.getMethodName());
     HTableDescriptor htd = new HTableDescriptor(tableName);
