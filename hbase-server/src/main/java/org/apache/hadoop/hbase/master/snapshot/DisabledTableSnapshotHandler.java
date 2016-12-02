@@ -25,10 +25,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
-import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.client.RegionReplicaUtil;
@@ -38,7 +36,6 @@ import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.snapshot.ClientSnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotManifest;
-import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.FSUtils;
 import org.apache.hadoop.hbase.util.ModifyRegionUtils;
 import org.apache.hadoop.hbase.util.Pair;
@@ -86,14 +83,7 @@ public class DisabledTableSnapshotHandler extends TakeSnapshotHandler {
         }
       }
       // handle the mob files if any.
-      HColumnDescriptor[] hcds = htd.getColumnFamilies();
-      boolean mobEnabled = false;
-      for (HColumnDescriptor hcd : hcds) {
-        if (hcd.isMobEnabled()) {
-          mobEnabled = true;
-          break;
-        }
-      }
+      boolean mobEnabled = MobUtils.hasMobColumns(htd);
       if (mobEnabled) {
         // snapshot the mob files as a offline region.
         HRegionInfo mobRegionInfo = MobUtils.getMobRegionInfo(htd.getTableName());

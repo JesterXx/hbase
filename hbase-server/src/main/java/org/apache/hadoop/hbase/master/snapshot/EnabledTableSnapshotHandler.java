@@ -25,7 +25,6 @@ import java.util.Set;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.errorhandling.ForeignException;
@@ -106,14 +105,7 @@ public class EnabledTableSnapshotHandler extends TakeSnapshotHandler {
         }
       }
       // handle the mob files if any.
-      HColumnDescriptor[] hcds = htd.getColumnFamilies();
-      boolean mobEnabled = false;
-      for (HColumnDescriptor hcd : hcds) {
-        if (hcd.isMobEnabled()) {
-          mobEnabled = true;
-          break;
-        }
-      }
+      boolean mobEnabled = MobUtils.hasMobColumns(htd);
       if (mobEnabled) {
         LOG.info("Taking snapshot for mob files in table " + htd.getTableName());
         // snapshot the mob files as a offline region.
