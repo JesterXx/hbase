@@ -261,9 +261,7 @@ public class AccessController extends BaseMasterAndRegionObserver
     for (Map.Entry<byte[], List<Cell>> f : familyMap.entrySet()) {
       List<Cell> cells = f.getValue();
       for (Cell cell: cells) {
-        if (Bytes.equals(cell.getFamilyArray(), cell.getFamilyOffset(),
-            cell.getFamilyLength(), AccessControlLists.ACL_LIST_FAMILY, 0,
-            AccessControlLists.ACL_LIST_FAMILY.length)) {
+        if (CellUtil.matchingFamily(cell, AccessControlLists.ACL_LIST_FAMILY)) {
           entries.add(CellUtil.cloneRow(cell));
         }
       }
@@ -1446,6 +1444,14 @@ public class AccessController extends BaseMasterAndRegionObserver
         Action.ADMIN, Action.CREATE);
   }
 
+  @Override
+  public void preSplitRegion(
+      final ObserverContext<MasterCoprocessorEnvironment> ctx,
+      final TableName tableName,
+      final byte[] splitRow) throws IOException {
+    requirePermission(getActiveUser(ctx), "split", tableName, null, null, Action.ADMIN);
+  }
+
   /* ---- RegionObserver implementation ---- */
 
   @Override
@@ -1507,19 +1513,6 @@ public class AccessController extends BaseMasterAndRegionObserver
   public void preFlush(ObserverContext<RegionCoprocessorEnvironment> c) throws IOException {
     requirePermission(getActiveUser(c), "flush", getTableName(c.getEnvironment()), null, null,
         Action.ADMIN, Action.CREATE);
-  }
-
-  @Override
-  public void preSplit(ObserverContext<RegionCoprocessorEnvironment> c) throws IOException {
-    requirePermission(getActiveUser(c), "split", getTableName(c.getEnvironment()), null, null,
-        Action.ADMIN);
-  }
-
-  @Override
-  public void preSplit(ObserverContext<RegionCoprocessorEnvironment> c,
-      byte[] splitRow) throws IOException {
-    requirePermission(getActiveUser(c), "split", getTableName(c.getEnvironment()), null, null,
-        Action.ADMIN);
   }
 
   @Override

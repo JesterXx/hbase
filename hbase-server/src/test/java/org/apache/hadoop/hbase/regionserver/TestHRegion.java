@@ -43,6 +43,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.security.PrivilegedExceptionAction;
@@ -90,6 +94,7 @@ import org.apache.hadoop.hbase.HDFSBlocksDistribution;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.MultithreadedTestUtil;
 import org.apache.hadoop.hbase.MultithreadedTestUtil.RepeatingTestThread;
@@ -126,19 +131,11 @@ import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.monitoring.TaskMonitor;
-import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.CompactionDescriptor;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.FlushDescriptor;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.FlushDescriptor.FlushAction;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.FlushDescriptor.StoreFlushDescriptor;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.RegionEventDescriptor;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.StoreDescriptor;
 import org.apache.hadoop.hbase.regionserver.HRegion.RegionScannerImpl;
 import org.apache.hadoop.hbase.regionserver.Region.RowLock;
 import org.apache.hadoop.hbase.regionserver.TestStore.FaultyFileSystem;
 import org.apache.hadoop.hbase.regionserver.handler.FinishRegionRecoveringHandler;
 import org.apache.hadoop.hbase.regionserver.wal.FSHLog;
-import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.MetricsWAL;
 import org.apache.hadoop.hbase.regionserver.wal.MetricsWALSource;
 import org.apache.hadoop.hbase.regionserver.wal.WALActionsListener;
@@ -146,11 +143,17 @@ import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.regionserver.wal.WALUtil;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.shaded.com.google.protobuf.ByteString;
+import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.CompactionDescriptor;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.FlushDescriptor;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.FlushDescriptor.FlushAction;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.FlushDescriptor.StoreFlushDescriptor;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.RegionEventDescriptor;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.StoreDescriptor;
 import org.apache.hadoop.hbase.test.MetricsAssertHelper;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.testclassification.VerySlowRegionServerTests;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManagerTestHelper;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -181,10 +184,6 @@ import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-
 /**
  * Basic stand-alone testing of HRegion.  No clusters!
  *
@@ -197,7 +196,8 @@ public class TestHRegion {
   // Do not spin up clusters in here. If you need to spin up a cluster, do it
   // over in TestHRegionOnCluster.
   private static final Log LOG = LogFactory.getLog(TestHRegion.class);
-  @Rule public TestName name = new TestName();
+  @Rule
+  public TestName name = new TestName();
   @ClassRule
   public static final TestRule timeout =
       CategoryBasedTimeout.forClass(TestHRegion.class);
@@ -234,7 +234,7 @@ public class TestHRegion {
     CONF = TEST_UTIL.getConfiguration();
     dir = TEST_UTIL.getDataTestDir("TestHRegion").toString();
     method = name.getMethodName();
-    tableName = TableName.valueOf(name.getMethodName());
+    tableName = TableName.valueOf(method);
   }
 
   @After
@@ -244,17 +244,13 @@ public class TestHRegion {
     TEST_UTIL.cleanupTestDir();
   }
 
-  String getName() {
-    return name.getMethodName();
-  }
-
   /**
    * Test that I can use the max flushed sequence id after the close.
    * @throws IOException
    */
   @Test
   public void testSequenceId() throws IOException {
-    HRegion region = initHRegion(tableName, name.getMethodName(), CONF, COLUMN_FAMILY_BYTES);
+    HRegion region = initHRegion(tableName, method, CONF, COLUMN_FAMILY_BYTES);
     assertEquals(HConstants.NO_SEQNUM, region.getMaxFlushedSeqId());
     // Weird. This returns 0 if no store files or no edits. Afraid to change it.
     assertEquals(0, (long)region.getMaxStoreSeqId().get(COLUMN_FAMILY_BYTES));
@@ -262,8 +258,8 @@ public class TestHRegion {
     assertEquals(HConstants.NO_SEQNUM, region.getMaxFlushedSeqId());
     assertEquals(0, (long)region.getMaxStoreSeqId().get(COLUMN_FAMILY_BYTES));
     // Open region again.
-    region = initHRegion(tableName, name.getMethodName(), CONF, COLUMN_FAMILY_BYTES);
-    byte [] value = Bytes.toBytes(name.getMethodName());
+    region = initHRegion(tableName, method, CONF, COLUMN_FAMILY_BYTES);
+    byte [] value = Bytes.toBytes(method);
     // Make a random put against our cf.
     Put put = new Put(value);
     put.addColumn(COLUMN_FAMILY_BYTES, null, value);
@@ -289,10 +285,10 @@ public class TestHRegion {
    */
   @Test
   public void testCloseCarryingSnapshot() throws IOException {
-    HRegion region = initHRegion(tableName, name.getMethodName(), CONF, COLUMN_FAMILY_BYTES);
+    HRegion region = initHRegion(tableName, method, CONF, COLUMN_FAMILY_BYTES);
     Store store = region.getStore(COLUMN_FAMILY_BYTES);
     // Get some random bytes.
-    byte [] value = Bytes.toBytes(name.getMethodName());
+    byte [] value = Bytes.toBytes(method);
     // Make a random put against our cf.
     Put put = new Put(value);
     put.addColumn(COLUMN_FAMILY_BYTES, null, value);
@@ -336,12 +332,12 @@ public class TestHRegion {
     FileSystem fs = FileSystem.get(CONF);
     Path rootDir = new Path(dir + "testMemstoreSnapshotSize");
     MyFaultyFSLog faultyLog = new MyFaultyFSLog(fs, rootDir, "testMemstoreSnapshotSize", CONF);
-    HRegion region = initHRegion(tableName, null, null, name.getMethodName(),
-      CONF, false, Durability.SYNC_WAL, faultyLog, COLUMN_FAMILY_BYTES);
+    HRegion region = initHRegion(tableName, null, null, false, Durability.SYNC_WAL, faultyLog,
+        COLUMN_FAMILY_BYTES);
 
     Store store = region.getStore(COLUMN_FAMILY_BYTES);
     // Get some random bytes.
-    byte [] value = Bytes.toBytes(name.getMethodName());
+    byte [] value = Bytes.toBytes(method);
     faultyLog.setStoreFlushCtx(store.createFlushContext(12345));
 
     Put put = new Put(value);
@@ -356,7 +352,7 @@ public class TestHRegion {
     } finally {
       assertTrue("The regionserver should have thrown an exception", threwIOE);
     }
-    long sz = store.getFlushableSize();
+    long sz = store.getSizeToFlush().getDataSize();
     assertTrue("flushable size should be zero, but it is " + sz, sz == 0);
     HBaseTestingUtility.closeRegionAndWAL(region);
   }
@@ -386,13 +382,13 @@ public class TestHRegion {
     FileSystem fs = FileSystem.get(CONF);
     Path rootDir = new Path(dir + "testMemstoreSizeWithFlushCanceling");
     FSHLog hLog = new FSHLog(fs, rootDir, "testMemstoreSizeWithFlushCanceling", CONF);
-    HRegion region = initHRegion(tableName, null, null, name.getMethodName(),
-        CONF, false, Durability.SYNC_WAL, hLog, COLUMN_FAMILY_BYTES);
+    HRegion region = initHRegion(tableName, null, null, false, Durability.SYNC_WAL, hLog,
+        COLUMN_FAMILY_BYTES);
     Store store = region.getStore(COLUMN_FAMILY_BYTES);
     assertEquals(0, region.getMemstoreSize());
 
     // Put some value and make sure flush could be completed normally
-    byte [] value = Bytes.toBytes(name.getMethodName());
+    byte [] value = Bytes.toBytes(method);
     Put put = new Put(value);
     put.addColumn(COLUMN_FAMILY_BYTES, Bytes.toBytes("abc"), value);
     region.put(put);
@@ -400,7 +396,7 @@ public class TestHRegion {
     assertTrue(onePutSize > 0);
     region.flush(true);
     assertEquals("memstoreSize should be zero", 0, region.getMemstoreSize());
-    assertEquals("flushable size should be zero", 0, store.getFlushableSize());
+    assertEquals("flushable size should be zero", 0, store.getSizeToFlush().getDataSize());
 
     // save normalCPHost and replaced by mockedCPHost, which will cancel flush requests
     RegionCoprocessorHost normalCPHost = region.getCoprocessorHost();
@@ -411,13 +407,14 @@ public class TestHRegion {
     region.put(put);
     region.flush(true);
     assertEquals("memstoreSize should NOT be zero", onePutSize, region.getMemstoreSize());
-    assertEquals("flushable size should NOT be zero", onePutSize, store.getFlushableSize());
+    assertEquals("flushable size should NOT be zero", onePutSize,
+        store.getSizeToFlush().getDataSize());
 
     // set normalCPHost and flush again, the snapshot will be flushed
     region.setCoprocessorHost(normalCPHost);
     region.flush(true);
     assertEquals("memstoreSize should be zero", 0, region.getMemstoreSize());
-    assertEquals("flushable size should be zero", 0, store.getFlushableSize());
+    assertEquals("flushable size should be zero", 0, store.getSizeToFlush().getDataSize());
     HBaseTestingUtility.closeRegionAndWAL(region);
   }
 
@@ -427,13 +424,13 @@ public class TestHRegion {
     FileSystem fs = FileSystem.get(CONF);
     Path rootDir = new Path(dir + testName);
     FSHLog hLog = new FSHLog(fs, rootDir, testName, CONF);
-    HRegion region = initHRegion(tableName, null, null, name.getMethodName(),
-        CONF, false, Durability.SYNC_WAL, hLog, COLUMN_FAMILY_BYTES);
+    HRegion region = initHRegion(tableName, null, null, false, Durability.SYNC_WAL, hLog,
+        COLUMN_FAMILY_BYTES);
     Store store = region.getStore(COLUMN_FAMILY_BYTES);
     assertEquals(0, region.getMemstoreSize());
 
     // Put one value
-    byte [] value = Bytes.toBytes(name.getMethodName());
+    byte [] value = Bytes.toBytes(method);
     Put put = new Put(value);
     put.addColumn(COLUMN_FAMILY_BYTES, Bytes.toBytes("abc"), value);
     region.put(put);
@@ -452,9 +449,10 @@ public class TestHRegion {
       fail("Should have failed with IOException");
     } catch (IOException expected) {
     }
-    long expectedSize = onePutSize * 2 - ClassSize.ARRAY;
+    long expectedSize = onePutSize * 2;
     assertEquals("memstoreSize should be incremented", expectedSize, region.getMemstoreSize());
-    assertEquals("flushable size should be incremented", expectedSize, store.getFlushableSize());
+    assertEquals("flushable size should be incremented", expectedSize,
+        store.getSizeToFlush().getDataSize());
 
     region.setCoprocessorHost(null);
     HBaseTestingUtility.closeRegionAndWAL(region);
@@ -478,12 +476,11 @@ public class TestHRegion {
   @Test
   public void testFlushSizeAccounting() throws Exception {
     final Configuration conf = HBaseConfiguration.create(CONF);
-    final String callingMethod = name.getMethodName();
-    final WAL wal = createWALCompatibleWithFaultyFileSystem(callingMethod, conf, tableName);
+    final WAL wal = createWALCompatibleWithFaultyFileSystem(method, conf, tableName);
     // Only retry once.
     conf.setInt("hbase.hstore.flush.retries.number", 1);
     final User user =
-      User.createUserForTesting(conf, this.name.getMethodName(), new String[]{"foo"});
+      User.createUserForTesting(conf, method, new String[]{"foo"});
     // Inject our faulty LocalFileSystem
     conf.setClass("fs.file.impl", FaultyFileSystem.class, FileSystem.class);
     user.runAs(new PrivilegedExceptionAction<Object>() {
@@ -496,8 +493,8 @@ public class TestHRegion {
         HRegion region = null;
         try {
           // Initialize region
-          region = initHRegion(tableName, null, null, callingMethod, conf, false,
-              Durability.SYNC_WAL, wal, COLUMN_FAMILY_BYTES);
+          region = initHRegion(tableName, null, null, false, Durability.SYNC_WAL, wal,
+              COLUMN_FAMILY_BYTES);
           long size = region.getMemstoreSize();
           Assert.assertEquals(0, size);
           // Put one item into memstore.  Measure the size of one item in memstore.
@@ -524,14 +521,14 @@ public class TestHRegion {
           p2.add(new KeyValue(row, COLUMN_FAMILY_BYTES, qual2, 2, (byte[])null));
           p2.add(new KeyValue(row, COLUMN_FAMILY_BYTES, qual3, 3, (byte[])null));
           region.put(p2);
-          long expectedSize = sizeOfOnePut * 3- ClassSize.ARRAY;
+          long expectedSize = sizeOfOnePut * 3;
           Assert.assertEquals(expectedSize, region.getMemstoreSize());
           // Do a successful flush.  It will clear the snapshot only.  Thats how flushes work.
           // If already a snapshot, we clear it else we move the memstore to be snapshot and flush
           // it
           region.flush(true);
           // Make sure our memory accounting is right.
-          Assert.assertEquals(sizeOfOnePut * 2 - ClassSize.ARRAY, region.getMemstoreSize());
+          Assert.assertEquals(sizeOfOnePut * 2, region.getMemstoreSize());
         } finally {
           HBaseTestingUtility.closeRegionAndWAL(region);
         }
@@ -544,12 +541,11 @@ public class TestHRegion {
   @Test
   public void testCloseWithFailingFlush() throws Exception {
     final Configuration conf = HBaseConfiguration.create(CONF);
-    final String callingMethod = name.getMethodName();
-    final WAL wal = createWALCompatibleWithFaultyFileSystem(callingMethod, conf, tableName);
+    final WAL wal = createWALCompatibleWithFaultyFileSystem(method, conf, tableName);
     // Only retry once.
     conf.setInt("hbase.hstore.flush.retries.number", 1);
     final User user =
-      User.createUserForTesting(conf, this.name.getMethodName(), new String[]{"foo"});
+      User.createUserForTesting(conf, this.method, new String[]{"foo"});
     // Inject our faulty LocalFileSystem
     conf.setClass("fs.file.impl", FaultyFileSystem.class, FileSystem.class);
     user.runAs(new PrivilegedExceptionAction<Object>() {
@@ -562,7 +558,7 @@ public class TestHRegion {
         HRegion region = null;
         try {
           // Initialize region
-          region = initHRegion(tableName, null, null, callingMethod, conf, false,
+          region = initHRegion(tableName, null, null, false,
               Durability.SYNC_WAL, wal, COLUMN_FAMILY_BYTES);
           long size = region.getMemstoreSize();
           Assert.assertEquals(0, size);
@@ -676,8 +672,6 @@ public class TestHRegion {
 
   @Test
   public void testSkipRecoveredEditsReplay() throws Exception {
-    String method = "testSkipRecoveredEditsReplay";
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     this.region = initHRegion(tableName, method, CONF, family);
     final WALFactory wals = new WALFactory(CONF, null, method);
@@ -700,7 +694,7 @@ public class TestHRegion {
         WALEdit edit = new WALEdit();
         edit.add(new KeyValue(row, family, Bytes.toBytes(i), time, KeyValue.Type.Put, Bytes
             .toBytes(i)));
-        writer.append(new WAL.Entry(new HLogKey(regionName, tableName, i, time,
+        writer.append(new WAL.Entry(new WALKey(regionName, tableName, i, time,
             HConstants.DEFAULT_CLUSTER_ID), edit));
 
         writer.close();
@@ -729,8 +723,6 @@ public class TestHRegion {
 
   @Test
   public void testSkipRecoveredEditsReplaySomeIgnored() throws Exception {
-    String method = "testSkipRecoveredEditsReplaySomeIgnored";
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     this.region = initHRegion(tableName, method, CONF, family);
     final WALFactory wals = new WALFactory(CONF, null, method);
@@ -753,7 +745,7 @@ public class TestHRegion {
         WALEdit edit = new WALEdit();
         edit.add(new KeyValue(row, family, Bytes.toBytes(i), time, KeyValue.Type.Put, Bytes
             .toBytes(i)));
-        writer.append(new WAL.Entry(new HLogKey(regionName, tableName, i, time,
+        writer.append(new WAL.Entry(new WALKey(regionName, tableName, i, time,
             HConstants.DEFAULT_CLUSTER_ID), edit));
 
         writer.close();
@@ -819,8 +811,6 @@ public class TestHRegion {
 
   @Test
   public void testSkipRecoveredEditsReplayTheLastFileIgnored() throws Exception {
-    String method = "testSkipRecoveredEditsReplayTheLastFileIgnored";
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     this.region = initHRegion(tableName, method, CONF, family);
     final WALFactory wals = new WALFactory(CONF, null, method);
@@ -858,7 +848,7 @@ public class TestHRegion {
           edit.add(new KeyValue(row, family, Bytes.toBytes(i), time, KeyValue.Type.Put, Bytes
             .toBytes(i)));
         }
-        writer.append(new WAL.Entry(new HLogKey(regionName, tableName, i, time,
+        writer.append(new WAL.Entry(new WALKey(regionName, tableName, i, time,
             HConstants.DEFAULT_CLUSTER_ID), edit));
         writer.close();
       }
@@ -887,9 +877,8 @@ public class TestHRegion {
     testRecoveredEditsReplayCompaction(false);
     testRecoveredEditsReplayCompaction(true);
   }
+
   public void testRecoveredEditsReplayCompaction(boolean mismatchedRegionName) throws Exception {
-    String method = name.getMethodName();
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     this.region = initHRegion(tableName, method, CONF, family);
     final WALFactory wals = new WALFactory(CONF, null, method);
@@ -956,7 +945,7 @@ public class TestHRegion {
 
       long time = System.nanoTime();
 
-      writer.append(new WAL.Entry(new HLogKey(regionName, tableName, 10, time,
+      writer.append(new WAL.Entry(new WALKey(regionName, tableName, 10, time,
           HConstants.DEFAULT_CLUSTER_ID), WALEdit.createCompaction(region.getRegionInfo(),
           compactionDescriptor)));
       writer.close();
@@ -998,8 +987,6 @@ public class TestHRegion {
   @Test
   public void testFlushMarkers() throws Exception {
     // tests that flush markers are written to WAL and handled at recovered edits
-    String method = name.getMethodName();
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     Path logDir = TEST_UTIL.getDataTestDirOnTestFS(method + ".log");
     final Configuration walConf = new Configuration(TEST_UTIL.getConfiguration());
@@ -1008,7 +995,7 @@ public class TestHRegion {
     final WAL wal = wals.getWAL(tableName.getName(), tableName.getNamespace());
 
     this.region = initHRegion(tableName, HConstants.EMPTY_START_ROW,
-      HConstants.EMPTY_END_ROW, method, CONF, false, Durability.USE_DEFAULT, wal, family);
+      HConstants.EMPTY_END_ROW, false, Durability.USE_DEFAULT, wal, family);
     try {
       Path regiondir = region.getRegionFileSystem().getRegionDir();
       FileSystem fs = region.getRegionFileSystem().getFileSystem();
@@ -1152,8 +1139,6 @@ public class TestHRegion {
   @Test
   public void testFlushMarkersWALFail() throws Exception {
     // test the cases where the WAL append for flush markers fail.
-    String method = name.getMethodName();
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
 
     // spy an actual WAL implementation to throw exception (was not able to mock)
@@ -1201,7 +1186,7 @@ public class TestHRegion {
           }
 
           @Override
-          public long getLength() throws IOException {
+          public long getLength() {
             return w.getLength();
           }
         };
@@ -1209,9 +1194,9 @@ public class TestHRegion {
     }
     FailAppendFlushMarkerWAL wal =
       new FailAppendFlushMarkerWAL(FileSystem.get(walConf), FSUtils.getRootDir(walConf),
-        getName(), walConf);
+        method, walConf);
     this.region = initHRegion(tableName, HConstants.EMPTY_START_ROW,
-      HConstants.EMPTY_END_ROW, method, CONF, false, Durability.USE_DEFAULT, wal, family);
+      HConstants.EMPTY_END_ROW, false, Durability.USE_DEFAULT, wal, family);
     try {
       int i = 0;
       Put put = new Put(Bytes.toBytes(i));
@@ -1240,10 +1225,10 @@ public class TestHRegion {
       // 2. Test case where START_FLUSH succeeds but COMMIT_FLUSH will throw exception
       wal.flushActions = new FlushAction [] {FlushAction.COMMIT_FLUSH};
       wal = new FailAppendFlushMarkerWAL(FileSystem.get(walConf), FSUtils.getRootDir(walConf),
-            getName(), walConf);
+            method, walConf);
 
       this.region = initHRegion(tableName, HConstants.EMPTY_START_ROW,
-        HConstants.EMPTY_END_ROW, method, CONF, false, Durability.USE_DEFAULT, wal, family);
+        HConstants.EMPTY_END_ROW, false, Durability.USE_DEFAULT, wal, family);
       region.put(put);
 
       // 3. Test case where ABORT_FLUSH will throw exception.
@@ -1269,13 +1254,11 @@ public class TestHRegion {
 
   @Test
   public void testGetWhileRegionClose() throws IOException {
-    TableName tableName = TableName.valueOf(name.getMethodName());
     Configuration hc = initSplit();
     int numRows = 100;
     byte[][] families = { fam1, fam2, fam3 };
 
     // Setting up region
-    String method = name.getMethodName();
     this.region = initHRegion(tableName, method, hc, families);
     try {
       // Put data in region
@@ -1364,7 +1347,7 @@ public class TestHRegion {
     TableName TABLE = TableName.valueOf("testWeirdCacheBehaviour");
     byte[][] FAMILIES = new byte[][] { Bytes.toBytes("trans-blob"), Bytes.toBytes("trans-type"),
         Bytes.toBytes("trans-date"), Bytes.toBytes("trans-tags"), Bytes.toBytes("trans-group") };
-    this.region = initHRegion(TABLE, getName(), CONF, FAMILIES);
+    this.region = initHRegion(TABLE, method, CONF, FAMILIES);
     try {
       String value = "this is the value";
       String value2 = "this is some other value";
@@ -1405,7 +1388,7 @@ public class TestHRegion {
   @Test
   public void testAppendWithReadOnlyTable() throws Exception {
     TableName TABLE = TableName.valueOf("readOnlyTable");
-    this.region = initHRegion(TABLE, getName(), CONF, true, Bytes.toBytes("somefamily"));
+    this.region = initHRegion(TABLE, method, CONF, true, Bytes.toBytes("somefamily"));
     boolean exceptionCaught = false;
     Append append = new Append(Bytes.toBytes("somerow"));
     append.setDurability(Durability.SKIP_WAL);
@@ -1425,7 +1408,7 @@ public class TestHRegion {
   @Test
   public void testIncrWithReadOnlyTable() throws Exception {
     TableName TABLE = TableName.valueOf("readOnlyTable");
-    this.region = initHRegion(TABLE, getName(), CONF, true, Bytes.toBytes("somefamily"));
+    this.region = initHRegion(TABLE, method, CONF, true, Bytes.toBytes("somefamily"));
     boolean exceptionCaught = false;
     Increment inc = new Increment(Bytes.toBytes("somerow"));
     inc.setDurability(Durability.SKIP_WAL);
@@ -1516,11 +1499,10 @@ public class TestHRegion {
 
   @Test
   public void testFamilyWithAndWithoutColon() throws Exception {
-    TableName b = TableName.valueOf(getName());
     byte[] cf = Bytes.toBytes(COLUMN_FAMILY);
-    this.region = initHRegion(b, getName(), CONF, cf);
+    this.region = initHRegion(tableName, method, CONF, cf);
     try {
-      Put p = new Put(b.toBytes());
+      Put p = new Put(tableName.toBytes());
       byte[] cfwithcolon = Bytes.toBytes(COLUMN_FAMILY + ":");
       p.addColumn(cfwithcolon, cfwithcolon, cfwithcolon);
       boolean exception = false;
@@ -1541,7 +1523,7 @@ public class TestHRegion {
     byte[] cf = Bytes.toBytes(COLUMN_FAMILY);
     byte[] qual = Bytes.toBytes("qual");
     byte[] val = Bytes.toBytes("val");
-    this.region = initHRegion(TableName.valueOf(getName()), getName(), CONF, cf);
+    this.region = initHRegion(tableName, method, CONF, cf);
     MetricsWALSource source = CompatibilitySingletonFactory.getInstance(MetricsWALSource.class);
     try {
       long syncs = metricsAssertHelper.getCounter("syncTimeNumOps", source);
@@ -1582,7 +1564,7 @@ public class TestHRegion {
     byte[] cf = Bytes.toBytes(COLUMN_FAMILY);
     byte[] qual = Bytes.toBytes("qual");
     byte[] val = Bytes.toBytes("val");
-    this.region = initHRegion(TableName.valueOf(getName()), getName(), CONF, cf);
+    this.region = initHRegion(tableName, method, CONF, cf);
     MetricsWALSource source = CompatibilitySingletonFactory.getInstance(MetricsWALSource.class);
     try {
       long syncs = metricsAssertHelper.getCounter("syncTimeNumOps", source);
@@ -1681,14 +1663,13 @@ public class TestHRegion {
 
   @Test
   public void testBatchPutWithTsSlop() throws Exception {
-    TableName b = TableName.valueOf(getName());
     byte[] cf = Bytes.toBytes(COLUMN_FAMILY);
     byte[] qual = Bytes.toBytes("qual");
     byte[] val = Bytes.toBytes("val");
 
     // add data with a timestamp that is too recent for range. Ensure assert
     CONF.setInt("hbase.hregion.keyvalue.timestamp.slop.millisecs", 1000);
-    this.region = initHRegion(b, getName(), CONF, cf);
+    this.region = initHRegion(tableName, method, CONF, cf);
 
     try {
       MetricsWALSource source = CompatibilitySingletonFactory.getInstance(MetricsWALSource.class);
@@ -1728,7 +1709,6 @@ public class TestHRegion {
     byte[] val2 = Bytes.toBytes("value2");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Putting empty data in key
@@ -1802,7 +1782,6 @@ public class TestHRegion {
     byte[] val2 = Bytes.toBytes("value2");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Putting data in key
@@ -1835,7 +1814,6 @@ public class TestHRegion {
     byte[] val1 = Bytes.toBytes("value1");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Putting data in key
@@ -1871,7 +1849,6 @@ public class TestHRegion {
     byte[] val4 = Bytes.toBytes("value4");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Putting val3 in key
@@ -1967,7 +1944,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam2 };
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       // Putting data in the key to check
@@ -2004,8 +1980,7 @@ public class TestHRegion {
 
   @Test
   public void testCheckAndPut_wrongRowInPut() throws IOException {
-    TableName tableName = TableName.valueOf(name.getMethodName());
-    this.region = initHRegion(tableName, this.getName(), CONF, COLUMNS);
+    this.region = initHRegion(tableName, method, CONF, COLUMNS);
     try {
       Put put = new Put(row2);
       put.addColumn(fam1, qual1, value1);
@@ -2038,7 +2013,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam2 };
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       // Put content
@@ -2113,7 +2087,6 @@ public class TestHRegion {
     put.addColumn(fam1, qual, (long) 1, value);
     put.addColumn(fam1, qual, (long) 2, value);
 
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       region.put(put);
@@ -2143,7 +2116,6 @@ public class TestHRegion {
     byte[] fam4 = Bytes.toBytes("fam4");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1, fam2, fam3);
     try {
       List<Cell> kvs = new ArrayList<Cell>();
@@ -2182,7 +2154,6 @@ public class TestHRegion {
   public void testDelete_mixed() throws IOException, InterruptedException {
     byte[] fam = Bytes.toBytes("info");
     byte[][] families = { fam };
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       EnvironmentEdgeManagerTestHelper.injectEdge(new IncrementingEnvironmentEdge());
@@ -2250,7 +2221,6 @@ public class TestHRegion {
   public void testDeleteRowWithFutureTs() throws IOException {
     byte[] fam = Bytes.toBytes("info");
     byte[][] families = { fam };
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       byte[] row = Bytes.toBytes("table_name");
@@ -2293,7 +2263,6 @@ public class TestHRegion {
   public void testPutWithLatestTS() throws IOException {
     byte[] fam = Bytes.toBytes("info");
     byte[][] families = { fam };
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       byte[] row = Bytes.toBytes("row1");
@@ -2345,7 +2314,6 @@ public class TestHRegion {
   public void testPutWithTsSlop() throws IOException {
     byte[] fam = Bytes.toBytes("info");
     byte[][] families = { fam };
-    String method = this.getName();
 
     // add data with a timestamp that is too recent for range. Ensure assert
     CONF.setInt("hbase.hregion.keyvalue.timestamp.slop.millisecs", 1000);
@@ -2374,7 +2342,7 @@ public class TestHRegion {
   public void testScanner_DeleteOneFamilyNotAnother() throws IOException {
     byte[] fam1 = Bytes.toBytes("columnA");
     byte[] fam2 = Bytes.toBytes("columnB");
-    this.region = initHRegion(tableName, getName(), CONF, fam1, fam2);
+    this.region = initHRegion(tableName, method, CONF, fam1, fam2);
     try {
       byte[] rowA = Bytes.toBytes("rowA");
       byte[] rowB = Bytes.toBytes("rowB");
@@ -2413,6 +2381,77 @@ public class TestHRegion {
   }
 
   @Test
+  public void testDataInMemoryWithoutWAL() throws IOException {
+    FileSystem fs = FileSystem.get(CONF);
+    Path rootDir = new Path(dir + "testDataInMemoryWithoutWAL");
+    FSHLog hLog = new FSHLog(fs, rootDir, "testDataInMemoryWithoutWAL", CONF);
+    HRegion region = initHRegion(tableName, null, null, false, Durability.SYNC_WAL, hLog,
+        COLUMN_FAMILY_BYTES);
+
+    Cell originalCell = CellUtil.createCell(row, COLUMN_FAMILY_BYTES, qual1,
+      System.currentTimeMillis(), KeyValue.Type.Put.getCode(), value1);
+    final long originalSize = KeyValueUtil.length(originalCell);
+
+    Cell addCell = CellUtil.createCell(row, COLUMN_FAMILY_BYTES, qual1,
+      System.currentTimeMillis(), KeyValue.Type.Put.getCode(), Bytes.toBytes("xxxxxxxxxx"));
+    final long addSize = KeyValueUtil.length(addCell);
+
+    LOG.info("originalSize:" + originalSize
+      + ", addSize:" + addSize);
+    // start test. We expect that the addPut's durability will be replaced
+    // by originalPut's durability.
+
+    // case 1:
+    testDataInMemoryWithoutWAL(region,
+            new Put(row).add(originalCell).setDurability(Durability.SKIP_WAL),
+            new Put(row).add(addCell).setDurability(Durability.SKIP_WAL),
+            originalSize + addSize);
+
+    // case 2:
+    testDataInMemoryWithoutWAL(region,
+            new Put(row).add(originalCell).setDurability(Durability.SKIP_WAL),
+            new Put(row).add(addCell).setDurability(Durability.SYNC_WAL),
+            originalSize + addSize);
+
+    // case 3:
+    testDataInMemoryWithoutWAL(region,
+            new Put(row).add(originalCell).setDurability(Durability.SYNC_WAL),
+            new Put(row).add(addCell).setDurability(Durability.SKIP_WAL),
+            0);
+
+    // case 4:
+    testDataInMemoryWithoutWAL(region,
+            new Put(row).add(originalCell).setDurability(Durability.SYNC_WAL),
+            new Put(row).add(addCell).setDurability(Durability.SYNC_WAL),
+            0);
+  }
+
+  private static void testDataInMemoryWithoutWAL(HRegion region, Put originalPut,
+          final Put addPut, long delta) throws IOException {
+    final long initSize = region.getDataInMemoryWithoutWAL();
+    // save normalCPHost and replaced by mockedCPHost
+    RegionCoprocessorHost normalCPHost = region.getCoprocessorHost();
+    RegionCoprocessorHost mockedCPHost = Mockito.mock(RegionCoprocessorHost.class);
+    Answer<Boolean> answer = new Answer<Boolean>() {
+      @Override
+      public Boolean answer(InvocationOnMock invocation) throws Throwable {
+        MiniBatchOperationInProgress<Mutation> mb = invocation.getArgumentAt(0,
+                MiniBatchOperationInProgress.class);
+        mb.addOperationsFromCP(0, new Mutation[]{addPut});
+        return false;
+      }
+    };
+    when(mockedCPHost.preBatchMutate(Mockito.isA(MiniBatchOperationInProgress.class)))
+      .then(answer);
+    region.setCoprocessorHost(mockedCPHost);
+    region.put(originalPut);
+    region.setCoprocessorHost(normalCPHost);
+    final long finalSize = region.getDataInMemoryWithoutWAL();
+    assertEquals("finalSize:" + finalSize + ", initSize:"
+      + initSize + ", delta:" + delta,finalSize, initSize + delta);
+  }
+
+  @Test
   public void testDeleteColumns_PostInsert() throws IOException, InterruptedException {
     Delete delete = new Delete(row);
     delete.addColumns(fam1, qual1);
@@ -2427,8 +2466,7 @@ public class TestHRegion {
   }
 
   public void doTestDelete_AndPostInsert(Delete delete) throws IOException, InterruptedException {
-    TableName tableName = TableName.valueOf(name.getMethodName());
-    this.region = initHRegion(tableName, getName(), CONF, fam1);
+    this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       EnvironmentEdgeManagerTestHelper.injectEdge(new IncrementingEnvironmentEdge());
       Put put = new Put(row);
@@ -2473,14 +2511,12 @@ public class TestHRegion {
 
   @Test
   public void testDelete_CheckTimestampUpdated() throws IOException {
-    TableName tableName = TableName.valueOf(name.getMethodName());
     byte[] row1 = Bytes.toBytes("row1");
     byte[] col1 = Bytes.toBytes("col1");
     byte[] col2 = Bytes.toBytes("col2");
     byte[] col3 = Bytes.toBytes("col3");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Building checkerList
@@ -2522,7 +2558,6 @@ public class TestHRegion {
     byte[] col1 = Bytes.toBytes("col1");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       Get get = new Get(row1);
@@ -2553,7 +2588,6 @@ public class TestHRegion {
     byte[] col5 = Bytes.toBytes("col5");
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Add to memstore
@@ -2599,7 +2633,6 @@ public class TestHRegion {
     byte[] row = Bytes.toBytes("row");
     byte[] fam = Bytes.toBytes("fam");
 
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam);
     try {
       Get get = new Get(row);
@@ -2621,7 +2654,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam2, fam3 };
     Configuration hc = initSplit();
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, hc, families);
     try {
       LOG.info("" + HBaseTestCase.addContent(region, fam3));
@@ -2713,7 +2745,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam2 };
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       Scan scan = new Scan();
@@ -2738,7 +2769,6 @@ public class TestHRegion {
     byte[][] families = { fam1 };
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       Scan scan = new Scan();
@@ -2767,7 +2797,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam2, fam3, fam4 };
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
 
@@ -2813,7 +2842,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam2 };
 
     // Setting up region
-    String method = this.getName();
     try {
       this.region = initHRegion(tableName, method, CONF, families);
     } catch (IOException e) {
@@ -2851,7 +2879,6 @@ public class TestHRegion {
     long ts = System.currentTimeMillis();
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       // Putting data in Region
@@ -2917,7 +2944,6 @@ public class TestHRegion {
     long ts3 = ts1 + 2;
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       // Putting data in Region
@@ -2976,7 +3002,6 @@ public class TestHRegion {
     long ts3 = ts1 + 2;
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       // Putting data in Region
@@ -3041,7 +3066,6 @@ public class TestHRegion {
     long ts4 = ts1 + 3;
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       // Putting data in Region
@@ -3122,7 +3146,6 @@ public class TestHRegion {
     long ts3 = ts1 + 2;
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, families);
     try {
       // Putting data in Region
@@ -3182,7 +3205,6 @@ public class TestHRegion {
     long ts3 = ts1 + 2;
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Putting data in Region
@@ -3234,7 +3256,7 @@ public class TestHRegion {
   @Test
   public void testScanner_StopRow1542() throws IOException {
     byte[] family = Bytes.toBytes("testFamily");
-    this.region = initHRegion(tableName, getName(), CONF, family);
+    this.region = initHRegion(tableName, method, CONF, family);
     try {
       byte[] row1 = Bytes.toBytes("row111");
       byte[] row2 = Bytes.toBytes("row222");
@@ -3292,7 +3314,6 @@ public class TestHRegion {
     long ts4 = ts1 + 3;
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, CONF, fam1);
     try {
       // Putting data in Region
@@ -3369,7 +3390,7 @@ public class TestHRegion {
     byte[] cf_essential = Bytes.toBytes("essential");
     byte[] cf_joined = Bytes.toBytes("joined");
     byte[] cf_alpha = Bytes.toBytes("alpha");
-    this.region = initHRegion(tableName, getName(), CONF, cf_essential, cf_joined, cf_alpha);
+    this.region = initHRegion(tableName, method, CONF, cf_essential, cf_joined, cf_alpha);
     try {
       byte[] row1 = Bytes.toBytes("row1");
       byte[] row2 = Bytes.toBytes("row2");
@@ -3437,7 +3458,7 @@ public class TestHRegion {
     final byte[] cf_first = Bytes.toBytes("first");
     final byte[] cf_second = Bytes.toBytes("second");
 
-    this.region = initHRegion(tableName, getName(), CONF, cf_first, cf_second);
+    this.region = initHRegion(tableName, method, CONF, cf_first, cf_second);
     try {
       final byte[] col_a = Bytes.toBytes("a");
       final byte[] col_b = Bytes.toBytes("b");
@@ -3530,8 +3551,6 @@ public class TestHRegion {
    */
   @Test
   public void testLongQualifier() throws Exception {
-    String method = name.getMethodName();
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     this.region = initHRegion(tableName, method, CONF, family);
     byte[] q = new byte[Short.MAX_VALUE+2];
@@ -3561,7 +3580,6 @@ public class TestHRegion {
 
     Configuration hc = initSplit();
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, hc, families);
 
     try {
@@ -3650,7 +3668,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam3 };
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, hc, families);
 
     // Put data in region
@@ -3689,7 +3706,6 @@ public class TestHRegion {
     byte[][] families = { fam1, fam3 };
 
     // Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, hc, families);
 
     // Put data in region
@@ -3766,7 +3782,6 @@ public class TestHRegion {
     int flushAndScanInterval = 10;
     int compactInterval = 10 * flushAndScanInterval;
 
-    String method = "testFlushCacheWhileScanning";
     this.region = initHRegion(tableName, method, CONF, family);
     FlushThread flushThread = new FlushThread();
     try {
@@ -3908,7 +3923,6 @@ public class TestHRegion {
       qualifiers[i] = Bytes.toBytes("qual" + i);
     }
 
-    String method = "testWritesWhileScanning";
     this.region = initHRegion(tableName, method, CONF, families);
     FlushThread flushThread = new FlushThread();
     PutThread putThread = new PutThread(numRows, families, qualifiers);
@@ -4083,7 +4097,6 @@ public class TestHRegion {
     }
 
 
-    String method = "testWritesWhileGetting";
     // This test flushes constantly and can cause many files to be created,
     // possibly
     // extending over the ulimit. Make sure compactions are aggressive in
@@ -4200,7 +4213,6 @@ public class TestHRegion {
     byte[] family = Bytes.toBytes("family");
 
     // Setting up region
-    String method = "testIndexesScanWithOneDeletedRow";
     this.region = initHRegion(tableName, method, CONF, family);
     try {
       Put put = new Put(Bytes.toBytes(1L));
@@ -4402,7 +4414,7 @@ public class TestHRegion {
     try {
       cluster = htu.startMiniCluster(1, regionServersCount, dataNodeHosts);
       byte[][] families = { fam1, fam2 };
-      Table ht = htu.createTable(TableName.valueOf(this.getName()), families);
+      Table ht = htu.createTable(tableName, families);
 
       // Setting up region
       byte row[] = Bytes.toBytes("row1");
@@ -4413,8 +4425,7 @@ public class TestHRegion {
       put.addColumn(fam2, col, (long) 1, Bytes.toBytes("test2"));
       ht.put(put);
 
-      HRegion firstRegion = htu.getHBaseCluster().getRegions(TableName.valueOf(this.getName()))
-          .get(0);
+      HRegion firstRegion = htu.getHBaseCluster().getRegions(tableName).get(0);
       firstRegion.flush(true);
       HDFSBlocksDistribution blocksDistribution1 = firstRegion.getHDFSBlocksDistribution();
 
@@ -4462,8 +4473,7 @@ public class TestHRegion {
    */
   @Test
   public void testStatusSettingToAbortIfAnyExceptionDuringRegionInitilization() throws Exception {
-    TableName tableName = TableName.valueOf(name.getMethodName());
-    HRegionInfo info = null;
+    HRegionInfo info;
     try {
       FileSystem fs = Mockito.mock(FileSystem.class);
       Mockito.when(fs.exists((Path) Mockito.anyObject())).thenThrow(new IOException());
@@ -4548,7 +4558,7 @@ public class TestHRegion {
     private final static byte[] incRow = Bytes.toBytes("incRow");
     private final static byte[] family = Bytes.toBytes("family");
     private final static byte[] qualifier = Bytes.toBytes("qualifier");
-    private final static long ONE = 1l;
+    private final static long ONE = 1L;
     private int incCounter;
 
     public Incrementer(HRegion region, int incCounter) {
@@ -4727,7 +4737,6 @@ public class TestHRegion {
   @Test
   public void testPutWithMemStoreFlush() throws Exception {
     byte[] family = Bytes.toBytes("family");
-    ;
     byte[] qualifier = Bytes.toBytes("qualifier");
     byte[] row = Bytes.toBytes("putRow");
     byte[] value = null;
@@ -4739,7 +4748,7 @@ public class TestHRegion {
 
     put = new Put(row);
     value = Bytes.toBytes("value0");
-    put.addColumn(family, qualifier, 1234567l, value);
+    put.addColumn(family, qualifier, 1234567L, value);
     region.put(put);
     get = new Get(row);
     get.addColumn(family, qualifier);
@@ -4760,7 +4769,7 @@ public class TestHRegion {
 
     put = new Put(row);
     value = Bytes.toBytes("value1");
-    put.addColumn(family, qualifier, 1234567l, value);
+    put.addColumn(family, qualifier, 1234567L, value);
     region.put(put);
     get = new Get(row);
     get.addColumn(family, qualifier);
@@ -4782,7 +4791,6 @@ public class TestHRegion {
 
   @Test
   public void testDurability() throws Exception {
-    String method = "testDurability";
     // there are 5 x 5 cases:
     // table durability(SYNC,FSYNC,ASYC,SKIP,USE_DEFAULT) x mutation
     // durability(SYNC,FSYNC,ASYC,SKIP,USE_DEFAULT)
@@ -4836,7 +4844,6 @@ public class TestHRegion {
       final boolean expectSyncFromLogSyncer) throws Exception {
     Configuration conf = HBaseConfiguration.create(CONF);
     method = method + "_" + tableDurability.name() + "_" + mutationDurability.name();
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     Path logDir = new Path(new Path(dir + method), "log");
     final Configuration walConf = new Configuration(conf);
@@ -4847,7 +4854,7 @@ public class TestHRegion {
     final WALFactory wals = new WALFactory(walConf, null, UUID.randomUUID().toString());
     final WAL wal = spy(wals.getWAL(tableName.getName(), tableName.getNamespace()));
     this.region = initHRegion(tableName, HConstants.EMPTY_START_ROW,
-        HConstants.EMPTY_END_ROW, method, conf, false, tableDurability, wal,
+        HConstants.EMPTY_END_ROW, false, tableDurability, wal,
         new byte[][] { family });
 
     Put put = new Put(Bytes.toBytes("r1"));
@@ -5151,8 +5158,6 @@ public class TestHRegion {
    */
   @Test
   public void testFlushResult() throws IOException {
-    String method = name.getMethodName();
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
 
     this.region = initHRegion(tableName, method, family);
@@ -5205,7 +5210,7 @@ public class TestHRegion {
    */
   protected HRegion initHRegion(TableName tableName, String callingMethod, Configuration conf,
       byte[]... families) throws IOException {
-    return initHRegion(tableName, null, null, callingMethod, conf, false, families);
+    return initHRegion(tableName, callingMethod, conf, false, families);
   }
 
   /**
@@ -5223,7 +5228,7 @@ public class TestHRegion {
     Path logDir = TEST_UTIL.getDataTestDirOnTestFS(callingMethod + ".log");
     HRegionInfo hri = new HRegionInfo(tableName, startKey, stopKey);
     final WAL wal = HBaseTestingUtility.createWal(conf, logDir, hri);
-    return initHRegion(tableName, startKey, stopKey, callingMethod, conf, isReadOnly,
+    return initHRegion(tableName, startKey, stopKey, isReadOnly,
         Durability.SYNC_WAL, wal, families);
   }
 
@@ -5232,8 +5237,7 @@ public class TestHRegion {
    *         {@link HBaseTestingUtility#closeRegionAndWAL(HRegion)} when done.
    */
   public HRegion initHRegion(TableName tableName, byte[] startKey, byte[] stopKey,
-      String callingMethod, Configuration conf, boolean isReadOnly, Durability durability,
-      WAL wal, byte[]... families) throws IOException {
+      boolean isReadOnly, Durability durability, WAL wal, byte[]... families) throws IOException {
     return TEST_UTIL.createLocalHRegion(tableName, startKey, stopKey,
         isReadOnly, durability, wal, families);
   }
@@ -5265,7 +5269,6 @@ public class TestHRegion {
     byte[][] families = { cf };
     byte[] col = Bytes.toBytes("C");
     long ts = 1;
-    String method = this.getName();
     this.region = initHRegion(tableName, method, families);
     try {
       KeyValue kv1 = new KeyValue(rowC, cf, col, ts, KeyValue.Type.Put, null);
@@ -5325,7 +5328,6 @@ public class TestHRegion {
     byte[][] families = { cf };
     byte[] col = Bytes.toBytes("C");
     long ts = 1;
-    String method = this.getName();
     this.region = initHRegion(tableName, method, families);
     try {
       KeyValue kv1 = new KeyValue(rowC, cf, col, ts, KeyValue.Type.Put, null);
@@ -5384,7 +5386,6 @@ public class TestHRegion {
     byte[][] families = { cf };
     byte[] col = Bytes.toBytes("C");
     long ts = 1;
-    String method = this.getName();
     this.region = initHRegion(tableName, method, families);
     try {
       KeyValue kv1 = new KeyValue(rowC, cf, col, ts, KeyValue.Type.Put, null);
@@ -5444,7 +5445,6 @@ public class TestHRegion {
     byte[] col1 = Bytes.toBytes("col1");
     byte[] col2 = Bytes.toBytes("col2");
     long ts = 1;
-    String method = this.getName();
     this.region = initHRegion(tableName, method, families);
     try {
       KeyValue kv1 = new KeyValue(rowA, cf, col1, ts, KeyValue.Type.Put, null);
@@ -5526,7 +5526,6 @@ public class TestHRegion {
     byte[] col1 = Bytes.toBytes("col1");
     byte[] col2 = Bytes.toBytes("col2");
     long ts = 1;
-    String method = this.getName();
     HBaseConfiguration config = new HBaseConfiguration();
     config.setInt("test.block.size", 1);
     this.region = initHRegion(tableName, method, config, families);
@@ -5612,7 +5611,6 @@ public class TestHRegion {
     byte[][] families = { cf1, cf2, cf3 };
     byte[] col = Bytes.toBytes("C");
     long ts = 1;
-    String method = this.getName();
     HBaseConfiguration conf = new HBaseConfiguration();
     // disable compactions in this test.
     conf.setInt("hbase.hstore.compactionThreshold", 10000);
@@ -5780,7 +5778,6 @@ public class TestHRegion {
     byte[][] families = { cf1, cf2, cf3, cf4 };
     byte[] col = Bytes.toBytes("C");
     long ts = 1;
-    String method = this.getName();
     HBaseConfiguration conf = new HBaseConfiguration();
     // disable compactions in this test.
     conf.setInt("hbase.hstore.compactionThreshold", 10000);
@@ -5852,7 +5849,6 @@ public class TestHRegion {
     byte[] cf1 = Bytes.toBytes("CF1");
     byte[][] families = {cf1};
     byte[] col = Bytes.toBytes("C");
-    String method = this.getName();
     HBaseConfiguration conf = new HBaseConfiguration();
     this.region = initHRegion(tableName, method, conf, families);
     try {
@@ -5907,7 +5903,6 @@ public class TestHRegion {
     byte[] cf1 = Bytes.toBytes("CF1");
     byte[][] families = { cf1 };
     byte[] col = Bytes.toBytes("C");
-    String method = this.getName();
     HBaseConfiguration conf = new HBaseConfiguration();
     this.region = initHRegion(tableName, method, conf, families);
     try {
@@ -5969,7 +5964,6 @@ public class TestHRegion {
     byte [][] families = {fam1};
 
     //Setting up region
-    String method = this.getName();
     this.region = initHRegion(tableName, method, hc, families);
 
     //Put data in region
@@ -6366,8 +6360,6 @@ public class TestHRegion {
    */
   @Test
   public void testRegionTooBusy() throws IOException {
-    String method = "testRegionTooBusy";
-    TableName tableName = TableName.valueOf(method);
     byte[] family = Bytes.toBytes("family");
     long defaultBusyWaitDuration = CONF.getLong("hbase.busy.wait.duration",
       HRegion.DEFAULT_BUSY_WAIT_DURATION);
@@ -6543,7 +6535,7 @@ public class TestHRegion {
 
   @Test
   public void testIncrementTimestampsAreMonotonic() throws IOException {
-    HRegion region = initHRegion(tableName, name.getMethodName(), CONF, fam1);
+    HRegion region = initHRegion(tableName, method, CONF, fam1);
     ManualEnvironmentEdge edge = new ManualEnvironmentEdge();
     EnvironmentEdgeManager.injectEdge(edge);
 
@@ -6562,13 +6554,13 @@ public class TestHRegion {
     region.increment(inc);
     result = region.get(new Get(row));
     c = result.getColumnLatestCell(fam1, qual1);
-    assertEquals(c.getTimestamp(), 10L);
+    assertEquals(c.getTimestamp(), 11L);
     assertEquals(Bytes.toLong(c.getValueArray(), c.getValueOffset(), c.getValueLength()), 2L);
   }
 
   @Test
   public void testAppendTimestampsAreMonotonic() throws IOException {
-    HRegion region = initHRegion(tableName, name.getMethodName(), CONF, fam1);
+    HRegion region = initHRegion(tableName, method, CONF, fam1);
     ManualEnvironmentEdge edge = new ManualEnvironmentEdge();
     EnvironmentEdgeManager.injectEdge(edge);
 
@@ -6587,7 +6579,7 @@ public class TestHRegion {
     region.append(a);
     result = region.get(new Get(row));
     c = result.getColumnLatestCell(fam1, qual1);
-    assertEquals(c.getTimestamp(), 10L);
+    assertEquals(c.getTimestamp(), 11L);
 
     byte[] expected = new byte[qual1.length*2];
     System.arraycopy(qual1, 0, expected, 0, qual1.length);
@@ -6599,7 +6591,7 @@ public class TestHRegion {
 
   @Test
   public void testCheckAndMutateTimestampsAreMonotonic() throws IOException {
-    HRegion region = initHRegion(tableName, name.getMethodName(), CONF, fam1);
+    HRegion region = initHRegion(tableName, method, CONF, fam1);
     ManualEnvironmentEdge edge = new ManualEnvironmentEdge();
     EnvironmentEdgeManager.injectEdge(edge);
 
@@ -6635,7 +6627,7 @@ public class TestHRegion {
 
     int prevLockTimeout = CONF.getInt("hbase.rowlock.wait.duration", 30000);
     CONF.setInt("hbase.rowlock.wait.duration", 1000);
-    final HRegion region = initHRegion(tableName, a, c, name.getMethodName(), CONF, false, fam1);
+    final HRegion region = initHRegion(tableName, a, c, method, CONF, false, fam1);
 
     Mutation[] mutations = new Mutation[] {
         new Put(a).addImmutable(fam1, null, null),
@@ -6691,7 +6683,7 @@ public class TestHRegion {
 
   @Test
   public void testCheckAndRowMutateTimestampsAreMonotonic() throws IOException {
-    HRegion region = initHRegion(tableName, name.getMethodName(), CONF, fam1);
+    HRegion region = initHRegion(tableName, method, CONF, fam1);
     ManualEnvironmentEdge edge = new ManualEnvironmentEdge();
     EnvironmentEdgeManager.injectEdge(edge);
 
@@ -6749,7 +6741,6 @@ public class TestHRegion {
       qualifiers[i] = Bytes.toBytes("qual" + i);
     }
 
-    String method = "testWritesWhileRollWriter";
     CONF.setInt("hbase.regionserver.wal.disruptor.event.count", 2);
     this.region = initHRegion(tableName, method, CONF, families);
     try {

@@ -33,7 +33,6 @@ import java.util.NavigableMap;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.ExecutionException;
 
 import org.apache.commons.lang.NotImplementedException;
 import org.apache.commons.logging.Log;
@@ -60,7 +59,6 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * The base class for load balancers. It provides the the functions used to by
@@ -119,7 +117,6 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     HRegionInfo[] regions;
     Deque<RegionLoad>[] regionLoads;
     private RegionLocationFinder regionFinder;
-    ArrayList<ListenableFuture<HDFSBlocksDistribution>> regionLocationFutures;
 
     int[][] regionLocations; //regionIndex -> list of serverIndex sorted by locality
 
@@ -169,8 +166,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
         Map<String, Deque<RegionLoad>> loads,
         RegionLocationFinder regionFinder,
         RackManager rackManager) {
-      this(null, clusterState, loads, regionFinder,
-        rackManager);
+      this(null, clusterState, loads, regionFinder, rackManager);
     }
 
     @SuppressWarnings("unchecked")
@@ -241,13 +237,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
       regionIndexToTableIndex = new int[numRegions];
       regionIndexToPrimaryIndex = new int[numRegions];
       regionLoads = new Deque[numRegions];
-      regionLocationFutures = new ArrayList<ListenableFuture<HDFSBlocksDistribution>>(
-          numRegions);
-      if (regionFinder != null) {
-        for (int i = 0; i < numRegions; i++) {
-          regionLocationFutures.add(null);
-        }
-      }
+
       regionLocations = new int[numRegions][];
       serverIndicesSortedByRegionCount = new Integer[numServers];
       serverIndicesSortedByLocality = new Integer[numServers];
@@ -307,41 +297,14 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
 
         for (HRegionInfo region : entry.getValue()) {
           registerRegion(region, regionIndex, serverIndex, loads, regionFinder);
-
           regionsPerServer[serverIndex][regionPerServerIndex++] = regionIndex;
           regionIndex++;
         }
       }
+
       for (HRegionInfo region : unassignedRegions) {
         registerRegion(region, regionIndex, -1, loads, regionFinder);
         regionIndex++;
-      }
-
-      if (regionFinder != null) {
-        for (int index = 0; index < regionLocationFutures.size(); index++) {
-          ListenableFuture<HDFSBlocksDistribution> future = regionLocationFutures
-              .get(index);
-          HDFSBlocksDistribution blockDistbn = null;
-          try {
-            blockDistbn = future.get();
-          } catch (InterruptedException ite) {
-          } catch (ExecutionException ee) {
-            LOG.debug(
-                "IOException during HDFSBlocksDistribution computation. for region = "
-                    + regions[index].getEncodedName(), ee);
-          } finally {
-            if (blockDistbn == null) {
-              blockDistbn = new HDFSBlocksDistribution();
-            }
-          }
-          List<ServerName> loc = regionFinder.getTopBlockLocations(blockDistbn);
-          regionLocations[index] = new int[loc.size()];
-          for (int i = 0; i < loc.size(); i++) {
-            regionLocations[index][i] = loc.get(i) == null ? -1
-                : (serversToIndex.get(loc.get(i).getHostAndPort()) == null ? -1
-                    : serversToIndex.get(loc.get(i).getHostAndPort()));
-          }
-        }
       }
 
       for (int i = 0; i < serversPerHostList.size(); i++) {
@@ -464,8 +427,9 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     }
 
     /** Helper for Cluster constructor to handle a region */
-    private void registerRegion(HRegionInfo region, int regionIndex, int serverIndex,
-        Map<String, Deque<RegionLoad>> loads, RegionLocationFinder regionFinder) {
+    private void registerRegion(HRegionInfo region, int regionIndex,
+        int serverIndex, Map<String, Deque<RegionLoad>> loads,
+        RegionLocationFinder regionFinder) {
       String tableName = region.getTable().getNameAsString();
       if (!tablesToIndex.containsKey(tableName)) {
         tables.add(tableName);
@@ -492,8 +456,13 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
 
       if (regionFinder != null) {
         // region location
-        regionLocationFutures.set(regionIndex,
-            regionFinder.asyncGetBlockDistribution(region));
+        List<ServerName> loc = regionFinder.getTopBlockLocations(region);
+        regionLocations[regionIndex] = new int[loc.size()];
+        for (int i = 0; i < loc.size(); i++) {
+          regionLocations[regionIndex][i] = loc.get(i) == null ? -1
+              : (serversToIndex.get(loc.get(i).getHostAndPort()) == null ? -1
+                  : serversToIndex.get(loc.get(i).getHostAndPort()));
+        }
       }
     }
 
@@ -1001,6 +970,8 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
 
   // slop for regions
   protected float slop;
+  // overallSlop to controll simpleLoadBalancer's cluster level threshold
+  protected float overallSlop;
   protected Configuration config;
   protected RackManager rackManager;
   private static final Random RANDOM = new Random(System.currentTimeMillis());
@@ -1066,6 +1037,9 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     if (slop < 0) slop = 0;
     else if (slop > 1) slop = 1;
 
+    if (overallSlop < 0) overallSlop = 0;
+    else if (overallSlop > 1) overallSlop = 1;
+
     this.config = conf;
     String[] tables = getTablesOnMaster(conf);
     if (tables != null && tables.length > 0) {
@@ -1077,6 +1051,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
 
   protected void setSlop(Configuration conf) {
     this.slop = conf.getFloat("hbase.regions.slop", (float) 0.2);
+    this.overallSlop = conf.getFloat("hbase.regions.overallSlop", slop);
   }
 
   /**
@@ -1168,6 +1143,11 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
   public synchronized void setClusterStatus(ClusterStatus st) {
     this.clusterStatus = st;
     regionFinder.setClusterStatus(st);
+  }
+
+  @Override
+  public void setClusterLoad(Map<TableName, Map<ServerName, List<HRegionInfo>>> clusterLoad){
+
   }
 
   @Override
@@ -1277,7 +1257,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
       return assignments;
     }
 
-    Cluster cluster = createCluster(servers, regions);
+    Cluster cluster = createCluster(servers, regions, false);
     List<HRegionInfo> unassignedRegions = new ArrayList<HRegionInfo>();
 
     roundRobinAssignment(cluster, regions, unassignedRegions,
@@ -1324,7 +1304,10 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
   }
 
   protected Cluster createCluster(List<ServerName> servers,
-      Collection<HRegionInfo> regions) {
+      Collection<HRegionInfo> regions, boolean forceRefresh) {
+    if (forceRefresh == true) {
+      regionFinder.refreshAndWait(regions);
+    }
     // Get the snapshot of the current assignments for the regions in question, and then create
     // a cluster out of it. Note that we might have replicas already assigned to some servers
     // earlier. So we want to get the snapshot to see those assignments, but this will only contain
@@ -1337,7 +1320,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
       }
     }
     return new Cluster(regions, clusterState, null, this.regionFinder,
-      rackManager);
+        rackManager);
   }
 
   /**
@@ -1365,7 +1348,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     }
 
     List<HRegionInfo> regions = Lists.newArrayList(regionInfo);
-    Cluster cluster = createCluster(servers, regions);
+    Cluster cluster = createCluster(servers, regions, false);
     return randomAssignment(cluster, regionInfo, servers);
   }
 
@@ -1440,7 +1423,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     int numRandomAssignments = 0;
     int numRetainedAssigments = 0;
 
-    Cluster cluster = createCluster(servers, regions.keySet());
+    Cluster cluster = createCluster(servers, regions.keySet(), true);
 
     for (Map.Entry<HRegionInfo, ServerName> entry : regions.entrySet()) {
       HRegionInfo region = entry.getKey();

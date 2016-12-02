@@ -17,15 +17,19 @@
  */
 package org.apache.hadoop.hbase.client;
 
-import com.google.common.base.Preconditions;
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
 
 import io.netty.util.HashedWheelTimer;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.ClientService;
 
 /**
  * Factory to create an AsyncRpcRetryCaller.
@@ -54,6 +58,8 @@ class AsyncRpcRetryingCallerFactory {
 
     private long rpcTimeoutNs = -1L;
 
+    private boolean locateToPreviousRegion;
+
     public SingleRequestCallerBuilder<T> table(TableName tableName) {
       this.tableName = tableName;
       return this;
@@ -80,13 +86,17 @@ class AsyncRpcRetryingCallerFactory {
       return this;
     }
 
+    public SingleRequestCallerBuilder<T> locateToPreviousRegion(boolean locateToPreviousRegion) {
+      this.locateToPreviousRegion = locateToPreviousRegion;
+      return this;
+    }
+
     public AsyncSingleRequestRpcRetryingCaller<T> build() {
       return new AsyncSingleRequestRpcRetryingCaller<>(retryTimer, conn,
-          Preconditions.checkNotNull(tableName, "tableName is null"),
-          Preconditions.checkNotNull(row, "row is null"),
-          Preconditions.checkNotNull(callable, "action is null"), conn.connConf.getPauseNs(),
-          conn.connConf.getMaxRetries(), operationTimeoutNs, rpcTimeoutNs,
-          conn.connConf.getStartLogErrorsCnt());
+          checkNotNull(tableName, "tableName is null"), checkNotNull(row, "row is null"),
+          locateToPreviousRegion, checkNotNull(callable, "action is null"),
+          conn.connConf.getPauseNs(), conn.connConf.getMaxRetries(), operationTimeoutNs,
+          rpcTimeoutNs, conn.connConf.getStartLogErrorsCnt());
     }
 
     /**
@@ -102,5 +112,149 @@ class AsyncRpcRetryingCallerFactory {
    */
   public <T> SingleRequestCallerBuilder<T> single() {
     return new SingleRequestCallerBuilder<>();
+  }
+
+  public class SmallScanCallerBuilder {
+
+    private TableName tableName;
+
+    private Scan scan;
+
+    private int limit;
+
+    private long scanTimeoutNs = -1L;
+
+    private long rpcTimeoutNs = -1L;
+
+    public SmallScanCallerBuilder table(TableName tableName) {
+      this.tableName = tableName;
+      return this;
+    }
+
+    public SmallScanCallerBuilder setScan(Scan scan) {
+      this.scan = scan;
+      return this;
+    }
+
+    public SmallScanCallerBuilder limit(int limit) {
+      this.limit = limit;
+      return this;
+    }
+
+    public SmallScanCallerBuilder scanTimeout(long scanTimeout, TimeUnit unit) {
+      this.scanTimeoutNs = unit.toNanos(scanTimeout);
+      return this;
+    }
+
+    public SmallScanCallerBuilder rpcTimeout(long rpcTimeout, TimeUnit unit) {
+      this.rpcTimeoutNs = unit.toNanos(rpcTimeout);
+      return this;
+    }
+
+    public AsyncSmallScanRpcRetryingCaller build() {
+      TableName tableName = checkNotNull(this.tableName, "tableName is null");
+      Scan scan = checkNotNull(this.scan, "scan is null");
+      checkArgument(limit > 0, "invalid limit %d", limit);
+      return new AsyncSmallScanRpcRetryingCaller(conn, tableName, scan, limit, scanTimeoutNs,
+          rpcTimeoutNs);
+    }
+
+    /**
+     * Shortcut for {@code build().call()}
+     */
+    public CompletableFuture<List<Result>> call() {
+      return build().call();
+    }
+  }
+
+  /**
+   * Create retry caller for small scan.
+   */
+  public SmallScanCallerBuilder smallScan() {
+    return new SmallScanCallerBuilder();
+  }
+
+  public class ScanSingleRegionCallerBuilder {
+
+    private long scannerId = -1L;
+
+    private Scan scan;
+
+    private ScanResultCache resultCache;
+
+    private RawScanResultConsumer consumer;
+
+    private ClientService.Interface stub;
+
+    private HRegionLocation loc;
+
+    private long scanTimeoutNs;
+
+    private long rpcTimeoutNs;
+
+    public ScanSingleRegionCallerBuilder id(long scannerId) {
+      this.scannerId = scannerId;
+      return this;
+    }
+
+    public ScanSingleRegionCallerBuilder setScan(Scan scan) {
+      this.scan = scan;
+      return this;
+    }
+
+    public ScanSingleRegionCallerBuilder resultCache(ScanResultCache resultCache) {
+      this.resultCache = resultCache;
+      return this;
+    }
+
+    public ScanSingleRegionCallerBuilder consumer(RawScanResultConsumer consumer) {
+      this.consumer = consumer;
+      return this;
+    }
+
+    public ScanSingleRegionCallerBuilder stub(ClientService.Interface stub) {
+      this.stub = stub;
+      return this;
+    }
+
+    public ScanSingleRegionCallerBuilder location(HRegionLocation loc) {
+      this.loc = loc;
+      return this;
+    }
+
+    public ScanSingleRegionCallerBuilder scanTimeout(long scanTimeout, TimeUnit unit) {
+      this.scanTimeoutNs = unit.toNanos(scanTimeout);
+      return this;
+    }
+
+    public ScanSingleRegionCallerBuilder rpcTimeout(long rpcTimeout, TimeUnit unit) {
+      this.rpcTimeoutNs = unit.toNanos(rpcTimeout);
+      return this;
+    }
+
+    public AsyncScanSingleRegionRpcRetryingCaller build() {
+      checkArgument(scannerId >= 0, "invalid scannerId %d", scannerId);
+      return new AsyncScanSingleRegionRpcRetryingCaller(retryTimer, conn,
+          checkNotNull(scan, "scan is null"), scannerId,
+          checkNotNull(resultCache, "resultCache is null"),
+          checkNotNull(consumer, "consumer is null"), checkNotNull(stub, "stub is null"),
+          checkNotNull(loc, "location is null"), conn.connConf.getPauseNs(),
+          conn.connConf.getMaxRetries(), scanTimeoutNs, rpcTimeoutNs,
+          conn.connConf.getStartLogErrorsCnt());
+    }
+
+    /**
+     * Short cut for {@code build().start()}.
+     */
+    public CompletableFuture<Boolean> start() {
+      return build().start();
+    }
+  }
+
+  /**
+   * Create retry caller for scanning a region.
+   */
+  public ScanSingleRegionCallerBuilder scanSingleRegion() {
+    return new ScanSingleRegionCallerBuilder();
   }
 }

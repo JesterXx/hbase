@@ -33,7 +33,6 @@ import static org.mockito.internal.verification.VerificationModeFactory.times;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +46,7 @@ import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.nio.ByteBuff;
 import org.apache.hadoop.hbase.shaded.ipc.protobuf.generated.TestProtos.EchoRequestProto;
 import org.apache.hadoop.hbase.shaded.ipc.protobuf.generated.TestProtos.EchoResponseProto;
 import org.apache.hadoop.hbase.shaded.ipc.protobuf.generated.TestProtos.EmptyRequestProto;
@@ -204,13 +204,13 @@ public abstract class AbstractTestIPC {
   @Test
   public void testRpcMaxRequestSize() throws IOException, ServiceException {
     Configuration conf = new Configuration(CONF);
-    conf.setInt(RpcServer.MAX_REQUEST_SIZE, 100);
+    conf.setInt(RpcServer.MAX_REQUEST_SIZE, 1000);
     RpcServer rpcServer = new TestRpcServer(conf);
     try (AbstractRpcClient<?> client = createRpcClient(conf)) {
       rpcServer.start();
       BlockingInterface stub = newBlockingStub(client, rpcServer.getListenerAddress());
-      StringBuilder message = new StringBuilder(120);
-      for (int i = 0; i < 20; i++) {
+      StringBuilder message = new StringBuilder(1200);
+      for (int i = 0; i < 200; i++) {
         message.append("hello.");
       }
       // set total RPC size bigger than 100 bytes
@@ -220,8 +220,9 @@ public abstract class AbstractTestIPC {
         param);
       fail("RPC should have failed because it exceeds max request size");
     } catch (ServiceException e) {
-      LOG.info("Caught expected exception: " + e.toString());
-      // the rpc server just close the connection so we can not get the detail message.
+      LOG.info("Caught expected exception: " + e);
+      assertTrue(e.toString(),
+          StringUtils.stringifyException(e).contains("RequestTooBigException"));
     } finally {
       rpcServer.stop();
     }
@@ -314,7 +315,7 @@ public abstract class AbstractTestIPC {
       }
 
       @Override
-      protected void processRequest(ByteBuffer buf) throws IOException, InterruptedException {
+      protected void processRequest(ByteBuff buf) throws IOException, InterruptedException {
         // this will throw exception after the connection header is read, and an RPC is sent
         // from client
         throw new DoNotRetryIOException("Failing for test");

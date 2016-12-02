@@ -19,8 +19,11 @@
 
 package org.apache.hadoop.hbase.coprocessor;
 
+import com.google.common.collect.ImmutableList;
+
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableSet;
 
 import org.apache.hadoop.fs.FileSystem;
@@ -57,12 +60,9 @@ import org.apache.hadoop.hbase.regionserver.StoreFile;
 import org.apache.hadoop.hbase.regionserver.StoreFileReader;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionRequest;
 import org.apache.hadoop.hbase.regionserver.querymatcher.DeleteTracker;
-import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.wal.WALKey;
-
-import com.google.common.collect.ImmutableList;
 
 /**
  * An abstract class that implements RegionObserver.
@@ -100,6 +100,13 @@ public class BaseRegionObserver implements RegionObserver {
       final Store store, final KeyValueScanner memstoreScanner, final InternalScanner s)
       throws IOException {
     return s;
+  }
+
+  @Override
+  public InternalScanner preFlushScannerOpen(final ObserverContext<RegionCoprocessorEnvironment> c,
+      final Store store, final KeyValueScanner memstoreScanner, final InternalScanner s,
+      final long readPoint) throws IOException {
+    return preFlushScannerOpen(c, store, memstoreScanner, s);
   }
 
   @Override
@@ -209,6 +216,13 @@ public class BaseRegionObserver implements RegionObserver {
       List<? extends KeyValueScanner> scanners, final ScanType scanType, final long earliestPutTs,
       final InternalScanner s, CompactionRequest request) throws IOException {
     return preCompactScannerOpen(c, store, scanners, scanType, earliestPutTs, s);
+  }
+
+  @Override
+  public InternalScanner preCompactScannerOpen(ObserverContext<RegionCoprocessorEnvironment> c,
+      Store store, List<? extends KeyValueScanner> scanners, ScanType scanType, long earliestPutTs,
+      InternalScanner s, CompactionRequest request, long readPoint) throws IOException {
+    return preCompactScannerOpen(c, store, scanners, scanType, earliestPutTs, s, request);
   }
 
   @Override
@@ -470,12 +484,6 @@ public class BaseRegionObserver implements RegionObserver {
       HRegionInfo info, WALKey logKey, WALEdit logEdit) throws IOException {
   }
 
-  @Override
-  public void preWALRestore(ObserverContext<RegionCoprocessorEnvironment> env, HRegionInfo info,
-      HLogKey logKey, WALEdit logEdit) throws IOException {
-    preWALRestore(env, info, (WALKey)logKey, logEdit);
-  }
-
   /**
    * Implementers should override this version of the method and leave the deprecated one as-is.
    */
@@ -485,19 +493,20 @@ public class BaseRegionObserver implements RegionObserver {
   }
 
   @Override
-  public void postWALRestore(ObserverContext<RegionCoprocessorEnvironment> env,
-      HRegionInfo info, HLogKey logKey, WALEdit logEdit) throws IOException {
-    postWALRestore(env, info, (WALKey)logKey, logEdit);
-  }
-
-  @Override
   public void preBulkLoadHFile(final ObserverContext<RegionCoprocessorEnvironment> ctx,
     List<Pair<byte[], String>> familyPaths) throws IOException {
   }
 
   @Override
   public boolean postBulkLoadHFile(ObserverContext<RegionCoprocessorEnvironment> ctx,
-    List<Pair<byte[], String>> familyPaths, boolean hasLoaded) throws IOException {
+    List<Pair<byte[], String>> stagingFamilyPaths, Map<byte[], List<Path>> finalPaths,
+    boolean hasLoaded) throws IOException {
+    return postBulkLoadHFile(ctx, stagingFamilyPaths, hasLoaded);
+  }
+
+  @Override
+  public boolean postBulkLoadHFile(ObserverContext<RegionCoprocessorEnvironment> ctx,
+    List<Pair<byte[], String>> stagingFamilyPaths, boolean hasLoaded) throws IOException {
     return hasLoaded;
   }
 

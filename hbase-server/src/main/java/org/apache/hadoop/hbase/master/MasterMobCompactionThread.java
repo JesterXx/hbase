@@ -57,9 +57,8 @@ public class MasterMobCompactionThread {
       new SynchronousQueue<Runnable>(), new ThreadFactory() {
         @Override
         public Thread newThread(Runnable r) {
-          Thread t = new Thread(r);
-          t.setName(n + "-MasterMobCompaction-" + EnvironmentEdgeManager.currentTime());
-          return t;
+          String name = n + "-MasterMobCompaction-" + EnvironmentEdgeManager.currentTime();
+          return new Thread(r, name);
         }
       });
     ((ThreadPoolExecutor) this.masterMobPool).allowCoreThreadTimeOut(true);
@@ -90,7 +89,7 @@ public class MasterMobCompactionThread {
       try {
         master.reportMobCompactionEnd(tableName);
       } catch (IOException e1) {
-        LOG.error("Failed to mark end of mob compation", e1);
+        LOG.error("Failed to mark end of mob compaction", e1);
       }
       throw e;
     }
@@ -132,7 +131,7 @@ public class MasterMobCompactionThread {
         try {
           master.reportMobCompactionEnd(tableName);
         } catch (IOException e) {
-          LOG.error("Failed to mark end of mob compation", e);
+          LOG.error("Failed to mark end of mob compaction", e);
         }
       }
     }

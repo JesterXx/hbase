@@ -86,6 +86,7 @@ public class VerifyReplication extends Configured implements Tool {
   static String rowPrefixes = null;
   static int sleepMsBeforeReCompare = 0;
   static boolean verbose = false;
+  static boolean includeDeletedCells = false;
 
   private final static String JOB_NAME_CONF_KEY = "mapreduce.job.name";
 
@@ -140,6 +141,8 @@ public class VerifyReplication extends Configured implements Tool {
             scan.addFamily(Bytes.toBytes(fam));
           }
         }
+        boolean includeDeletedCells = conf.getBoolean(NAME + ".includeDeletedCells", false);
+        scan.setRaw(includeDeletedCells);
         String rowPrefixes = conf.get(NAME + ".rowPrefixes", null);
         setRowPrefixFilter(scan, rowPrefixes);
         scan.setTimeRange(startTime, endTime);
@@ -208,18 +211,19 @@ public class VerifyReplication extends Configured implements Tool {
           if (!sourceResult.isEmpty()) {
             context.getCounter(Counters.GOODROWS).increment(1);
             if (verbose) {
-              LOG.info("Good row key: " + delimiter + Bytes.toString(row.getRow()) + delimiter);
+              LOG.info("Good row key (with recompare): " + delimiter + Bytes.toStringBinary(row.getRow())
+              + delimiter);
             }
           }
           return;
         } catch (Exception e) {
           LOG.error("recompare fail after sleep, rowkey=" + delimiter +
-              Bytes.toString(row.getRow()) + delimiter);
+              Bytes.toStringBinary(row.getRow()) + delimiter);
         }
       }
       context.getCounter(counter).increment(1);
       context.getCounter(Counters.BADROWS).increment(1);
-      LOG.error(counter.toString() + ", rowkey=" + delimiter + Bytes.toString(row.getRow()) +
+      LOG.error(counter.toString() + ", rowkey=" + delimiter + Bytes.toStringBinary(row.getRow()) +
           delimiter);
     }
 
@@ -294,7 +298,7 @@ public class VerifyReplication extends Configured implements Tool {
       return pair;
     } catch (ReplicationException e) {
       throw new IOException(
-          "An error occured while trying to connect to the remove peer cluster", e);
+          "An error occurred while trying to connect to the remove peer cluster", e);
     } finally {
       if (peer != null) {
         peer.close();
@@ -325,6 +329,7 @@ public class VerifyReplication extends Configured implements Tool {
     conf.setInt(NAME +".sleepMsBeforeReCompare", sleepMsBeforeReCompare);
     conf.set(NAME + ".delimiter", delimiter);
     conf.setBoolean(NAME +".verbose", verbose);
+    conf.setBoolean(NAME +".includeDeletedCells", includeDeletedCells);
     if (families != null) {
       conf.set(NAME+".families", families);
     }
@@ -349,6 +354,7 @@ public class VerifyReplication extends Configured implements Tool {
 
     Scan scan = new Scan();
     scan.setTimeRange(startTime, endTime);
+    scan.setRaw(includeDeletedCells);
     if (versions >= 0) {
       scan.setMaxVersions(versions);
       LOG.info("Number of versions set to " + versions);
@@ -426,6 +432,12 @@ public class VerifyReplication extends Configured implements Tool {
           continue;
         }
 
+        final String includeDeletedCellsArgKey = "--raw";
+        if (cmd.equals(includeDeletedCellsArgKey)) {
+          includeDeletedCells = true;
+          continue;
+        }
+
         final String versionsArgKey = "--versions=";
         if (cmd.startsWith(versionsArgKey)) {
           versions = Integer.parseInt(cmd.substring(versionsArgKey.length()));
@@ -495,6 +507,7 @@ public class VerifyReplication extends Configured implements Tool {
     families = null;
     peerId = null;
     rowPrefixes = null;
+    includeDeletedCells = false;
   }
 
   /*
@@ -513,6 +526,7 @@ public class VerifyReplication extends Configured implements Tool {
     System.err.println("              without endtime means from starttime to forever");
     System.err.println(" endtime      end of the time range");
     System.err.println(" versions     number of cell versions to verify");
+    System.err.println(" raw          includes raw scan if given in options");
     System.err.println(" families     comma-separated list of families to copy");
     System.err.println(" row-prefixes comma-separated list of row key prefixes to filter on ");
     System.err.println(" delimiter    the delimiter used in display around rowkey");

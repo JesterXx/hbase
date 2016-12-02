@@ -19,6 +19,11 @@
 
 package org.apache.hadoop.hbase.regionserver;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+import com.google.protobuf.Message;
+import com.google.protobuf.Service;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,18 +34,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.google.protobuf.Message;
-import com.google.protobuf.Service;
-
 import org.apache.commons.collections.map.AbstractReferenceMap;
 import org.apache.commons.collections.map.ReferenceMap;
 import org.apache.commons.lang.ClassUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -52,6 +50,8 @@ import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.Append;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Durability;
@@ -78,13 +78,12 @@ import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.regionserver.Region.Operation;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionRequest;
 import org.apache.hadoop.hbase.regionserver.querymatcher.DeleteTracker;
-import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
-import org.apache.hadoop.hbase.security.User;
-import org.apache.hadoop.hbase.wal.WALKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.CoprocessorClassLoader;
 import org.apache.hadoop.hbase.util.Pair;
+import org.apache.hadoop.hbase.wal.WALKey;
 
 /**
  * Implements the coprocessor environment and runtime support for coprocessors
@@ -113,8 +112,6 @@ public class RegionCoprocessorHost
     private Region region;
     private RegionServerServices rsServices;
     ConcurrentMap<String, Object> sharedData;
-    private final boolean useLegacyPre;
-    private final boolean useLegacyPost;
 
     /**
      * Constructor
@@ -128,14 +125,6 @@ public class RegionCoprocessorHost
       this.region = region;
       this.rsServices = services;
       this.sharedData = sharedData;
-      // Pick which version of the WAL related events we'll call.
-      // This way we avoid calling the new version on older RegionObservers so
-      // we can maintain binary compatibility.
-      // See notes in javadoc for RegionObserver
-      useLegacyPre = useLegacyMethod(impl.getClass(), "preWALRestore", ObserverContext.class,
-          HRegionInfo.class, WALKey.class, WALEdit.class);
-      useLegacyPost = useLegacyMethod(impl.getClass(), "postWALRestore", ObserverContext.class,
-          HRegionInfo.class, WALKey.class, WALEdit.class);
     }
 
     /** @return the region */
@@ -421,31 +410,6 @@ public class RegionCoprocessorHost
   }
 
   /**
-   * HBASE-4014 : This is used by coprocessor hooks which are not declared to throw exceptions.
-   *
-   * For example, {@link
-   * org.apache.hadoop.hbase.regionserver.RegionCoprocessorHost#preOpen()} and
-   * {@link org.apache.hadoop.hbase.regionserver.RegionCoprocessorHost#postOpen()} are such hooks.
-   *
-   * See also
-   * {@link org.apache.hadoop.hbase.master.MasterCoprocessorHost#handleCoprocessorThrowable(
-   *    CoprocessorEnvironment, Throwable)}
-   * @param env The coprocessor that threw the exception.
-   * @param e The exception that was thrown.
-   */
-  private void handleCoprocessorThrowableNoRethrow(
-      final CoprocessorEnvironment env, final Throwable e) {
-    try {
-      handleCoprocessorThrowable(env,e);
-    } catch (IOException ioe) {
-      // We cannot throw exceptions from the caller hook, so ignore.
-      LOG.warn(
-        "handleCoprocessorThrowable() threw an IOException while attempting to handle Throwable " +
-        e + ". Ignoring.",e);
-    }
-  }
-
-  /**
    * Invoked before a region open.
    *
    * @throws IOException Signals that an I/O exception has occurred.
@@ -531,18 +495,19 @@ public class RegionCoprocessorHost
 
   /**
    * See
-   * {@link RegionObserver#preCompactScannerOpen(ObserverContext, Store, List, ScanType, long, InternalScanner, CompactionRequest)}
+   * {@link RegionObserver#preCompactScannerOpen(ObserverContext, Store, List, ScanType, long,
+   *   InternalScanner, CompactionRequest, long)}
    */
   public InternalScanner preCompactScannerOpen(final Store store,
       final List<StoreFileScanner> scanners, final ScanType scanType, final long earliestPutTs,
-      final CompactionRequest request, final User user) throws IOException {
+      final CompactionRequest request, final User user, final long readPoint) throws IOException {
     return execOperationWithResult(null,
         coprocessors.isEmpty() ? null : new RegionOperationWithResult<InternalScanner>(user) {
       @Override
       public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
           throws IOException {
         setResult(oserver.preCompactScannerOpen(ctx, store, scanners, scanType,
-          earliestPutTs, getResult(), request));
+          earliestPutTs, getResult(), request, readPoint));
       }
     });
   }
@@ -661,16 +626,16 @@ public class RegionCoprocessorHost
   /**
    * See
    * {@link RegionObserver#preFlushScannerOpen(ObserverContext,
-   *    Store, KeyValueScanner, InternalScanner)}
+   *    Store, KeyValueScanner, InternalScanner, long)}
    */
   public InternalScanner preFlushScannerOpen(final Store store,
-      final KeyValueScanner memstoreScanner) throws IOException {
+      final KeyValueScanner memstoreScanner, final long readPoint) throws IOException {
     return execOperationWithResult(null,
         coprocessors.isEmpty() ? null : new RegionOperationWithResult<InternalScanner>() {
       @Override
       public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
           throws IOException {
-        setResult(oserver.preFlushScannerOpen(ctx, store, memstoreScanner, getResult()));
+        setResult(oserver.preFlushScannerOpen(ctx, store, memstoreScanner, getResult(), readPoint));
       }
     });
   }
@@ -707,7 +672,7 @@ public class RegionCoprocessorHost
    * Invoked just before a split
    * @throws IOException
    */
-  // TODO: Deprecate this
+  @Deprecated
   public void preSplit(final User user) throws IOException {
     execOperation(coprocessors.isEmpty() ? null : new RegionOperation(user) {
       @Override
@@ -721,7 +686,10 @@ public class RegionCoprocessorHost
   /**
    * Invoked just before a split
    * @throws IOException
+   *
+   * Note: the logic moves to Master; it is unused in RS
    */
+  @Deprecated
   public void preSplit(final byte[] splitRow, final User user) throws IOException {
     execOperation(coprocessors.isEmpty() ? null : new RegionOperation(user) {
       @Override
@@ -737,7 +705,10 @@ public class RegionCoprocessorHost
    * @param l the new left-hand daughter region
    * @param r the new right-hand daughter region
    * @throws IOException
+   *
+   * Note: the logic moves to Master; it is unused in RS
    */
+  @Deprecated
   public void postSplit(final Region l, final Region r, final User user) throws IOException {
     execOperation(coprocessors.isEmpty() ? null : new RegionOperation(user) {
       @Override
@@ -748,6 +719,10 @@ public class RegionCoprocessorHost
     });
   }
 
+  /**
+  * Note: the logic moves to Master; it is unused in RS
+  */
+ @Deprecated
   public boolean preSplitBeforePONR(final byte[] splitKey,
       final List<Mutation> metaEntries, final User user) throws IOException {
     return execOperation(coprocessors.isEmpty() ? null : new RegionOperation(user) {
@@ -759,6 +734,10 @@ public class RegionCoprocessorHost
     });
   }
 
+  /**
+  * Note: the logic moves to Master; it is unused in RS
+  */
+  @Deprecated
   public void preSplitAfterPONR(final User user) throws IOException {
     execOperation(coprocessors.isEmpty() ? null : new RegionOperation(user) {
       @Override
@@ -772,7 +751,10 @@ public class RegionCoprocessorHost
   /**
    * Invoked just before the rollback of a failed split is started
    * @throws IOException
-   */
+   *
+  * Note: the logic moves to Master; it is unused in RS
+  */
+  @Deprecated
   public void preRollBackSplit(final User user) throws IOException {
     execOperation(coprocessors.isEmpty() ? null : new RegionOperation(user) {
       @Override
@@ -786,7 +768,10 @@ public class RegionCoprocessorHost
   /**
    * Invoked just after the rollback of a failed split is done
    * @throws IOException
-   */
+   *
+  * Note: the logic moves to Master; it is unused in RS
+  */
+  @Deprecated
   public void postRollBackSplit(final User user) throws IOException {
     execOperation(coprocessors.isEmpty() ? null : new RegionOperation(user) {
       @Override
@@ -1448,30 +1433,9 @@ public class RegionCoprocessorHost
       @Override
       public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
           throws IOException {
-        // Once we don't need to support the legacy call, replace RegionOperation with a version
-        // that's ObserverContext<RegionEnvironment> and avoid this cast.
-        final RegionEnvironment env = (RegionEnvironment)ctx.getEnvironment();
-        if (env.useLegacyPre) {
-          if (logKey instanceof HLogKey) {
-            oserver.preWALRestore(ctx, info, (HLogKey)logKey, logEdit);
-          } else {
-            legacyWarning(oserver.getClass(), "There are wal keys present that are not HLogKey.");
-          }
-        } else {
-          oserver.preWALRestore(ctx, info, logKey, logEdit);
-        }
+        oserver.preWALRestore(ctx, info, logKey, logEdit);
       }
     });
-  }
-
-  /**
-   * @return true if default behavior should be bypassed, false otherwise
-   * @deprecated use {@link #preWALRestore(HRegionInfo, WALKey, WALEdit)}; as of 2.0, remove in 3.0
-   */
-  @Deprecated
-  public boolean preWALRestore(final HRegionInfo info, final HLogKey logKey,
-      final WALEdit logEdit) throws IOException {
-    return preWALRestore(info, (WALKey)logKey, logEdit);
   }
 
   /**
@@ -1486,29 +1450,9 @@ public class RegionCoprocessorHost
       @Override
       public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
           throws IOException {
-        // Once we don't need to support the legacy call, replace RegionOperation with a version
-        // that's ObserverContext<RegionEnvironment> and avoid this cast.
-        final RegionEnvironment env = (RegionEnvironment)ctx.getEnvironment();
-        if (env.useLegacyPost) {
-          if (logKey instanceof HLogKey) {
-            oserver.postWALRestore(ctx, info, (HLogKey)logKey, logEdit);
-          } else {
-            legacyWarning(oserver.getClass(), "There are wal keys present that are not HLogKey.");
-          }
-        } else {
-          oserver.postWALRestore(ctx, info, logKey, logEdit);
-        }
+        oserver.postWALRestore(ctx, info, logKey, logEdit);
       }
     });
-  }
-
-  /**
-   * @deprecated use {@link #postWALRestore(HRegionInfo, WALKey, WALEdit)}; as of 2.0, remove in 3.0
-   */
-  @Deprecated
-  public void postWALRestore(final HRegionInfo info, final HLogKey logKey, final WALEdit logEdit)
-      throws IOException {
-    postWALRestore(info, (WALKey)logKey, logEdit);
   }
 
   /**
@@ -1528,18 +1472,19 @@ public class RegionCoprocessorHost
 
   /**
    * @param familyPaths pairs of { CF, file path } submitted for bulk load
+   * @param map Map of CF to List of file paths for the final loaded files
    * @param hasLoaded whether load was successful or not
    * @return the possibly modified value of hasLoaded
    * @throws IOException
    */
   public boolean postBulkLoadHFile(final List<Pair<byte[], String>> familyPaths,
-      boolean hasLoaded) throws IOException {
+      Map<byte[], List<Path>> map, boolean hasLoaded) throws IOException {
     return execOperationWithResult(hasLoaded,
         coprocessors.isEmpty() ? null : new RegionOperationWithResult<Boolean>() {
       @Override
       public void call(RegionObserver oserver, ObserverContext<RegionCoprocessorEnvironment> ctx)
           throws IOException {
-        setResult(oserver.postBulkLoadHFile(ctx, familyPaths, getResult()));
+        setResult(oserver.postBulkLoadHFile(ctx, familyPaths, map, getResult()));
       }
     });
   }

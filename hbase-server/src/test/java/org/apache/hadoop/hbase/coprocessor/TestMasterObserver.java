@@ -49,6 +49,7 @@ import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.client.MasterSwitchType;
+import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.master.HMaster;
@@ -224,6 +225,8 @@ public class TestMasterObserver {
       postBalanceCalled = false;
       preBalanceSwitchCalled = false;
       postBalanceSwitchCalled = false;
+      preShutdownCalled = false;
+      preStopMasterCalled = false;
       preSnapshotCalled = false;
       postSnapshotCalled = false;
       preListSnapshotCalled = false;
@@ -834,10 +837,18 @@ public class TestMasterObserver {
       preShutdownCalled = true;
     }
 
+    public boolean wasShutdownCalled() {
+      return preShutdownCalled;
+    }
+
     @Override
     public void preStopMaster(ObserverContext<MasterCoprocessorEnvironment> env)
         throws IOException {
       preStopMasterCalled = true;
+    }
+
+    public boolean wasStopMasterCalled() {
+      return preStopMasterCalled;
     }
 
     @Override
@@ -1118,11 +1129,11 @@ public class TestMasterObserver {
     }
 
     public boolean wasModifyTableActionCalled() {
-      return preModifyColumnFamilyActionCalled && postCompletedModifyColumnFamilyActionCalled;
+      return preModifyTableActionCalled && postCompletedModifyTableActionCalled;
     }
 
     public boolean wasModifyTableActionCalledOnly() {
-      return preModifyColumnFamilyActionCalled && !postCompletedModifyColumnFamilyActionCalled;
+      return preModifyTableActionCalled && !postCompletedModifyTableActionCalled;
     }
 
     @Deprecated
@@ -1465,6 +1476,44 @@ public class TestMasterObserver {
     @Override
     public void postBalanceRSGroup(ObserverContext<MasterCoprocessorEnvironment> ctx,
                                    String groupName, boolean balancerRan) throws IOException {
+    }
+
+    @Override
+    public void preSplitRegion(
+        final ObserverContext<MasterCoprocessorEnvironment> c,
+        final TableName tableName,
+        final byte[] splitRow) throws IOException {
+    }
+
+    @Override
+    public void preSplitRegionAction(
+        final ObserverContext<MasterCoprocessorEnvironment> c,
+        final TableName tableName,
+        final byte[] splitRow) throws IOException {
+    }
+
+    @Override
+    public void postCompletedSplitRegionAction(
+        final ObserverContext<MasterCoprocessorEnvironment> c,
+        final HRegionInfo regionInfoA,
+        final HRegionInfo regionInfoB) throws IOException {
+    }
+
+    @Override
+    public void preSplitRegionBeforePONRAction(
+        final ObserverContext<MasterCoprocessorEnvironment> ctx,
+        final byte[] splitKey,
+        final List<Mutation> metaEntries) throws IOException {
+    }
+
+    @Override
+    public void preSplitRegionAfterPONRAction(
+        final ObserverContext<MasterCoprocessorEnvironment> ctx) throws IOException {
+    }
+
+    @Override
+    public void preRollBackSplitRegionAction(
+        final ObserverContext<MasterCoprocessorEnvironment> ctx) throws IOException {
     }
   }
 

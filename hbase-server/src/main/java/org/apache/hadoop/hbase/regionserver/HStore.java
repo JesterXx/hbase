@@ -33,6 +33,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.Set;
@@ -59,8 +60,8 @@ import org.apache.hadoop.hbase.CompoundConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.backup.FailedArchiveException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.conf.ConfigurationManager;
@@ -362,12 +363,26 @@ public class HStore implements Store {
   }
 
   @Override
+  @Deprecated
   public long getFlushableSize() {
+    MemstoreSize size = getSizeToFlush();
+    return size.getDataSize() + size.getHeapOverhead();
+  }
+
+  @Override
+  public MemstoreSize getSizeToFlush() {
     return this.memstore.getFlushableSize();
   }
 
   @Override
+  @Deprecated
   public long getSnapshotSize() {
+    MemstoreSize size = getSizeOfSnapshot();
+    return size.getDataSize() + size.getHeapOverhead();
+  }
+
+  @Override
+  public MemstoreSize getSizeOfSnapshot() {
     return this.memstore.getSnapshotSize();
   }
 
@@ -636,12 +651,12 @@ public class HStore implements Store {
   /**
    * Adds a value to the memstore
    * @param cell
-   * @return memstore size delta
+   * @param memstoreSize
    */
-  public long add(final Cell cell) {
+  public void add(final Cell cell, MemstoreSize memstoreSize) {
     lock.readLock().lock();
     try {
-       return this.memstore.add(cell);
+       this.memstore.add(cell, memstoreSize);
     } finally {
       lock.readLock().unlock();
     }
@@ -650,12 +665,12 @@ public class HStore implements Store {
   /**
    * Adds the specified value to the memstore
    * @param cells
-   * @return memstore size delta
+   * @param memstoreSize
    */
-  public long add(final Iterable<Cell> cells) {
+  public void add(final Iterable<Cell> cells, MemstoreSize memstoreSize) {
     lock.readLock().lock();
     try {
-      return memstore.add(cells);
+      memstore.add(cells, memstoreSize);
     } finally {
       lock.readLock().unlock();
     }
@@ -664,21 +679,6 @@ public class HStore implements Store {
   @Override
   public long timeOfOldestEdit() {
     return memstore.timeOfOldestEdit();
-  }
-
-  /**
-   * Adds a value to the memstore
-   *
-   * @param kv
-   * @return memstore size delta
-   */
-  protected long delete(final KeyValue kv) {
-    lock.readLock().lock();
-    try {
-      return this.memstore.delete(kv);
-    } finally {
-      lock.readLock().unlock();
-    }
   }
 
   /**
@@ -2026,7 +2026,14 @@ public class HStore implements Store {
   }
 
   @Override
+  @Deprecated
   public long getMemStoreSize() {
+    MemstoreSize size = getSizeOfMemStore();
+    return size.getDataSize() + size.getHeapOverhead();
+  }
+
+  @Override
+  public MemstoreSize getSizeOfMemStore() {
     return this.memstore.size();
   }
 
@@ -2069,37 +2076,6 @@ public class HStore implements Store {
   }
 
   /**
-   * Updates the value for the given row/family/qualifier. This function will always be seen as
-   * atomic by other readers because it only puts a single KV to memstore. Thus no read/write
-   * control necessary.
-   * @param row row to update
-   * @param f family to update
-   * @param qualifier qualifier to update
-   * @param newValue the new value to set into memstore
-   * @return memstore size delta
-   * @throws IOException
-   */
-  @VisibleForTesting
-  public long updateColumnValue(byte [] row, byte [] f,
-                                byte [] qualifier, long newValue)
-      throws IOException {
-
-    this.lock.readLock().lock();
-    try {
-      long now = EnvironmentEdgeManager.currentTime();
-
-      return this.memstore.updateColumnValue(row,
-          f,
-          qualifier,
-          newValue,
-          now);
-
-    } finally {
-      this.lock.readLock().unlock();
-    }
-  }
-
-  /**
    * Adds or replaces the specified KeyValues.
    * <p>
    * For each KeyValue specified, if a cell with the same row, family, and qualifier exists in
@@ -2109,13 +2085,14 @@ public class HStore implements Store {
    * across all of them.
    * @param cells
    * @param readpoint readpoint below which we can safely remove duplicate KVs
-   * @return memstore size delta
+   * @param memstoreSize
    * @throws IOException
    */
-  public long upsert(Iterable<Cell> cells, long readpoint) throws IOException {
+  public void upsert(Iterable<Cell> cells, long readpoint, MemstoreSize memstoreSize)
+      throws IOException {
     this.lock.readLock().lock();
     try {
-      return this.memstore.upsert(cells, readpoint);
+      this.memstore.upsert(cells, readpoint, memstoreSize);
     } finally {
       this.lock.readLock().unlock();
     }
@@ -2149,7 +2126,7 @@ public class HStore implements Store {
       // passing the current sequence number of the wal - to allow bookkeeping in the memstore
       this.snapshot = memstore.snapshot();
       this.cacheFlushCount = snapshot.getCellsCount();
-      this.cacheFlushSize = snapshot.getSize();
+      this.cacheFlushSize = snapshot.getDataSize();
       committedFiles = new ArrayList<Path>(1);
     }
 
@@ -2282,7 +2259,8 @@ public class HStore implements Store {
 
   @Override
   public long heapSize() {
-    return DEEP_OVERHEAD + this.memstore.heapSize();
+    MemstoreSize memstoreSize = this.memstore.size();
+    return DEEP_OVERHEAD + memstoreSize.getDataSize() + memstoreSize.getHeapOverhead();
   }
 
   @Override
@@ -2467,7 +2445,24 @@ public class HStore implements Store {
           LOG.debug("Moving the files " + filesToRemove + " to archive");
         }
         // Only if this is successful it has to be removed
-        this.fs.removeStoreFiles(this.getFamily().getNameAsString(), filesToRemove);
+        try {
+          this.fs.removeStoreFiles(this.getFamily().getNameAsString(), filesToRemove);
+        } catch (FailedArchiveException fae) {
+          // Even if archiving some files failed, we still need to clear out any of the
+          // files which were successfully archived.  Otherwise we will receive a
+          // FileNotFoundException when we attempt to re-archive them in the next go around.
+          Collection<Path> failedFiles = fae.getFailedFiles();
+          Iterator<StoreFile> iter = filesToRemove.iterator();
+          while (iter.hasNext()) {
+            if (failedFiles.contains(iter.next().getPath())) {
+              iter.remove();
+            }
+          }
+          if (!filesToRemove.isEmpty()) {
+            clearCompactedfiles(filesToRemove);
+          }
+          throw fae;
+        }
       }
     }
     if (!filesToRemove.isEmpty()) {

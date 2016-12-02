@@ -32,7 +32,7 @@
   <parent>
     <groupId>org.apache</groupId>
     <artifactId>apache</artifactId>
-    <version>12</version>
+    <version>18</version>
     <relativePath/>
     <!-- no parent resolution -->
   </parent>
@@ -88,11 +88,6 @@
   <!--Add apache snapshots in case we want to use unreleased versions of plugins:
       e.g. surefire 2.18-SNAPSHOT-->
   <pluginRepositories>
-    <pluginRepository>
-      <id>scala-tools.org</id>
-      <name>Scala-tools Maven2 Repository</name>
-      <url>http://scala-tools.org/repo-releases</url>
-    </pluginRepository>
     <pluginRepository>
       <id>apache.snapshots</id>
       <url>http://repository.apache.org/snapshots/</url>
@@ -189,6 +184,12 @@
       <name>Ashish Singhi</name>
       <email>ashishsinghi@apache.org</email>
       <timezone>+5</timezone>
+    </developer>
+    <developer>
+      <id>binlijin</id>
+      <name>Lijin Bin</name>
+      <email>binlijin@apache.org</email>
+      <timezone>+8</timezone>
     </developer>
     <developer>
       <id>busbey</id>
@@ -461,6 +462,12 @@
       <timezone>-8</timezone>
     </developer>
     <developer>
+      <id>yangzhe1991</id>
+      <name>Phil Yang</name>
+      <email>yangzhe1991@apache.org</email>
+      <timezone>+8</timezone>
+    </developer>
+    <developer>
       <id>zhangduo</id>
       <name>Duo Zhang</name>
       <email>zhangduo@apache.org</email>
@@ -474,6 +481,13 @@
     </developer>
   </developers>
   <build>
+    <extensions>
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>1.5.0.Final</version>
+      </extension>
+    </extensions>
     <pluginManagement>
       <plugins>
         <plugin>
@@ -723,6 +737,7 @@
                     <versionRange>[1.5,)</versionRange>
                     <goals>
                       <goal>process</goal>
+                      <goal>bundle</goal>
                     </goals>
                   </pluginExecutionFilter>
                   <action>
@@ -797,6 +812,7 @@
               <exclude>**/rat.txt</exclude>
               <!-- exclude the shaded protobuf files -->
               <exclude>**/shaded/com/google/protobuf/**</exclude>
+              <exclude>**/src/main/patches/**</exclude>
             </excludes>
           </configuration>
         </plugin>
@@ -810,12 +826,15 @@
           </configuration>
         </plugin>
         <plugin>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-maven-plugins</artifactId>
-          <version>${hadoop-two.version}</version>
+          <groupId>org.xolstice.maven.plugins</groupId>
+          <artifactId>protobuf-maven-plugin</artifactId>
+          <version>${protobuf.plugin.version}</version>
           <configuration>
-            <protocVersion>${protobuf.version}</protocVersion>
-            <protocCommand>${protoc.path}</protocCommand>
+            <protocArtifact>com.google.protobuf:protoc:${external.protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+            <protoSourceRoot>${basedir}/src/main/protobuf/</protoSourceRoot>
+            <outputDirectory>${basedir}/src/main/java/</outputDirectory>
+            <clearOutputDirectory>false</clearOutputDirectory>
+            <checkStaleness>true</checkStaleness>
           </configuration>
         </plugin>
         <plugin>
@@ -1186,7 +1205,7 @@
     <compat.module>hbase-hadoop2-compat</compat.module>
     <assembly.file>src/main/assembly/hadoop-two-compat.xml</assembly.file>
     <!-- end HBASE-15925 default hadoop compatibility values -->
-    <commons-cli.version>1.2</commons-cli.version>
+    <commons-cli.version>1.3.1</commons-cli.version>
     <commons-codec.version>1.9</commons-codec.version>
     <!-- pretty outdated -->
     <commons-io.version>2.4</commons-io.version>
@@ -1194,7 +1213,7 @@
     <commons-logging.version>1.2</commons-logging.version>
     <commons-math.version>2.2</commons-math.version>
     <commons-net.version>3.1</commons-net.version>
-    <disruptor.version>3.3.0</disruptor.version>
+    <disruptor.version>3.3.6</disruptor.version>
     <!-- Do not use versions earlier than 3.2.2 due to a security vulnerability -->
     <collections.version>3.2.2</collections.version>
     <httpclient.version>4.5.2</httpclient.version>
@@ -1213,7 +1232,9 @@
     <htrace.version>3.1.0-incubating</htrace.version>
     <log4j.version>1.2.17</log4j.version>
     <mockito-all.version>1.10.8</mockito-all.version>
-    <protobuf.version>2.5.0</protobuf.version>
+    <!--Internally we use a different version of protobuf. See hbase-protocol-shaded-->
+    <external.protobuf.version>2.5.0</external.protobuf.version>
+    <protobuf.plugin.version>0.5.0</protobuf.plugin.version>
     <thrift.path>thrift</thrift.path>
     <thrift.version>0.9.3</thrift.version>
     <zookeeper.version>3.4.8</zookeeper.version>
@@ -1228,6 +1249,8 @@
     <spy.version>2.11.6</spy.version>
     <bouncycastle.version>1.46</bouncycastle.version>
     <kerby.version>1.0.0-RC2</kerby.version>
+    <commons-crypto.version>1.0.0</commons-crypto.version>
+    <curator.version>2.11.0</curator.version>
     <!-- Plugin Dependencies -->
     <maven.assembly.version>2.4</maven.assembly.version>
     <maven.antrun.version>1.8</maven.antrun.version>
@@ -1723,7 +1746,7 @@
       <dependency>
         <groupId>com.google.protobuf</groupId>
         <artifactId>protobuf-java</artifactId>
-        <version>${protobuf.version}</version>
+        <version>${external.protobuf.version}</version>
       </dependency>
       <dependency>
         <groupId>com.sun.jersey</groupId>
@@ -1784,28 +1807,60 @@
         <artifactId>disruptor</artifactId>
         <version>${disruptor.version}</version>
       </dependency>
-        <dependency>
+      <dependency>
         <groupId>net.spy</groupId>
         <artifactId>spymemcached</artifactId>
         <version>${spy.version}</version>
         <optional>true</optional>
-    </dependency>
-     <dependency>
-       <groupId>org.bouncycastle</groupId>
-       <artifactId>bcprov-jdk16</artifactId>
-       <version>${bouncycastle.version}</version>
-       <scope>test</scope>
-     </dependency>
-     <dependency>
-       <groupId>org.apache.kerby</groupId>
-       <artifactId>kerb-client</artifactId>
-       <version>${kerby.version}</version>
-     </dependency>
-     <dependency>
-       <groupId>org.apache.kerby</groupId>
-       <artifactId>kerb-simplekdc</artifactId>
-       <version>${kerby.version}</version>
-     </dependency>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcprov-jdk16</artifactId>
+        <version>${bouncycastle.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.kerby</groupId>
+        <artifactId>kerb-client</artifactId>
+        <version>${kerby.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.kerby</groupId>
+        <artifactId>kerb-simplekdc</artifactId>
+        <version>${kerby.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-crypto</artifactId>
+        <version>${commons-crypto.version}</version>
+        <exclusions>
+          <exclusion>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+          </exclusion>
+        </exclusions>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-recipes</artifactId>
+        <version>${curator.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-framework</artifactId>
+        <version>${curator.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-client</artifactId>
+        <version>${curator.version}</version>
+        <exclusions>
+          <exclusion>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+          </exclusion>
+        </exclusions>
+      </dependency>
     </dependencies>
   </dependencyManagement>
   <!-- Dependencies needed by subprojects -->
@@ -2892,25 +2947,6 @@
         <!-- see src/main/site/site.xml for selected reports -->
         <configuration>
           <dependencyLocationsEnabled>false</dependencyLocationsEnabled>
-        </configuration>
-      </plugin>
-
-      <!-- This seems to be needed by the surefire plugin.
-           The Javadoc below provide code as well -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jxr-plugin</artifactId>
-        <version>2.3</version>
-        <configuration>
-          <aggregate>true</aggregate>
-          <test-aggregate>true</test-aggregate>
-          <linkJavadoc>true</linkJavadoc>
-          <javadocDir>${project.reporting.outputDirectory}/devapidocs</javadocDir>
-          <testJavadocDir>${project.reporting.outputDirectory}/testdevapidocs</testJavadocDir>
-          <destDir>${project.reporting.outputDirectory}/xref</destDir>
-          <excludes>
-            <exclude>**/generated/*</exclude>
-          </excludes>
         </configuration>
       </plugin>
 

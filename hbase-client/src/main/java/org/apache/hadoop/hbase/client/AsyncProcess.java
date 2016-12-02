@@ -19,6 +19,8 @@
 
 package org.apache.hadoop.hbase.client;
 
+import static org.apache.hadoop.hbase.util.CollectionUtils.computeIfAbsent;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import java.io.IOException;
@@ -118,7 +120,7 @@ class AsyncProcess {
   private static final String THRESHOLD_TO_LOG_UNDONE_TASK_DETAILS =
       "hbase.client.threshold.log.details";
   private static final int DEFAULT_THRESHOLD_TO_LOG_UNDONE_TASK_DETAILS = 10;
-  private final int THRESHOLD_TO_LOG_REGION_DETAILS = 2;
+  private static final int THRESHOLD_TO_LOG_REGION_DETAILS = 2;
 
   /**
    * The maximum size of single RegionServer.
@@ -210,6 +212,7 @@ class AsyncProcess {
    */
   protected final int maxConcurrentTasksPerServer;
   protected final long pause;
+  protected final long pauseForCQTBE;// pause for CallQueueTooBigException, if specified
   protected int numTries;
   protected int serverTrackerTimeout;
   protected int rpcTimeout;
@@ -234,6 +237,15 @@ class AsyncProcess {
 
     this.pause = conf.getLong(HConstants.HBASE_CLIENT_PAUSE,
         HConstants.DEFAULT_HBASE_CLIENT_PAUSE);
+    long configuredPauseForCQTBE = conf.getLong(HConstants.HBASE_CLIENT_PAUSE_FOR_CQTBE, pause);
+    if (configuredPauseForCQTBE < pause) {
+      LOG.warn("The " + HConstants.HBASE_CLIENT_PAUSE_FOR_CQTBE + " setting: "
+          + configuredPauseForCQTBE + " is smaller than " + HConstants.HBASE_CLIENT_PAUSE
+          + ", will use " + pause + " instead.");
+      this.pauseForCQTBE = pause;
+    } else {
+      this.pauseForCQTBE = configuredPauseForCQTBE;
+    }
     // how many times we could try in total, one more than retry number
     this.numTries = conf.getInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER,
         HConstants.DEFAULT_HBASE_CLIENT_RETRIES_NUMBER) + 1;
@@ -635,23 +647,10 @@ class AsyncProcess {
   protected void incTaskCounters(Collection<byte[]> regions, ServerName sn) {
     tasksInProgress.incrementAndGet();
 
-    AtomicInteger serverCnt = taskCounterPerServer.get(sn);
-    if (serverCnt == null) {
-      taskCounterPerServer.putIfAbsent(sn, new AtomicInteger());
-      serverCnt = taskCounterPerServer.get(sn);
-    }
-    serverCnt.incrementAndGet();
+    computeIfAbsent(taskCounterPerServer, sn, AtomicInteger::new).incrementAndGet();
 
     for (byte[] regBytes : regions) {
-      AtomicInteger regionCnt = taskCounterPerRegion.get(regBytes);
-      if (regionCnt == null) {
-        regionCnt = new AtomicInteger();
-        AtomicInteger oldCnt = taskCounterPerRegion.putIfAbsent(regBytes, regionCnt);
-        if (oldCnt != null) {
-          regionCnt = oldCnt;
-        }
-      }
-      regionCnt.incrementAndGet();
+      computeIfAbsent(taskCounterPerRegion, regBytes, AtomicInteger::new).incrementAndGet();
     }
   }
 

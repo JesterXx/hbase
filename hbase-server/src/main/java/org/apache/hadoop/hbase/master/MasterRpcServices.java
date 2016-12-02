@@ -66,6 +66,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.ClusterStatusProtos.Reg
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.NameStringPair;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.ProcedureDescription;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.RegionInfo;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.RegionSpecifier.RegionSpecifierType;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.SnapshotDescription;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos;
@@ -83,6 +84,8 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProto
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.ReportRSFatalErrorResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.ReportRegionStateTransitionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.ReportRegionStateTransitionResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.SplitTableRegionRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.SplitTableRegionResponse;
 import org.apache.hadoop.hbase.regionserver.RSRpcServices;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.security.access.AccessController;
@@ -546,6 +549,22 @@ public class MasterRpcServices extends RSRpcServices
       return EnableTableResponse.newBuilder().setProcId(procId).build();
     } catch (IOException ioe) {
       throw new ServiceException(ioe);
+    }
+  }
+
+  @Override
+  public SplitTableRegionResponse splitRegion(
+      final RpcController controller,
+      final SplitTableRegionRequest request) throws ServiceException {
+    try {
+      long procId = master.splitRegion(
+        HRegionInfo.convert(request.getRegionInfo()),
+        request.getSplitRow().toByteArray(),
+        request.getNonceGroup(),
+        request.getNonce());
+      return SplitTableRegionResponse.newBuilder().setProcId(procId).build();
+    } catch (IOException ie) {
+      throw new ServiceException(ie);
     }
   }
 
@@ -1296,15 +1315,16 @@ public class MasterRpcServices extends RSRpcServices
     try {
       master.checkServiceStarted();
       RegionStateTransition rt = req.getTransition(0);
-      TableName tableName = ProtobufUtil.toTableName(
-        rt.getRegionInfo(0).getTableName());
       RegionStates regionStates = master.getAssignmentManager().getRegionStates();
-      if (!(TableName.META_TABLE_NAME.equals(tableName)
-          && regionStates.getRegionState(HRegionInfo.FIRST_META_REGIONINFO) != null)
-            && !master.getAssignmentManager().isFailoverCleanupDone()) {
-        // Meta region is assigned before master finishes the
-        // failover cleanup. So no need this check for it
-        throw new PleaseHoldException("Master is rebuilding user regions");
+      for (RegionInfo ri : rt.getRegionInfoList())  { 
+        TableName tableName = ProtobufUtil.toTableName(ri.getTableName());
+        if (!(TableName.META_TABLE_NAME.equals(tableName)
+            && regionStates.getRegionState(HRegionInfo.FIRST_META_REGIONINFO) != null)
+              && !master.getAssignmentManager().isFailoverCleanupDone()) {
+          // Meta region is assigned before master finishes the
+          // failover cleanup. So no need this check for it
+          throw new PleaseHoldException("Master is rebuilding user regions");
+        }
       }
       ServerName sn = ProtobufUtil.toServerName(req.getServer());
       String error = master.getAssignmentManager().onRegionTransition(sn, rt);

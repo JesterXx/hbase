@@ -32,6 +32,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.Option;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
@@ -41,15 +43,12 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
 import org.apache.hadoop.hbase.client.SnapshotDescription;
-import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.util.AbstractHBaseTool;
 import org.apache.hadoop.util.StringUtils;
-import org.apache.hadoop.util.Tool;
-import org.apache.hadoop.util.ToolRunner;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.io.HFileLink;
 import org.apache.hadoop.hbase.io.WALLink;
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
@@ -68,8 +67,22 @@ import org.apache.hadoop.hbase.util.FSUtils;
  */
 @InterfaceAudience.Public
 @InterfaceStability.Evolving
-public final class SnapshotInfo extends Configured implements Tool {
+public final class SnapshotInfo extends AbstractHBaseTool {
   private static final Log LOG = LogFactory.getLog(SnapshotInfo.class);
+
+  static final class Options {
+    static final Option SNAPSHOT = new Option(null, "snapshot", true, "Snapshot to examine.");
+    static final Option REMOTE_DIR = new Option(null, "remote-dir", true,
+        "Root directory that contains the snapshots.");
+    static final Option LIST_SNAPSHOTS = new Option(null, "list-snapshots", false,
+        "List all the available snapshots and exit.");
+    static final Option FILES = new Option(null, "files", false, "Files and logs list.");
+    static final Option STATS = new Option(null, "stats", false, "Files and logs stats.");
+    static final Option SCHEMA = new Option(null, "schema", false,
+        "Describe the snapshotted table.");
+    static final Option SIZE_IN_BYTES = new Option(null, "size-in-bytes", false,
+        "Print the size of the files in bytes.");
+  }
 
   /**
    * Statistics about the snapshot
@@ -142,7 +155,7 @@ public final class SnapshotInfo extends Configured implements Tool {
         final SnapshotDescription snapshot)
     {
       this.snapshot = ProtobufUtil.createHBaseProtosSnapshotDesc(snapshot);
-      this.snapshotTable = TableName.valueOf(snapshot.getTable());
+      this.snapshotTable = snapshot.getTableName();
       this.conf = conf;
       this.fs = fs;
     }
@@ -158,9 +171,7 @@ public final class SnapshotInfo extends Configured implements Tool {
 
     /** @return the snapshot descriptor */
     public SnapshotDescription getSnapshotDescription() {
-      return new SnapshotDescription(this.snapshot.getName(), this.snapshot.getTable(),
-          ProtobufUtil.createSnapshotType(this.snapshot.getType()), this.snapshot.getOwner(),
-          this.snapshot.getCreationTime(), this.snapshot.getVersion());
+      return ProtobufUtil.createSnapshotDesc(this.snapshot);
     }
 
     /** @return true if the snapshot is corrupted */
@@ -341,54 +352,25 @@ public final class SnapshotInfo extends Configured implements Tool {
     }
   }
 
-  private boolean printSizeInBytes = false;
   private FileSystem fs;
   private Path rootDir;
 
   private SnapshotManifest snapshotManifest;
 
-  @Override
-  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="REC_CATCH_EXCEPTION",
-    justification="Intentional")
-  public int run(String[] args) throws IOException, InterruptedException {
-    final Configuration conf = getConf();
-    boolean listSnapshots = false;
-    String snapshotName = null;
-    boolean showSchema = false;
-    boolean showFiles = false;
-    boolean showStats = false;
+  private boolean listSnapshots = false;
+  private String snapshotName;
+  private Path remoteDir;
+  private boolean showSchema = false;
+  private boolean showFiles = false;
+  private boolean showStats = false;
+  private boolean printSizeInBytes = false;
 
-    // Process command line args
-    for (int i = 0; i < args.length; i++) {
-      String cmd = args[i];
-      try {
-        if (cmd.equals("-snapshot")) {
-          snapshotName = args[++i];
-        } else if (cmd.equals("-files")) {
-          showFiles = true;
-          showStats = true;
-        } else if (cmd.equals("-stats")) {
-          showStats = true;
-        } else if (cmd.equals("-schema")) {
-          showSchema = true;
-        } else if (cmd.equals("-remote-dir")) {
-          Path sourceDir = new Path(args[++i]);
-          URI defaultFs = sourceDir.getFileSystem(conf).getUri();
-          FSUtils.setFsDefault(conf, new Path(defaultFs));
-          FSUtils.setRootDir(conf, sourceDir);
-        } else if (cmd.equals("-list-snapshots")) {
-          listSnapshots = true;
-        } else if (cmd.equals("-size-in-bytes")) {
-          printSizeInBytes = true;
-        } else if (cmd.equals("-h") || cmd.equals("--help")) {
-          printUsageAndExit();
-        } else {
-          System.err.println("UNEXPECTED: " + cmd);
-          printUsageAndExit();
-        }
-      } catch (Exception e) {
-        printUsageAndExit(); // FindBugs: REC_CATCH_EXCEPTION
-      }
+  @Override
+  public int doWork() throws IOException, InterruptedException {
+    if (remoteDir != null) {
+      URI defaultFs = remoteDir.getFileSystem(conf).getUri();
+      FSUtils.setFsDefault(conf, new Path(defaultFs));
+      FSUtils.setRootDir(conf, remoteDir);
     }
 
     // List Available Snapshots
@@ -399,15 +381,9 @@ public final class SnapshotInfo extends Configured implements Tool {
         System.out.printf("%-20s | %20s | %s%n",
                           desc.getName(),
                           df.format(new Date(desc.getCreationTime())),
-                          desc.getTable());
+                          desc.getTableNameAsString());
       }
       return 0;
-    }
-
-    if (snapshotName == null) {
-      System.err.println("Missing snapshot name!");
-      printUsageAndExit();
-      return 1;
     }
 
     rootDir = FSUtils.getRootDir(conf);
@@ -463,7 +439,7 @@ public final class SnapshotInfo extends Configured implements Tool {
   }
 
   /**
-   * Dump the {@link HTableDescriptor}
+   * Dump the {@link org.apache.hadoop.hbase.HTableDescriptor}
    */
   private void printSchema() {
     System.out.println("Table Descriptor");
@@ -485,9 +461,7 @@ public final class SnapshotInfo extends Configured implements Tool {
     // Collect information about hfiles and logs in the snapshot
     final HBaseProtos.SnapshotDescription snapshotDesc = snapshotManifest.getSnapshotDescription();
     final String table = snapshotDesc.getTable();
-    SnapshotDescription desc = new SnapshotDescription(snapshotDesc.getName(),
-        snapshotDesc.getTable(), ProtobufUtil.createSnapshotType(snapshotDesc.getType()),
-        snapshotDesc.getOwner(), snapshotDesc.getCreationTime(), snapshotDesc.getVersion());
+    final SnapshotDescription desc = ProtobufUtil.createSnapshotDesc(snapshotDesc);
     final SnapshotStats stats = new SnapshotStats(this.getConf(), this.fs, desc);
     SnapshotReferenceUtil.concurrentVisitReferencedFiles(getConf(), fs, snapshotManifest,
         "SnapshotInfo",
@@ -540,22 +514,36 @@ public final class SnapshotInfo extends Configured implements Tool {
     return printSizeInBytes ? Long.toString(size) : StringUtils.humanReadableInt(size);
   }
 
-  private void printUsageAndExit() {
-    System.err.printf("Usage: bin/hbase snapshot info [options]%n");
-    System.err.println(" where [options] are:");
-    System.err.println("  -h|-help                Show this help and exit.");
-    System.err.println("  -remote-dir             Root directory that contains the snapshots.");
-    System.err.println("  -list-snapshots         List all the available snapshots and exit.");
-    System.err.println("  -size-in-bytes          Print the size of the files in bytes.");
-    System.err.println("  -snapshot NAME          Snapshot to examine.");
-    System.err.println("  -files                  Files and logs list.");
-    System.err.println("  -stats                  Files and logs stats.");
-    System.err.println("  -schema                 Describe the snapshotted table.");
-    System.err.println();
+  @Override
+  protected void addOptions() {
+    addRequiredOption(Options.SNAPSHOT);
+    addOption(Options.REMOTE_DIR);
+    addOption(Options.LIST_SNAPSHOTS);
+    addOption(Options.FILES);
+    addOption(Options.STATS);
+    addOption(Options.SCHEMA);
+    addOption(Options.SIZE_IN_BYTES);
+  }
+
+  @Override
+  protected void processOptions(CommandLine cmd) {
+    snapshotName = cmd.getOptionValue(Options.SNAPSHOT.getLongOpt());
+    showFiles = cmd.hasOption(Options.FILES.getLongOpt());
+    showStats = cmd.hasOption(Options.FILES.getLongOpt())
+        || cmd.hasOption(Options.STATS.getLongOpt());
+    showSchema = cmd.hasOption(Options.SCHEMA.getLongOpt());
+    listSnapshots = cmd.hasOption(Options.LIST_SNAPSHOTS.getLongOpt());
+    printSizeInBytes = cmd.hasOption(Options.SIZE_IN_BYTES.getLongOpt());
+    if (cmd.hasOption(Options.REMOTE_DIR.getLongOpt())) {
+      remoteDir = new Path(cmd.getOptionValue(Options.REMOTE_DIR.getLongOpt()));
+    }
+  }
+
+  @Override
+  protected void printUsage() {
+    printUsage("bin/hbase snapshot info [options]", "Options:", "");
     System.err.println("Examples:");
-    System.err.println("  hbase snapshot info \\");
-    System.err.println("    -snapshot MySnapshot -files");
-    System.exit(1);
+    System.err.println("  hbase snapshot info --snapshot MySnapshot --files");
   }
 
   /**
@@ -566,9 +554,8 @@ public final class SnapshotInfo extends Configured implements Tool {
    */
   public static SnapshotStats getSnapshotStats(final Configuration conf,
       final SnapshotDescription snapshot) throws IOException {
-    HBaseProtos.SnapshotDescription snapshotDesc = ProtobufUtil.createHBaseProtosSnapshotDesc(
-        snapshot);
-
+    HBaseProtos.SnapshotDescription snapshotDesc =
+      ProtobufUtil.createHBaseProtosSnapshotDesc(snapshot);
     return getSnapshotStats(conf, snapshotDesc, null);
   }
 
@@ -616,9 +603,7 @@ public final class SnapshotInfo extends Configured implements Tool {
     for (FileStatus snapshotDirStat: snapshots) {
       HBaseProtos.SnapshotDescription snapshotDesc =
           SnapshotDescriptionUtils.readSnapshotInfo(fs, snapshotDirStat.getPath());
-      snapshotLists.add(new SnapshotDescription(snapshotDesc.getName(),
-          snapshotDesc.getTable(), ProtobufUtil.createSnapshotType(snapshotDesc.getType()),
-          snapshotDesc.getOwner(), snapshotDesc.getCreationTime(), snapshotDesc.getVersion()));
+      snapshotLists.add(ProtobufUtil.createSnapshotDesc(snapshotDesc));
     }
     return snapshotLists;
   }
@@ -639,8 +624,8 @@ public final class SnapshotInfo extends Configured implements Tool {
       final ConcurrentHashMap<Path, Integer> filesMap,
       final AtomicLong uniqueHFilesArchiveSize, final AtomicLong uniqueHFilesSize,
       final AtomicLong uniqueHFilesMobSize) throws IOException {
-    HBaseProtos.SnapshotDescription snapshotDesc = ProtobufUtil.createHBaseProtosSnapshotDesc(
-        snapshot);
+    HBaseProtos.SnapshotDescription snapshotDesc =
+        ProtobufUtil.createHBaseProtosSnapshotDesc(snapshot);
     Path rootDir = FSUtils.getRootDir(conf);
     final FileSystem fs = FileSystem.get(rootDir.toUri(), conf);
 
@@ -651,9 +636,8 @@ public final class SnapshotInfo extends Configured implements Tool {
           @Override public void storeFile(final HRegionInfo regionInfo, final String family,
               final SnapshotRegionManifest.StoreFile storeFile) throws IOException {
             if (!storeFile.hasReference()) {
-              HFileLink link = HFileLink
-                  .build(conf, TableName.valueOf(snapshot.getTable()), regionInfo.getEncodedName(),
-                      family, storeFile.getName());
+              HFileLink link = HFileLink.build(conf, snapshot.getTableName(),
+                  regionInfo.getEncodedName(), family, storeFile.getName());
               long size;
               Integer count;
               Path p;
@@ -722,18 +706,8 @@ public final class SnapshotInfo extends Configured implements Tool {
     return fileMap;
   }
 
-  /**
-   * The guts of the {@link #main} method.
-   * Call this method to avoid the {@link #main(String[])} System.exit.
-   * @param args
-   * @return errCode
-   * @throws Exception
-   */
-  static int innerMain(final String [] args) throws Exception {
-    return ToolRunner.run(HBaseConfiguration.create(), new SnapshotInfo(), args);
-  }
 
-  public static void main(String[] args) throws Exception {
-     System.exit(innerMain(args));
+  public static void main(String[] args) {
+    new SnapshotInfo().doStaticMain(args);
   }
 }

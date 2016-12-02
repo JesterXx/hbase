@@ -21,7 +21,8 @@ package org.apache.hadoop.hbase.regionserver;
 
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
-import org.apache.hadoop.hbase.CellUtil;
+import org.apache.hadoop.hbase.ExtendedCell;
+import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.client.Scan;
@@ -85,13 +86,14 @@ public class ImmutableSegment extends Segment {
    * The input parameter "type" exists for future use when more types of flat ImmutableSegments
    * are going to be introduced.
    */
-  protected ImmutableSegment(CellComparator comparator, MemStoreCompactorIterator iterator,
-      MemStoreLAB memStoreLAB, int numOfCells, Type type) {
+  protected ImmutableSegment(CellComparator comparator, MemStoreSegmentsIterator iterator,
+      MemStoreLAB memStoreLAB, int numOfCells, Type type, boolean merge) {
+
     super(null, // initiailize the CellSet with NULL
         comparator, memStoreLAB);
     this.type = type;
     // build the true CellSet based on CellArrayMap
-    CellSet cs = createCellArrayMapSet(numOfCells, iterator);
+    CellSet cs = createCellArrayMapSet(numOfCells, iterator, merge);
 
     this.setCellSet(null, cs);            // update the CellSet of the new Segment
     this.timeRange = this.timeRangeTracker == null ? null : this.timeRangeTracker.toTimeRange();
@@ -102,18 +104,19 @@ public class ImmutableSegment extends Segment {
    * list of older ImmutableSegments.
    * The given iterator returns the Cells that "survived" the compaction.
    */
-  protected ImmutableSegment(CellComparator comparator, MemStoreCompactorIterator iterator,
+  protected ImmutableSegment(CellComparator comparator, MemStoreSegmentsIterator iterator,
       MemStoreLAB memStoreLAB) {
     super(new CellSet(comparator), // initiailize the CellSet with empty CellSet
         comparator, memStoreLAB);
     type = Type.SKIPLIST_MAP_BASED;
+    MemstoreSize memstoreSize = new MemstoreSize();
     while (iterator.hasNext()) {
       Cell c = iterator.next();
       // The scanner is doing all the elimination logic
       // now we just copy it to the new segment
       Cell newKV = maybeCloneWithAllocator(c);
       boolean usedMSLAB = (newKV != c);
-      internalAdd(newKV, usedMSLAB); //
+      internalAdd(newKV, usedMSLAB, memstoreSize);
     }
     this.timeRange = this.timeRangeTracker == null ? null : this.timeRangeTracker.toTimeRange();
   }
@@ -139,23 +142,10 @@ public class ImmutableSegment extends Segment {
     return this.timeRange.getMin();
   }
 
-
-  @Override
-  public long size() {
-    switch (this.type) {
-    case SKIPLIST_MAP_BASED:
-      return keySize() + DEEP_OVERHEAD_CSLM;
-    case ARRAY_MAP_BASED:
-      return keySize() + DEEP_OVERHEAD_CAM;
-    default:
-      throw new RuntimeException("Unknown type " + type);
-    }
-  }
-
   /**------------------------------------------------------------------------
    * Change the CellSet of this ImmutableSegment from one based on ConcurrentSkipListMap to one
    * based on CellArrayMap.
-   * If this ImmutableSegment is not based on ConcurrentSkipListMap , this is NOP
+   * If this ImmutableSegment is not based on ConcurrentSkipListMap , this is NOOP
    *
    * Synchronization of the CellSet replacement:
    * The reference to the CellSet is AtomicReference and is updated only when ImmutableSegment
@@ -163,7 +153,7 @@ public class ImmutableSegment extends Segment {
    * thread of compaction, but to be on the safe side the initial CellSet is locally saved
    * before the flattening and then replaced using CAS instruction.
    */
-  public boolean flatten() {
+  public boolean flatten(MemstoreSize memstoreSize) {
     if (isFlat()) return false;
     CellSet oldCellSet = getCellSet();
     int numOfCells = getCellsCount();
@@ -175,12 +165,13 @@ public class ImmutableSegment extends Segment {
 
     // arrange the meta-data size, decrease all meta-data sizes related to SkipList
     // (recreateCellArrayMapSet doesn't take the care for the sizes)
-    long newSegmentSizeDelta = -(ClassSize.CONCURRENT_SKIPLISTMAP +
-        numOfCells * ClassSize.CONCURRENT_SKIPLISTMAP_ENTRY);
+    long newSegmentSizeDelta = -(numOfCells * ClassSize.CONCURRENT_SKIPLISTMAP_ENTRY);
     // add size of CellArrayMap and meta-data overhead per Cell
-    newSegmentSizeDelta = newSegmentSizeDelta + ClassSize.CELL_ARRAY_MAP +
-        numOfCells * ClassSize.CELL_ARRAY_MAP_ENTRY;
-    incSize(newSegmentSizeDelta);
+    newSegmentSizeDelta = newSegmentSizeDelta + numOfCells * ClassSize.CELL_ARRAY_MAP_ENTRY;
+    incSize(0, newSegmentSizeDelta);
+    if (memstoreSize != null) {
+      memstoreSize.incMemstoreSize(0, newSegmentSizeDelta);
+    }
 
     return true;
   }
@@ -188,19 +179,26 @@ public class ImmutableSegment extends Segment {
   /////////////////////  PRIVATE METHODS  /////////////////////
   /*------------------------------------------------------------------------*/
   // Create CellSet based on CellArrayMap from compacting iterator
-  private CellSet createCellArrayMapSet(int numOfCells, MemStoreCompactorIterator iterator) {
+  private CellSet createCellArrayMapSet(int numOfCells, MemStoreSegmentsIterator iterator,
+      boolean merge) {
 
     Cell[] cells = new Cell[numOfCells];   // build the Cell Array
     int i = 0;
     while (iterator.hasNext()) {
       Cell c = iterator.next();
       // The scanner behind the iterator is doing all the elimination logic
-      // now we just copy it to the new segment (also MSLAB copy)
-      cells[i] = maybeCloneWithAllocator(c);
-      boolean usedMSLAB = (cells[i] != c);
+      if (merge) {
+        // if this is merge we just move the Cell object without copying MSLAB
+        // the sizes still need to be updated in the new segment
+        cells[i] = c;
+      } else {
+        // now we just copy it to the new segment (also MSLAB copy)
+        cells[i] = maybeCloneWithAllocator(c);
+      }
+      boolean useMSLAB = (getMemStoreLAB()!=null);
       // second parameter true, because in compaction addition of the cell to new segment
       // is always successful
-      updateMetaInfo(c, true, usedMSLAB); // updates the size per cell
+      updateMetaInfo(c, true, useMSLAB, null); // updates the size per cell
       i++;
     }
     // build the immutable CellSet
@@ -208,14 +206,18 @@ public class ImmutableSegment extends Segment {
     return new CellSet(cam);
   }
 
-  protected long heapSizeChange(Cell cell, boolean succ) {
+  @Override
+  protected long heapOverheadChange(Cell cell, boolean succ) {
     if (succ) {
       switch (this.type) {
       case SKIPLIST_MAP_BASED:
-        return ClassSize
-            .align(ClassSize.CONCURRENT_SKIPLISTMAP_ENTRY + CellUtil.estimatedHeapSizeOf(cell));
+        return super.heapOverheadChange(cell, succ);
       case ARRAY_MAP_BASED:
-        return ClassSize.align(ClassSize.CELL_ARRAY_MAP_ENTRY + CellUtil.estimatedHeapSizeOf(cell));
+        if (cell instanceof ExtendedCell) {
+          return ClassSize
+              .align(ClassSize.CELL_ARRAY_MAP_ENTRY + ((ExtendedCell) cell).heapOverhead());
+        }
+        return ClassSize.align(ClassSize.CELL_ARRAY_MAP_ENTRY + KeyValue.FIXED_OVERHEAD);
       }
     }
     return 0;

@@ -108,35 +108,54 @@ public class ProcedureTestingUtility {
     return loader;
   }
 
-  public static <TEnv> void setKillBeforeStoreUpdate(ProcedureExecutor<TEnv> procExecutor,
-      boolean value) {
+  private static <TEnv> void createExecutorTesting(final ProcedureExecutor<TEnv> procExecutor) {
     if (procExecutor.testing == null) {
       procExecutor.testing = new ProcedureExecutor.Testing();
     }
+  }
+
+  public static <TEnv> void setKillIfSuspended(ProcedureExecutor<TEnv> procExecutor,
+      boolean value) {
+    createExecutorTesting(procExecutor);
+    procExecutor.testing.killIfSuspended = value;
+  }
+
+  public static <TEnv> void setKillBeforeStoreUpdate(ProcedureExecutor<TEnv> procExecutor,
+      boolean value) {
+    createExecutorTesting(procExecutor);
     procExecutor.testing.killBeforeStoreUpdate = value;
     LOG.warn("Set Kill before store update to: " + procExecutor.testing.killBeforeStoreUpdate);
+    assertSingleExecutorForKillTests(procExecutor);
   }
 
   public static <TEnv> void setToggleKillBeforeStoreUpdate(ProcedureExecutor<TEnv> procExecutor,
       boolean value) {
-    if (procExecutor.testing == null) {
-      procExecutor.testing = new ProcedureExecutor.Testing();
-    }
+    createExecutorTesting(procExecutor);
     procExecutor.testing.toggleKillBeforeStoreUpdate = value;
+    assertSingleExecutorForKillTests(procExecutor);
   }
 
   public static <TEnv> void toggleKillBeforeStoreUpdate(ProcedureExecutor<TEnv> procExecutor) {
-    if (procExecutor.testing == null) {
-      procExecutor.testing = new ProcedureExecutor.Testing();
-    }
+    createExecutorTesting(procExecutor);
     procExecutor.testing.killBeforeStoreUpdate = !procExecutor.testing.killBeforeStoreUpdate;
     LOG.warn("Set Kill before store update to: " + procExecutor.testing.killBeforeStoreUpdate);
+    assertSingleExecutorForKillTests(procExecutor);
   }
 
   public static <TEnv> void setKillAndToggleBeforeStoreUpdate(ProcedureExecutor<TEnv> procExecutor,
       boolean value) {
     ProcedureTestingUtility.setKillBeforeStoreUpdate(procExecutor, value);
     ProcedureTestingUtility.setToggleKillBeforeStoreUpdate(procExecutor, value);
+    assertSingleExecutorForKillTests(procExecutor);
+  }
+
+  private static <TEnv> void assertSingleExecutorForKillTests(final ProcedureExecutor<TEnv> procExecutor) {
+    if (procExecutor.testing == null) return;
+    if (procExecutor.testing.killBeforeStoreUpdate ||
+        procExecutor.testing.toggleKillBeforeStoreUpdate) {
+      assertEquals("expected only one executor running during test with kill/restart",
+        1, procExecutor.getCorePoolSize());
+    }
   }
 
   public static <TEnv> long submitAndWait(Configuration conf, TEnv env, Procedure<TEnv> proc)
@@ -208,24 +227,31 @@ public class ProcedureTestingUtility {
     assertFalse("found exception: " + result.getException(), result.isFailed());
   }
 
-  public static void assertIsAbortException(final ProcedureInfo result) {
+  public static <TEnv> Throwable assertProcFailed(final ProcedureExecutor<TEnv> procExecutor,
+      final long procId) {
+    ProcedureInfo result = procExecutor.getResult(procId);
+    assertTrue("expected procedure result", result != null);
+    return assertProcFailed(result);
+  }
+
+  public static Throwable assertProcFailed(final ProcedureInfo result) {
     assertEquals(true, result.isFailed());
-    LOG.info(result.getException().getMessage());
-    Throwable cause = result.getException().getCause();
+    LOG.info("procId=" + result.getProcId() + " exception: " + result.getException().getMessage());
+    return getExceptionCause(result);
+  }
+
+  public static void assertIsAbortException(final ProcedureInfo result) {
+    Throwable cause = assertProcFailed(result);
     assertTrue("expected abort exception, got "+ cause, cause instanceof ProcedureAbortedException);
   }
 
   public static void assertIsTimeoutException(final ProcedureInfo result) {
-    assertEquals(true, result.isFailed());
-    LOG.info(result.getException().getMessage());
-    Throwable cause = result.getException();
+    Throwable cause = assertProcFailed(result);
     assertTrue("expected TimeoutIOException, got " + cause, cause instanceof TimeoutIOException);
   }
 
   public static void assertIsIllegalArgumentException(final ProcedureInfo result) {
-    assertEquals(true, result.isFailed());
-    LOG.info(result.getException().getMessage());
-    Throwable cause = getExceptionCause(result);
+    Throwable cause = assertProcFailed(result);
     assertTrue("expected IllegalArgumentIOException, got " + cause,
       cause instanceof IllegalArgumentIOException);
   }
@@ -234,6 +260,54 @@ public class ProcedureTestingUtility {
     assert procInfo.isFailed();
     Throwable cause = procInfo.getException().getCause();
     return cause == null ? procInfo.getException() : cause;
+  }
+
+  /**
+   * Run through all procedure flow states TWICE while also restarting
+   * procedure executor at each step; i.e force a reread of procedure store.
+   *
+   *<p>It does
+   * <ol><li>Execute step N - kill the executor before store update
+   * <li>Restart executor/store
+   * <li>Execute step N - and then save to store
+   * </ol>
+   *
+   *<p>This is a good test for finding state that needs persisting and steps that are not
+   * idempotent.
+   */
+  public static <TEnv> void testRecoveryAndDoubleExecution(final ProcedureExecutor<TEnv> procExec,
+      final long procId) throws Exception {
+    testRecoveryAndDoubleExecution(procExec, procId, false);
+  }
+
+  public static <TEnv> void testRecoveryAndDoubleExecution(final ProcedureExecutor<TEnv> procExec,
+      final long procId, final boolean expectFailure) throws Exception {
+    testRecoveryAndDoubleExecution(procExec, procId, expectFailure, null);
+  }
+
+  public static <TEnv> void testRecoveryAndDoubleExecution(final ProcedureExecutor<TEnv> procExec,
+      final long procId, final boolean expectFailure, final Runnable customRestart)
+      throws Exception {
+    final Procedure proc = procExec.getProcedure(procId);
+    waitProcedure(procExec, procId);
+    assertEquals(false, procExec.isRunning());
+
+    for (int i = 0; !procExec.isFinished(procId); ++i) {
+      LOG.info("Restart " + i + " exec state: " + proc);
+      if (customRestart != null) {
+        customRestart.run();
+      } else {
+        restart(procExec);
+      }
+      waitProcedure(procExec, procId);
+    }
+
+    assertEquals(true, procExec.isRunning());
+    if (expectFailure) {
+      assertProcFailed(procExec, procId);
+    } else {
+      assertProcNotFailed(procExec, procId);
+    }
   }
 
   public static class NoopProcedure<TEnv> extends Procedure<TEnv> {
@@ -275,10 +349,17 @@ public class ProcedureTestingUtility {
     }
 
     public TestProcedure(long procId, long parentId, byte[] data) {
+      this(procId, parentId, parentId, data);
+    }
+
+    public TestProcedure(long procId, long parentId, long rootId, byte[] data) {
       setData(data);
       setProcId(procId);
       if (parentId > 0) {
         setParentProcId(parentId);
+      }
+      if (rootId > 0 || parentId > 0) {
+        setRootProcId(rootId);
       }
     }
 

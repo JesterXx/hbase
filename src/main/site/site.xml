@@ -97,8 +97,6 @@
       <item name="User API (Test)" href="testapidocs/index.html" target="_blank" />
       <item name="Developer API" href="devapidocs/index.html" target="_blank" />
       <item name="Developer API (Test)" href="testdevapidocs/index.html" target="_blank" />
-      <item name="X-Ref" href="xref/index.html" />
-      <item name="X-Ref (Test)" href="xref-test/index.html" />
       <item name="中文参考指南(单页)" href="http://abloz.com/hbase/book.html" target="_blank" />
       <item name="FAQ" href="book.html#faq" target="_blank" />
       <item name="Videos/Presentations" href="book.html#other.info" target="_blank" />
@@ -108,6 +106,16 @@
       <item name="Metrics" href="metrics.html" target="_blank" />
       <item name="HBase on Windows" href="cygwin.html" target="_blank" />
       <item name="Cluster replication" href="book.html#replication" target="_blank" />
+      <item name="1.2 Documentation">
+        <item name="API" href="1.2/apidocs/index.html" target="_blank" />
+        <item name="X-Ref" href="1.2/xref/index.html" target="_blank" />
+        <item name="Ref Guide (single-page)" href="1.2/book.html" target="_blank" />
+      </item>
+      <item name="1.1 Documentation">
+        <item name="API" href="1.1/apidocs/index.html" target="_blank" />
+        <item name="X-Ref" href="1.1/xref/index.html" target="_blank" />
+        <item name="Ref Guide (single-page)" href="1.1/book.html" target="_blank" />
+      </item>
       <item name="0.94 Documentation">
         <item name="API" href="0.94/apidocs/index.html" target="_blank" />
         <item name="X-Ref" href="0.94/xref/index.html" target="_blank" />

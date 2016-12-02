@@ -71,7 +71,7 @@ public class HFileReplicator {
   public static final int REPLICATION_BULKLOAD_COPY_HFILES_PERTHREAD_DEFAULT = 10;
 
   private static final Log LOG = LogFactory.getLog(HFileReplicator.class);
-  private final String UNDERSCORE = "_";
+  private static final String UNDERSCORE = "_";
   private final static FsPermission PERM_ALL_ACCESS = FsPermission.valueOf("-rwxrwxrwx");
 
   private Configuration sourceClusterConf;
@@ -177,7 +177,7 @@ public class HFileReplicator {
       // need to reload split keys each iteration.
       startEndKeys = locator.getStartEndKeys();
       if (count != 0) {
-        LOG.warn("Error occured while replicating HFiles, retry attempt " + count + " with "
+        LOG.warn("Error occurred while replicating HFiles, retry attempt " + count + " with "
             + queue.size() + " files still remaining to replicate.");
       }
 

@@ -226,6 +226,36 @@
         <surefire.skipFirstPart>true</surefire.skipFirstPart>
       </properties>
     </profile>
+    <profile>
+      <id>compile-protobuf</id>
+      <activation>
+        <property>
+          <name>compile-protobuf</name>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.xolstice.maven.plugins</groupId>
+            <artifactId>protobuf-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>compile-protoc</id>
+                <phase>generate-sources</phase>
+                <goals>
+                  <goal>compile</goal>
+                </goals>
+                <configuration>
+                  <additionalProtoPathElements>
+                    <additionalProtoPathElement>${basedir}/../hbase-protocol/src/main/protobuf</additionalProtoPathElement>
+                  </additionalProtoPathElements>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+        </profile>
 
     <!-- profile against Hadoop 2.x: This is the default. -->
     <profile>

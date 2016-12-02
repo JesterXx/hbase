@@ -68,6 +68,7 @@ import org.apache.hadoop.hbase.client.Durability;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Increment;
 import org.apache.hadoop.hbase.client.Mutation;
+import org.apache.hadoop.hbase.client.PackagePrivateFieldAccessor;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.RegionLoadStats;
 import org.apache.hadoop.hbase.client.Result;
@@ -104,12 +105,16 @@ import org.apache.hadoop.hbase.shaded.com.google.protobuf.ServiceException;
 import org.apache.hadoop.hbase.shaded.com.google.protobuf.TextFormat;
 import org.apache.hadoop.hbase.shaded.com.google.protobuf.UnsafeByteOperations;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.AdminService;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionForSplitRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionForSplitResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetOnlineRegionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetOnlineRegionResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetRegionInfoRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetRegionInfoResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetRegionLoadRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetRegionLoadResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetServerInfoRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetServerInfoResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetStoreFileRequest;
@@ -735,8 +740,8 @@ public final class ProtobufUtil {
   throws IOException {
     MutationType type = proto.getMutateType();
     assert type == MutationType.APPEND : type.name();
-    byte [] row = proto.hasRow()? proto.getRow().toByteArray(): null;
-    Append append = null;
+    byte[] row = proto.hasRow() ? proto.getRow().toByteArray() : null;
+    Append append = row != null ? new Append(row) : null;
     int cellCount = proto.hasAssociatedCellCount()? proto.getAssociatedCellCount(): 0;
     if (cellCount > 0) {
       // The proto has metadata only and the data is separate to be found in the cellScanner.
@@ -756,7 +761,9 @@ public final class ProtobufUtil {
         append.add(cell);
       }
     } else {
-      append = new Append(row);
+      if (append == null) {
+        throw new IllegalArgumentException("row cannot be null");
+      }
       for (ColumnValue column: proto.getColumnValueList()) {
         byte[] family = column.getFamily().toByteArray();
         for (QualifierValue qv: column.getQualifierValueList()) {
@@ -815,7 +822,7 @@ public final class ProtobufUtil {
     MutationType type = proto.getMutateType();
     assert type == MutationType.INCREMENT : type.name();
     byte [] row = proto.hasRow()? proto.getRow().toByteArray(): null;
-    Increment increment = null;
+    Increment increment = row != null ? new Increment(row) : null;
     int cellCount = proto.hasAssociatedCellCount()? proto.getAssociatedCellCount(): 0;
     if (cellCount > 0) {
       // The proto has metadata only and the data is separate to be found in the cellScanner.
@@ -835,7 +842,9 @@ public final class ProtobufUtil {
         increment.add(cell);
       }
     } else {
-      increment = new Increment(row);
+      if (increment == null) {
+        throw new IllegalArgumentException("row cannot be null");
+      }
       for (ColumnValue column: proto.getColumnValueList()) {
         byte[] family = column.getFamily().toByteArray();
         for (QualifierValue qv: column.getQualifierValueList()) {
@@ -891,12 +900,9 @@ public final class ProtobufUtil {
         }
         Cell cell = cellScanner.current();
         if (get == null) {
-          get = new Get(Bytes.copy(cell.getRowArray(), cell.getRowOffset(), cell.getRowLength()));
+          get = new Get(CellUtil.cloneRow(cell));
         }
-        get.addColumn(
-          Bytes.copy(cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength()),
-          Bytes.copy(cell.getQualifierArray(), cell.getQualifierOffset(),
-            cell.getQualifierLength()));
+        get.addColumn(CellUtil.cloneFamily(cell), CellUtil.cloneQualifier(cell));
       }
     } else {
       get = new Get(row);
@@ -1014,6 +1020,10 @@ public final class ProtobufUtil {
     if (scan.getCaching() > 0) {
       scanBuilder.setCaching(scan.getCaching());
     }
+    long mvccReadPoint = PackagePrivateFieldAccessor.getMvccReadPoint(scan);
+    if (mvccReadPoint > 0) {
+      scanBuilder.setMvccReadPoint(mvccReadPoint);
+    }
     return scanBuilder.build();
   }
 
@@ -1100,6 +1110,9 @@ public final class ProtobufUtil {
     }
     if (proto.hasCaching()) {
       scan.setCaching(proto.getCaching());
+    }
+    if (proto.hasMvccReadPoint()) {
+      PackagePrivateFieldAccessor.setMvccReadPoint(scan, proto.getMvccReadPoint());
     }
     return scan;
   }
@@ -1675,6 +1688,29 @@ public final class ProtobufUtil {
     }
   }
 
+  public static List<org.apache.hadoop.hbase.RegionLoad> getRegionLoad(
+      final RpcController controller, final AdminService.BlockingInterface admin,
+      final TableName tableName) throws IOException {
+    GetRegionLoadRequest request = RequestConverter.buildGetRegionLoadRequest(tableName);
+    GetRegionLoadResponse response;
+    try {
+      response = admin.getRegionLoad(controller, request);
+    } catch (ServiceException se) {
+      throw getRemoteException(se);
+    }
+    return getRegionLoadInfo(response);
+  }
+
+  static List<org.apache.hadoop.hbase.RegionLoad> getRegionLoadInfo(
+      GetRegionLoadResponse regionLoadResponse) {
+    List<org.apache.hadoop.hbase.RegionLoad> regionLoadList =
+        new ArrayList<>(regionLoadResponse.getRegionLoadsCount());
+    for (RegionLoad regionLoad : regionLoadResponse.getRegionLoadsList()) {
+      regionLoadList.add(new org.apache.hadoop.hbase.RegionLoad(regionLoad));
+    }
+    return regionLoadList;
+  }
+
   /**
    * A helper to close a region given a region name
    * using admin protocol.
@@ -1713,6 +1749,33 @@ public final class ProtobufUtil {
         regionName, destinationServer);
     try {
       CloseRegionResponse response = admin.closeRegion(controller, closeRegionRequest);
+      return ResponseConverter.isClosed(response);
+    } catch (ServiceException se) {
+      throw getRemoteException(se);
+    }
+  }
+
+  /**
+   * A helper to close a region for split
+   * using admin protocol.
+   *
+   * @param controller RPC controller
+   * @param admin Admin service
+   * @param server the RS that hosts the target region
+   * @param parentRegionInfo the target region info
+   * @return true if the region is closed
+   * @throws IOException
+   */
+  public static boolean closeRegionForSplit(
+      final RpcController controller,
+      final AdminService.BlockingInterface admin,
+      final ServerName server,
+      final HRegionInfo parentRegionInfo) throws IOException {
+    CloseRegionForSplitRequest closeRegionForSplitRequest =
+        ProtobufUtil.buildCloseRegionForSplitRequest(server, parentRegionInfo);
+    try {
+      CloseRegionForSplitResponse response =
+          admin.closeRegionForSplit(controller, closeRegionForSplitRequest);
       return ResponseConverter.isClosed(response);
     } catch (ServiceException se) {
       throw getRemoteException(se);
@@ -2196,6 +2259,9 @@ public final class ProtobufUtil {
       ClientProtos.MutateRequest r = (ClientProtos.MutateRequest) m;
       return "region= " + getStringForByteString(r.getRegion().getValue()) +
           ", row=" + getStringForByteString(r.getMutation().getRow());
+    } else if (m instanceof ClientProtos.CoprocessorServiceRequest) {
+      ClientProtos.CoprocessorServiceRequest r = (ClientProtos.CoprocessorServiceRequest) m;
+      return "coprocessorService= " + r.getCall().getServiceName() + ":" + r.getCall().getMethodName();
     }
     return "TODO: " + m.getClass().toString();
   }
@@ -2842,8 +2908,8 @@ public final class ProtobufUtil {
   public static HBaseProtos.SnapshotDescription
       createHBaseProtosSnapshotDesc(SnapshotDescription snapshotDesc) {
     HBaseProtos.SnapshotDescription.Builder builder = HBaseProtos.SnapshotDescription.newBuilder();
-    if (snapshotDesc.getTable() != null) {
-      builder.setTable(snapshotDesc.getTable());
+    if (snapshotDesc.getTableName() != null) {
+      builder.setTable(snapshotDesc.getTableNameAsString());
     }
     if (snapshotDesc.getName() != null) {
       builder.setName(snapshotDesc.getName());
@@ -2871,7 +2937,8 @@ public final class ProtobufUtil {
    */
   public static SnapshotDescription
       createSnapshotDesc(HBaseProtos.SnapshotDescription snapshotDesc) {
-    return new SnapshotDescription(snapshotDesc.getName(), snapshotDesc.getTable(),
+    return new SnapshotDescription(snapshotDesc.getName(),
+        snapshotDesc.hasTable() ? TableName.valueOf(snapshotDesc.getTable()) : null,
         createSnapshotType(snapshotDesc.getType()), snapshotDesc.getOwner(),
         snapshotDesc.getCreationTime(), snapshotDesc.getVersion());
   }
@@ -3063,6 +3130,23 @@ public final class ProtobufUtil {
   }
 
   /**
+   * Create a CloseRegionForSplitRequest for a given region
+   *
+   * @param server the RS server that hosts the region
+   * @param parentRegionInfo the info of the region to close
+   * @return a CloseRegionForSplitRequest
+   */
+  public static CloseRegionForSplitRequest buildCloseRegionForSplitRequest(
+      final ServerName server,
+      final HRegionInfo parentRegionInfo) {
+    CloseRegionForSplitRequest.Builder builder = CloseRegionForSplitRequest.newBuilder();
+    RegionSpecifier parentRegion = RequestConverter.buildRegionSpecifier(
+      RegionSpecifierType.REGION_NAME, parentRegionInfo.getRegionName());
+    builder.setRegion(parentRegion);
+    return builder.build();
+  }
+
+  /**
     * Create a CloseRegionRequest for a given encoded region name
     *
     * @param encodedRegionName the name of the region to close
@@ -3130,7 +3214,7 @@ public final class ProtobufUtil {
    * has a serialized {@link ServerName} in it.
    * @return Returns null if <code>data</code> is null else converts passed data
    * to a ServerName instance.
-   * @throws DeserializationException 
+   * @throws DeserializationException
    */
   public static ServerName parseServerNameFrom(final byte [] data) throws DeserializationException {
     if (data == null || data.length <= 0) return null;

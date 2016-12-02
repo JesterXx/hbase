@@ -312,7 +312,7 @@ possible configurations would overwhelm and obscure the important.
   </property>
   <property>
     <name>hbase.regionserver.region.split.policy</name>
-    <value>org.apache.hadoop.hbase.regionserver.IncreasingToUpperBoundRegionSplitPolicy</value>
+    <value>org.apache.hadoop.hbase.regionserver.SteppingSplitPolicy</value>
     <description>
       A split policy determines when a region should be split. The various other split policies that
       are available currently are BusyRegionSplitPolicy, ConstantSizeRegionSplitPolicy, DisabledRegionSplitPolicy,
@@ -458,6 +458,14 @@ possible configurations would overwhelm and obscure the important.
     this initial pause amount and how this pause works w/ retries.</description>
   </property>
   <property>
+    <name>hbase.client.pause.cqtbe</name>
+    <value></value>
+    <description>Whether or not to use a special client pause for
+    CallQueueTooBigException (cqtbe). Set this property to a higher value
+    than hbase.client.pause if you observe frequent CQTBE from the same
+    RegionServer and the call queue there keeps full</description>
+  </property>
+  <property>
     <name>hbase.client.retries.number</name>
     <value>35</value>
     <description>Maximum retries.  Used as maximum for all retryable
@@ -540,6 +548,14 @@ possible configurations would overwhelm and obscure the important.
     <description>Maximum retries.  This is maximum number of iterations
     to atomic bulk loads are attempted in the face of splitting operations
     0 means never give up.</description>
+  </property>
+  <property>
+    <name>hbase.master.balancer.maxRitPercent</name>
+    <value>1.0</value>
+    <description>The max percent of regions in transition when balancing.
+      The default value is 1.0. So there are no balancer throttling. If set this config to 0.01,
+      It means that there are at most 1% regions in transition when balancing.
+      Then the cluster's availability is at least 99% when balancing.</description>
   </property>
   <property>
     <name>hbase.balancer.period
@@ -1626,32 +1642,6 @@ possible configurations would overwhelm and obscure the important.
     </description>
   </property>
   <property>
-    <name>hbase.mob.sweep.tool.compaction.ratio</name>
-    <value>0.5f</value>
-    <description>
-      If there're too many cells deleted in a mob file, it's regarded
-      as an invalid file and needs to be merged.
-      If existingCellsSize/mobFileSize is less than ratio, it's regarded
-      as an invalid file. The default value is 0.5f.
-    </description>
-  </property>
-  <property>
-    <name>hbase.mob.sweep.tool.compaction.mergeable.size</name>
-    <value>134217728</value>
-    <description>
-      If the size of a mob file is less than this value, it's regarded as a small
-      file and needs to be merged. The default value is 128MB.
-    </description>
-  </property>
-  <property>
-    <name>hbase.mob.sweep.tool.compaction.memstore.flush.size</name>
-    <value>134217728</value>
-    <description>
-      The flush size for the memstore used by sweep job. Each sweep reducer owns such a memstore.
-      The default value is 128MB.
-    </description>
-  </property>
-  <property>
     <name>hbase.master.mob.ttl.cleaner.period</name>
     <value>86400</value>
     <description>
@@ -1664,10 +1654,10 @@ possible configurations would overwhelm and obscure the important.
   </property>
   <property>
     <name>hbase.mob.compaction.mergeable.threshold</name>
-    <value>201326592</value>
+    <value>1342177280</value>
     <description>
       If the size of a mob file is less than this value, it's regarded as a small
-      file and needs to be merged in mob compaction. The default value is 192MB.
+      file and needs to be merged in mob compaction. The default value is 1280MB.
     </description>
   </property>
   <property>

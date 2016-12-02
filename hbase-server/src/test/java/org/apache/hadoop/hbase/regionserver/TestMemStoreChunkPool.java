@@ -22,6 +22,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.KeyValueUtil;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
+import org.apache.hadoop.hbase.io.util.MemorySizeUtil;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -32,6 +33,7 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.util.List;
 import java.util.Random;
 
@@ -49,11 +51,14 @@ public class TestMemStoreChunkPool {
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
-    conf.setBoolean(SegmentFactory.USEMSLAB_KEY, true);
-    conf.setFloat(MemStoreChunkPool.CHUNK_POOL_MAXSIZE_KEY, 0.2f);
+    conf.setBoolean(MemStoreLAB.USEMSLAB_KEY, true);
+    conf.setFloat(MemStoreLAB.CHUNK_POOL_MAXSIZE_KEY, 0.2f);
     chunkPoolDisabledBeforeTest = MemStoreChunkPool.chunkPoolDisabled;
     MemStoreChunkPool.chunkPoolDisabled = false;
-    chunkPool = MemStoreChunkPool.getPool(conf);
+    long globalMemStoreLimit = (long) (ManagementFactory.getMemoryMXBean().getHeapMemoryUsage()
+        .getMax() * MemorySizeUtil.getGlobalMemStoreHeapPercent(conf, false));
+    chunkPool = MemStoreChunkPool.initialize(globalMemStoreLimit, 0.2f,
+        MemStoreLAB.POOL_INITIAL_SIZE_DEFAULT, MemStoreLABImpl.CHUNK_SIZE_DEFAULT, false);
     assertTrue(chunkPool != null);
   }
 
@@ -70,7 +75,7 @@ public class TestMemStoreChunkPool {
   @Test
   public void testReusingChunks() {
     Random rand = new Random();
-    MemStoreLAB mslab = new HeapMemStoreLAB(conf);
+    MemStoreLAB mslab = new MemStoreLABImpl(conf);
     int expectedOff = 0;
     byte[] lastBuffer = null;
     final byte[] rk = Bytes.toBytes("r1");
@@ -96,7 +101,7 @@ public class TestMemStoreChunkPool {
     int chunkCount = chunkPool.getPoolSize();
     assertTrue(chunkCount > 0);
     // reconstruct mslab
-    mslab = new HeapMemStoreLAB(conf);
+    mslab = new MemStoreLABImpl(conf);
     // chunk should be got from the pool, so we can reuse it.
     KeyValue kv = new KeyValue(rk, cf, q, new byte[10]);
     mslab.copyCellInto(kv);
@@ -117,9 +122,9 @@ public class TestMemStoreChunkPool {
     DefaultMemStore memstore = new DefaultMemStore();
 
     // Setting up memstore
-    memstore.add(new KeyValue(row, fam, qf1, val));
-    memstore.add(new KeyValue(row, fam, qf2, val));
-    memstore.add(new KeyValue(row, fam, qf3, val));
+    memstore.add(new KeyValue(row, fam, qf1, val), null);
+    memstore.add(new KeyValue(row, fam, qf2, val), null);
+    memstore.add(new KeyValue(row, fam, qf3, val), null);
 
     // Creating a snapshot
     MemStoreSnapshot snapshot = memstore.snapshot();
@@ -127,8 +132,8 @@ public class TestMemStoreChunkPool {
 
     // Adding value to "new" memstore
     assertEquals(0, memstore.getActive().getCellsCount());
-    memstore.add(new KeyValue(row, fam, qf4, val));
-    memstore.add(new KeyValue(row, fam, qf5, val));
+    memstore.add(new KeyValue(row, fam, qf4, val), null);
+    memstore.add(new KeyValue(row, fam, qf5, val), null);
     assertEquals(2, memstore.getActive().getCellsCount());
     memstore.clearSnapshot(snapshot.getId());
 
@@ -154,9 +159,9 @@ public class TestMemStoreChunkPool {
     DefaultMemStore memstore = new DefaultMemStore();
 
     // Setting up memstore
-    memstore.add(new KeyValue(row, fam, qf1, val));
-    memstore.add(new KeyValue(row, fam, qf2, val));
-    memstore.add(new KeyValue(row, fam, qf3, val));
+    memstore.add(new KeyValue(row, fam, qf1, val), null);
+    memstore.add(new KeyValue(row, fam, qf2, val), null);
+    memstore.add(new KeyValue(row, fam, qf3, val), null);
 
     // Creating a snapshot
     MemStoreSnapshot snapshot = memstore.snapshot();
@@ -164,8 +169,8 @@ public class TestMemStoreChunkPool {
 
     // Adding value to "new" memstore
     assertEquals(0, memstore.getActive().getCellsCount());
-    memstore.add(new KeyValue(row, fam, qf4, val));
-    memstore.add(new KeyValue(row, fam, qf5, val));
+    memstore.add(new KeyValue(row, fam, qf4, val), null);
+    memstore.add(new KeyValue(row, fam, qf5, val), null);
     assertEquals(2, memstore.getActive().getCellsCount());
 
     // opening scanner before clear the snapshot
@@ -188,8 +193,8 @@ public class TestMemStoreChunkPool {
     // Creating another snapshot
     snapshot = memstore.snapshot();
     // Adding more value
-    memstore.add(new KeyValue(row, fam, qf6, val));
-    memstore.add(new KeyValue(row, fam, qf7, val));
+    memstore.add(new KeyValue(row, fam, qf6, val), null);
+    memstore.add(new KeyValue(row, fam, qf7, val), null);
     // opening scanners
     scanners = memstore.getScanners(0);
     // close scanners before clear the snapshot
@@ -209,7 +214,7 @@ public class TestMemStoreChunkPool {
     final int initialCount = 5;
     final int chunkSize = 30;
     final int valSize = 7;
-    MemStoreChunkPool pool = new MemStoreChunkPool(conf, chunkSize, maxCount, initialCount, 1);
+    MemStoreChunkPool pool = new MemStoreChunkPool(chunkSize, maxCount, initialCount, 1, false);
     assertEquals(initialCount, pool.getPoolSize());
     assertEquals(maxCount, pool.getMaxCount());
     MemStoreChunkPool.GLOBAL_INSTANCE = pool;// Replace the global ref with the new one we created.
@@ -221,7 +226,7 @@ public class TestMemStoreChunkPool {
       Runnable r = new Runnable() {
         @Override
         public void run() {
-          MemStoreLAB memStoreLAB = new HeapMemStoreLAB(conf);
+          MemStoreLAB memStoreLAB = new MemStoreLABImpl(conf);
           for (int i = 0; i < maxCount; i++) {
             memStoreLAB.copyCellInto(kv);// Try allocate size = chunkSize. Means every
                                          // allocate call will result in a new chunk

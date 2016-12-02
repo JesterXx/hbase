@@ -43,6 +43,7 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.exceptions.PreemptiveFastFailException;
+import org.apache.hadoop.hbase.ipc.RpcExecutor;
 import org.apache.hadoop.hbase.ipc.SimpleRpcScheduler;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
@@ -73,7 +74,7 @@ public class TestFastFail {
   public static void setUpBeforeClass() throws Exception {
     // Just to prevent fastpath FIFO from picking calls up bypassing the queue.
     TEST_UTIL.getConfiguration().set(
-      SimpleRpcScheduler.CALL_QUEUE_TYPE_CONF_KEY, "deadline");
+      RpcExecutor.CALL_QUEUE_TYPE_CONF_KEY, "deadline");
     TEST_UTIL.startMiniCluster(SLAVES);
   }
 
@@ -293,7 +294,7 @@ public class TestFastFail {
   }
 
   @Test
-  public void testCallQueueTooBigException() throws Exception {
+  public void testCallQueueTooBigExceptionDoesntTriggerPffe() throws Exception {
     Admin admin = TEST_UTIL.getHBaseAdmin();
 
     final String tableName = "testCallQueueTooBigException";
@@ -327,7 +328,8 @@ public class TestFastFail {
     } catch (Throwable ex) {
     }
 
-    assertEquals("There should have been 1 hit", 1,
+    assertEquals("We should have not entered PFFE mode on CQTBE, but we did;"
+      + " number of times this mode should have been entered:", 0,
       CallQueueTooBigPffeInterceptor.numCallQueueTooBig.get());
 
     newConf = HBaseConfiguration.create(TEST_UTIL.getConfiguration());

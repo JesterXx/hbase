@@ -48,23 +48,6 @@ public final class MobConstants {
   public static final String MOB_CLEANER_PERIOD = "hbase.master.mob.ttl.cleaner.period";
   public static final int DEFAULT_MOB_CLEANER_PERIOD = 24 * 60 * 60; // one day
 
-  public static final String MOB_SWEEP_TOOL_COMPACTION_START_DATE =
-      "hbase.mob.sweep.tool.compaction.start.date";
-  public static final String MOB_SWEEP_TOOL_COMPACTION_RATIO =
-      "hbase.mob.sweep.tool.compaction.ratio";
-  public static final String MOB_SWEEP_TOOL_COMPACTION_MERGEABLE_SIZE =
-      "hbase.mob.sweep.tool.compaction.mergeable.size";
-
-  public static final float DEFAULT_SWEEP_TOOL_MOB_COMPACTION_RATIO = 0.5f;
-  public static final long DEFAULT_SWEEP_TOOL_MOB_COMPACTION_MERGEABLE_SIZE = 128 * 1024 * 1024;
-
-  public static final String MOB_SWEEP_TOOL_COMPACTION_TEMP_DIR_NAME = "mobcompaction";
-
-  public static final String MOB_SWEEP_TOOL_COMPACTION_MEMSTORE_FLUSH_SIZE =
-      "hbase.mob.sweep.tool.compaction.memstore.flush.size";
-  public static final long DEFAULT_MOB_SWEEP_TOOL_COMPACTION_MEMSTORE_FLUSH_SIZE =
-      1024 * 1024 * 128; // 128M
-
   public static final String MOB_CACHE_EVICT_PERIOD = "hbase.mob.cache.evict.period";
   public static final String MOB_CACHE_EVICT_REMAIN_RATIO = "hbase.mob.cache.evict.remain.ratio";
   public static final Tag MOB_REF_TAG = new ArrayBackedTag(TagType.MOB_REFERENCE_TAG_TYPE,
@@ -79,11 +62,11 @@ public final class MobConstants {
   public final static String EMPTY_STRING = "";
   /**
    * If the size of a mob file is less than this value, it's regarded as a small file and needs to
-   * be merged in mob compaction. The default value is 192MB.
+   * be merged in mob compaction. The default value is 1280MB.
    */
   public static final String MOB_COMPACTION_MERGEABLE_THRESHOLD =
     "hbase.mob.compaction.mergeable.threshold";
-  public static final long DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD = 192 * 1024 * 1024;
+  public static final long DEFAULT_MOB_COMPACTION_MERGEABLE_THRESHOLD = 10 * 128 * 1024 * 1024;
   /**
    * The max number of del files that is allowed in the mob file compaction. In the mob
    * compaction, when the number of existing del files is larger than this value, they are merged

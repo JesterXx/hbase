@@ -20,13 +20,10 @@ package org.apache.hadoop.hbase.master;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -232,6 +229,13 @@ public class RegionStates {
       rit.add(rs);
     }
     return rit;
+  }
+
+  /**
+   * Get the number of regions in transition.
+   */
+  public synchronized int getRegionsInTransitionCount() {
+    return regionsInTransition.size();
   }
 
   /**
@@ -447,7 +451,15 @@ public class RegionStates {
     updateRegionState(hri, State.OPEN, serverName, openSeqNum);
 
     synchronized (this) {
-      regionsInTransition.remove(encodedName);
+      RegionState regionState = regionsInTransition.remove(encodedName);
+      // When region is online and remove from regionsInTransition,
+      // update the RIT duration to assignment manager metrics
+      if (regionState != null && this.server.getAssignmentManager() != null) {
+        long ritDuration = System.currentTimeMillis() - regionState.getStamp()
+            + regionState.getRitDuration();
+        this.server.getAssignmentManager().getAssignmentManagerMetrics()
+            .updateRitDuration(ritDuration);
+      }
       ServerName oldServerName = regionAssignments.put(hri, serverName);
       if (!serverName.equals(oldServerName)) {
         if (LOG.isDebugEnabled()) {
@@ -873,6 +885,17 @@ public class RegionStates {
     return regions == null ? false : regions.contains(hri);
   }
 
+  public void prepareAssignDaughters(HRegionInfo a, HRegionInfo b) {
+     synchronized (this) {
+       if (isRegionInState(a, State.SPLITTING_NEW)) {
+         updateRegionState(a, State.OFFLINE, null);
+       }
+       if (isRegionInState(b, State.SPLITTING_NEW)) {
+         updateRegionState(b, State.OFFLINE, null);
+       }
+     }
+   }
+
   void splitRegion(HRegionInfo p,
       HRegionInfo a, HRegionInfo b, ServerName sn) throws IOException {
 
@@ -975,50 +998,27 @@ public class RegionStates {
       (double)totalLoad / (double)numServers;
   }
 
+  protected Map<TableName, Map<ServerName, List<HRegionInfo>>> getAssignmentsByTable() {
+    return getAssignmentsByTable(false);
+  }
+
   /**
    * This is an EXPENSIVE clone.  Cloning though is the safest thing to do.
    * Can't let out original since it can change and at least the load balancer
    * wants to iterate this exported list.  We need to synchronize on regions
    * since all access to this.servers is under a lock on this.regions.
-   *
+   * @param forceByCluster a flag to force to aggregate the server-load to the cluster level
    * @return A clone of current assignments by table.
    */
-  protected Map<TableName, Map<ServerName, List<HRegionInfo>>>
-      getAssignmentsByTable() {
-    Map<TableName, Map<ServerName, List<HRegionInfo>>> result =
-      new HashMap<TableName, Map<ServerName,List<HRegionInfo>>>();
+  protected Map<TableName, Map<ServerName, List<HRegionInfo>>> getAssignmentsByTable(
+          boolean forceByCluster) {
+    Map<TableName, Map<ServerName, List<HRegionInfo>>> result;
     synchronized (this) {
-      if (!server.getConfiguration().getBoolean(
-            HConstants.HBASE_MASTER_LOADBALANCE_BYTABLE, false)) {
-        Map<ServerName, List<HRegionInfo>> svrToRegions =
-          new HashMap<ServerName, List<HRegionInfo>>(serverHoldings.size());
-        for (Map.Entry<ServerName, Set<HRegionInfo>> e: serverHoldings.entrySet()) {
-          svrToRegions.put(e.getKey(), new ArrayList<HRegionInfo>(e.getValue()));
-        }
-        result.put(TableName.valueOf(HConstants.ENSEMBLE_TABLE_NAME), svrToRegions);
-      } else {
-        for (Map.Entry<ServerName, Set<HRegionInfo>> e: serverHoldings.entrySet()) {
-          for (HRegionInfo hri: e.getValue()) {
-            if (hri.isMetaRegion()) continue;
-            TableName tablename = hri.getTable();
-            Map<ServerName, List<HRegionInfo>> svrToRegions = result.get(tablename);
-            if (svrToRegions == null) {
-              svrToRegions = new HashMap<ServerName, List<HRegionInfo>>(serverHoldings.size());
-              result.put(tablename, svrToRegions);
-            }
-            List<HRegionInfo> regions = svrToRegions.get(e.getKey());
-            if (regions == null) {
-              regions = new ArrayList<HRegionInfo>();
-              svrToRegions.put(e.getKey(), regions);
-            }
-            regions.add(hri);
-          }
-        }
-      }
+      result = getTableRSRegionMap(server.getConfiguration().getBoolean(
+              HConstants.HBASE_MASTER_LOADBALANCE_BYTABLE,false) && !forceByCluster);
     }
-
     Map<ServerName, ServerLoad>
-      onlineSvrs = serverManager.getOnlineServers();
+            onlineSvrs = serverManager.getOnlineServers();
     // Take care of servers w/o assignments, and remove servers in draining mode
     List<ServerName> drainingServers = this.serverManager.getDrainingServersList();
     for (Map<ServerName, List<HRegionInfo>> map: result.values()) {
@@ -1032,7 +1032,30 @@ public class RegionStates {
     return result;
   }
 
-  protected RegionState getRegionState(final HRegionInfo hri) {
+  private Map<TableName, Map<ServerName, List<HRegionInfo>>> getTableRSRegionMap(Boolean bytable){
+    Map<TableName, Map<ServerName, List<HRegionInfo>>> result =
+            new HashMap<TableName, Map<ServerName,List<HRegionInfo>>>();
+    for (Map.Entry<ServerName, Set<HRegionInfo>> e: serverHoldings.entrySet()) {
+      for (HRegionInfo hri: e.getValue()) {
+        if (hri.isMetaRegion()) continue;
+        TableName tablename = bytable ? hri.getTable() : TableName.valueOf(HConstants.ENSEMBLE_TABLE_NAME);
+        Map<ServerName, List<HRegionInfo>> svrToRegions = result.get(tablename);
+        if (svrToRegions == null) {
+          svrToRegions = new HashMap<ServerName, List<HRegionInfo>>(serverHoldings.size());
+          result.put(tablename, svrToRegions);
+        }
+        List<HRegionInfo> regions = svrToRegions.get(e.getKey());
+        if (regions == null) {
+          regions = new ArrayList<HRegionInfo>();
+          svrToRegions.put(e.getKey(), regions);
+        }
+        regions.add(hri);
+      }
+    }
+    return result;
+  }
+
+  public RegionState getRegionState(final HRegionInfo hri) {
     return getRegionState(hri.getEncodedName());
   }
 
@@ -1076,7 +1099,7 @@ public class RegionStates {
       }
       return hri;
     } catch (IOException e) {
-      server.abort("Aborting because error occoured while reading "
+      server.abort("Aborting because error occurred while reading "
         + Bytes.toStringBinary(regionName) + " from hbase:meta", e);
       return null;
     }
@@ -1111,7 +1134,12 @@ public class RegionStates {
     }
 
     synchronized (this) {
-      regionsInTransition.put(encodedName, regionState);
+      RegionState oldRegionState = regionsInTransition.put(encodedName, regionState);
+      // When region transform old region state to new region state,
+      // accumulate the RIT duration to new region state.
+      if (oldRegionState != null) {
+        regionState.updateRitDuration(oldRegionState.getStamp());
+      }
       putRegionState(regionState);
 
       // For these states, region should be properly closed.

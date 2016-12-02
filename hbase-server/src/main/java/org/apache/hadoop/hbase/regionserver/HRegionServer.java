@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryType;
 import java.lang.management.MemoryUsage;
 import java.lang.reflect.Constructor;
 import java.net.BindException;
@@ -83,6 +84,8 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionUtils;
+import org.apache.hadoop.hbase.client.NonceGenerator;
+import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.RpcRetryingCallerFactory;
 import org.apache.hadoop.hbase.conf.ConfigurationManager;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
@@ -98,6 +101,7 @@ import org.apache.hadoop.hbase.fs.HFileSystem;
 import org.apache.hadoop.hbase.http.InfoServer;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
+import org.apache.hadoop.hbase.io.util.MemorySizeUtil;
 import org.apache.hadoop.hbase.ipc.CoprocessorRpcUtils;
 import org.apache.hadoop.hbase.ipc.RpcClient;
 import org.apache.hadoop.hbase.ipc.RpcClientFactory;
@@ -142,6 +146,8 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.NameStringP
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.RegionServerInfo;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.RegionSpecifier;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.RegionSpecifier.RegionSpecifierType;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.GetProcedureResultRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.GetProcedureResultResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.GetLastFlushedSequenceIdRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.GetLastFlushedSequenceIdResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.RegionServerReportRequest;
@@ -153,6 +159,8 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProto
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.ReportRSFatalErrorRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.ReportRegionStateTransitionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.ReportRegionStateTransitionResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.SplitTableRegionRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.SplitTableRegionResponse;
 import org.apache.hadoop.hbase.trace.SpanReceiverHost;
 import org.apache.hadoop.hbase.util.Addressing;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -160,9 +168,11 @@ import org.apache.hadoop.hbase.util.CompressionTest;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSTableDescriptors;
 import org.apache.hadoop.hbase.util.FSUtils;
+import org.apache.hadoop.hbase.util.ForeignExceptionUtil;
 import org.apache.hadoop.hbase.util.HasThread;
 import org.apache.hadoop.hbase.util.JSONBean;
 import org.apache.hadoop.hbase.util.JvmPauseMonitor;
+import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.ServerRegionReplicaUtil;
 import org.apache.hadoop.hbase.util.Sleeper;
 import org.apache.hadoop.hbase.util.Threads;
@@ -368,8 +378,6 @@ public class HRegionServer extends HasThread implements
   // WAL roller. log is protected rather than private to avoid
   // eclipse warning when accessed by inner classes
   final LogRoller walRoller;
-  // Lazily initialized if this RegionServer hosts a meta table.
-  final AtomicReference<LogRoller> metawalRoller = new AtomicReference<LogRoller>();
 
   // flag set after we're done setting up server threads
   final AtomicBoolean online = new AtomicBoolean(false);
@@ -498,9 +506,6 @@ public class HRegionServer extends HasThread implements
 
   /**
    * Starts a HRegionServer at the default location.
-   * @param conf
-   * @throws IOException
-   * @throws InterruptedException
    */
   public HRegionServer(Configuration conf) throws IOException, InterruptedException {
     this(conf, CoordinatedStateManagerFactory.getCoordinatedStateManager(conf));
@@ -508,14 +513,13 @@ public class HRegionServer extends HasThread implements
 
   /**
    * Starts a HRegionServer at the default location
-   * @param conf
    * @param csm implementation of CoordinatedStateManager to be used
-   * @throws IOException
    */
-  public HRegionServer(Configuration conf, CoordinatedStateManager csm)
-      throws IOException {
+  public HRegionServer(Configuration conf, CoordinatedStateManager csm) throws IOException {
+    super("RegionServer");  // thread name
     this.fsOk = true;
     this.conf = conf;
+    MemorySizeUtil.checkForClusterFreeHeapMemoryLimit(this.conf);
     HFile.checkHFileVersion(this.conf);
     checkCodecs(this.conf);
     this.userProvider = UserProvider.instantiate(conf);
@@ -581,16 +585,7 @@ public class HRegionServer extends HasThread implements
       }
     };
 
-    // Set 'fs.defaultFS' to match the filesystem on hbase.rootdir else
-    // underlying hadoop hdfs accessors will be going against wrong filesystem
-    // (unless all is set to defaults).
-    FSUtils.setFsDefault(this.conf, FSUtils.getRootDir(this.conf));
-    // Get fs instance used by this RS.  Do we use checksum verification in the hbase? If hbase
-    // checksum verification enabled, then automatically switch off hdfs checksum verification.
-    boolean useHBaseChecksum = conf.getBoolean(HConstants.HBASE_CHECKSUM_VERIFICATION, true);
-    this.fs = new HFileSystem(this.conf, useHBaseChecksum);
-    this.rootDir = FSUtils.getRootDir(this.conf);
-    this.tableDescriptors = getFsTableDescriptors();
+    initializeFileSystem();
 
     service = new ExecutorService(getServerName().toShortString());
     spanReceiverHost = SpanReceiverHost.getInstance(getConfiguration());
@@ -644,6 +639,19 @@ public class HRegionServer extends HasThread implements
     this.compactedFileDischarger =
         new CompactedHFilesDischarger(cleanerInterval, (Stoppable)this, (RegionServerServices)this);
     choreService.scheduleChore(compactedFileDischarger);
+  }
+
+  private void initializeFileSystem() throws IOException {
+    // Set 'fs.defaultFS' to match the filesystem on hbase.rootdir else
+    // underlying hadoop hdfs accessors will be going against wrong filesystem
+    // (unless all is set to defaults).
+    FSUtils.setFsDefault(this.conf, FSUtils.getRootDir(this.conf));
+    // Get fs instance used by this RS.  Do we use checksum verification in the hbase? If hbase
+    // checksum verification enabled, then automatically switch off hdfs checksum verification.
+    boolean useHBaseChecksum = conf.getBoolean(HConstants.HBASE_CHECKSUM_VERIFICATION, true);
+    this.fs = new HFileSystem(this.conf, useHBaseChecksum);
+    this.rootDir = FSUtils.getRootDir(this.conf);
+    this.tableDescriptors = getFsTableDescriptors();
   }
 
   protected TableDescriptors getFsTableDescriptors() throws IOException {
@@ -1384,6 +1392,7 @@ public class HRegionServer extends HasThread implements
   protected void handleReportForDutyResponse(final RegionServerStartupResponse c)
   throws IOException {
     try {
+      boolean updateRootDir = false;
       for (NameStringPair e : c.getMapEntriesList()) {
         String key = e.getName();
         // The hostname the master sees us as.
@@ -1406,11 +1415,23 @@ public class HRegionServer extends HasThread implements
           }
           continue;
         }
+
         String value = e.getValue();
+        if (key.equals(HConstants.HBASE_DIR)) {
+          if (value != null && !value.equals(conf.get(HConstants.HBASE_DIR))) {
+            updateRootDir = true;
+          }
+        }
+
         if (LOG.isDebugEnabled()) {
-          LOG.info("Config from master: " + key + "=" + value);
+          LOG.debug("Config from master: " + key + "=" + value);
         }
         this.conf.set(key, value);
+      }
+
+      if (updateRootDir) {
+        // initialize file system by the config fs.defaultFS and hbase.rootdir from master
+        initializeFileSystem();
       }
 
       // hack! Maps DFSClient => RegionServer for logs.  HDFS made this
@@ -1434,6 +1455,8 @@ public class HRegionServer extends HasThread implements
 
       startServiceThreads();
       startHeapMemoryManager();
+      // Call it after starting HeapMemoryManager.
+      initializeMemStoreChunkPool();
       LOG.info("Serving as " + this.serverName +
         ", RpcServer on " + rpcServices.isa +
         ", sessionid=0x" +
@@ -1453,16 +1476,34 @@ public class HRegionServer extends HasThread implements
     }
   }
 
+  private void initializeMemStoreChunkPool() {
+    if (MemStoreLAB.isEnabled(conf)) {
+      // MSLAB is enabled. So initialize MemStoreChunkPool
+      // By this time, the MemstoreFlusher is already initialized. We can get the global limits from
+      // it.
+      Pair<Long, MemoryType> pair = MemorySizeUtil.getGlobalMemstoreSize(conf);
+      long globalMemStoreSize = pair.getFirst();
+      boolean offheap = pair.getSecond() == MemoryType.NON_HEAP;
+      // When off heap memstore in use, take full area for chunk pool.
+      float poolSizePercentage = offheap ? 1.0F
+          : conf.getFloat(MemStoreLAB.CHUNK_POOL_MAXSIZE_KEY, MemStoreLAB.POOL_MAX_SIZE_DEFAULT);
+      float initialCountPercentage = conf.getFloat(MemStoreLAB.CHUNK_POOL_INITIALSIZE_KEY,
+          MemStoreLAB.POOL_INITIAL_SIZE_DEFAULT);
+      int chunkSize = conf.getInt(MemStoreLAB.CHUNK_SIZE_KEY, MemStoreLAB.CHUNK_SIZE_DEFAULT);
+      MemStoreChunkPool pool = MemStoreChunkPool.initialize(globalMemStoreSize, poolSizePercentage,
+          initialCountPercentage, chunkSize, offheap);
+      if (pool != null && this.hMemManager != null) {
+        // Register with Heap Memory manager
+        this.hMemManager.registerTuneObserver(pool);
+      }
+    }
+  }
+
   private void startHeapMemoryManager() {
-    this.hMemManager = HeapMemoryManager.create(this.conf, this.cacheFlusher,
-        this, this.regionServerAccounting);
+    this.hMemManager = HeapMemoryManager.create(this.conf, this.cacheFlusher, this,
+        this.regionServerAccounting);
     if (this.hMemManager != null) {
       this.hMemManager.start(getChoreService());
-      MemStoreChunkPool chunkPool = MemStoreChunkPool.getPool(this.conf);
-      if (chunkPool != null) {
-        // Register it as HeapMemoryTuneObserver
-        this.hMemManager.registerTuneObserver(chunkPool);
-      }
     }
   }
 
@@ -1497,7 +1538,7 @@ public class HRegionServer extends HasThread implements
    *
    * @throws IOException
    */
-  private RegionLoad createRegionLoad(final Region r, RegionLoad.Builder regionLoadBldr,
+  RegionLoad createRegionLoad(final Region r, RegionLoad.Builder regionLoadBldr,
       RegionSpecifier.Builder regionSpecifier) throws IOException {
     byte[] name = r.getRegionInfo().getRegionName();
     int stores = 0;
@@ -1703,34 +1744,6 @@ public class HRegionServer extends HasThread implements
     return new WALFactory(conf, listeners, serverName.toString());
   }
 
-  /**
-   * We initialize the roller for the wal that handles meta lazily
-   * since we don't know if this regionserver will handle it. All calls to
-   * this method return a reference to the that same roller. As newly referenced
-   * meta regions are brought online, they will be offered to the roller for maintenance.
-   * As a part of that registration process, the roller will add itself as a
-   * listener on the wal.
-   */
-  protected LogRoller ensureMetaWALRoller() {
-    // Using a tmp log roller to ensure metaLogRoller is alive once it is not
-    // null
-    LogRoller roller = metawalRoller.get();
-    if (null == roller) {
-      LogRoller tmpLogRoller = new LogRoller(this, this);
-      String n = Thread.currentThread().getName();
-      Threads.setDaemonThreadRunning(tmpLogRoller.getThread(),
-          n + "-MetaLogRoller", uncaughtExceptionHandler);
-      if (metawalRoller.compareAndSet(null, tmpLogRoller)) {
-        roller = tmpLogRoller;
-      } else {
-        // Another thread won starting the roller
-        Threads.shutdown(tmpLogRoller.getThread());
-        roller = metawalRoller.get();
-      }
-    }
-    return roller;
-  }
-
   public MetricsRegionServer getRegionServerMetrics() {
     return this.metricsRegionServer;
   }
@@ -1895,11 +1908,6 @@ public class HRegionServer extends HasThread implements
       stop("One or more threads are no longer alive -- stop");
       return false;
     }
-    final LogRoller metawalRoller = this.metawalRoller.get();
-    if (metawalRoller != null && !metawalRoller.isAlive()) {
-      stop("Meta WAL roller thread is no longer alive -- stop");
-      return false;
-    }
     return true;
   }
 
@@ -1913,11 +1921,9 @@ public class HRegionServer extends HasThread implements
   @Override
   public WAL getWAL(HRegionInfo regionInfo) throws IOException {
     WAL wal;
-    LogRoller roller = walRoller;
-    //_ROOT_ and hbase:meta regions have separate WAL.
-    if (regionInfo != null && regionInfo.isMetaTable() &&
-        regionInfo.getReplicaId() == HRegionInfo.DEFAULT_REPLICA_ID) {
-      roller = ensureMetaWALRoller();
+    // _ROOT_ and hbase:meta regions have separate WAL.
+    if (regionInfo != null && regionInfo.isMetaTable()
+        && regionInfo.getReplicaId() == HRegionInfo.DEFAULT_REPLICA_ID) {
       wal = walFactory.getMetaWAL(regionInfo.getEncodedNameAsBytes());
     } else if (regionInfo == null) {
       wal = walFactory.getWAL(UNSPECIFIED_REGION, null);
@@ -1925,7 +1931,7 @@ public class HRegionServer extends HasThread implements
       byte[] namespace = regionInfo.getTable().getNamespace();
       wal = walFactory.getWAL(regionInfo.getEncodedNameAsBytes(), namespace);
     }
-    roller.addWAL(wal);
+    walRoller.addWAL(wal);
     return wal;
   }
 
@@ -1947,6 +1953,7 @@ public class HRegionServer extends HasThread implements
   @Override
   public void stop(final String msg) {
     if (!this.stopped) {
+      LOG.info("***** STOPPING region server '" + this + "' *****");
       try {
         if (this.rsHost != null) {
           this.rsHost.preStop(msg);
@@ -2099,6 +2106,81 @@ public class HRegionServer extends HasThread implements
     return false;
   }
 
+  @Override
+  public long requestRegionSplit(final HRegionInfo regionInfo, final byte[] splitRow) {
+    NonceGenerator ng = clusterConnection.getNonceGenerator();
+    final long nonceGroup = ng.getNonceGroup();
+    final long nonce = ng.newNonce();
+    long procId = -1;
+    SplitTableRegionRequest request =
+        RequestConverter.buildSplitTableRegionRequest(regionInfo, splitRow, nonceGroup, nonce);
+
+    while (keepLooping()) {
+      RegionServerStatusService.BlockingInterface rss = rssStub;
+      try {
+        if (rss == null) {
+          createRegionServerStatusStub();
+          continue;
+        }
+        SplitTableRegionResponse response = rss.splitRegion(null, request);
+
+        //TODO: should we limit the retry number before quitting?
+        if (response == null || (procId = response.getProcId()) == -1) {
+          LOG.warn("Failed to split " + regionInfo + " retrying...");
+          continue;
+        }
+
+        break;
+      } catch (ServiceException se) {
+        // TODO: retry or just fail
+        IOException ioe = ProtobufUtil.getRemoteException(se);
+        LOG.info("Failed to split region, will retry", ioe);
+        if (rssStub == rss) {
+          rssStub = null;
+        }
+      }
+    }
+    return procId;
+  }
+
+  @Override
+  public boolean isProcedureFinished(final long procId) throws IOException {
+    GetProcedureResultRequest request =
+        GetProcedureResultRequest.newBuilder().setProcId(procId).build();
+
+    while (keepLooping()) {
+      RegionServerStatusService.BlockingInterface rss = rssStub;
+      try {
+        if (rss == null) {
+          createRegionServerStatusStub();
+          continue;
+        }
+        // TODO: find a way to get proc result
+        GetProcedureResultResponse response = rss.getProcedureResult(null, request);
+
+        if (response == null) {
+          LOG.warn("Failed to get procedure (id=" + procId + ") status.");
+          return false;
+        } else if (response.getState() == GetProcedureResultResponse.State.RUNNING) {
+          return false;
+        } else if (response.hasException()) {
+          // Procedure failed.
+          throw ForeignExceptionUtil.toIOException(response.getException());
+        }
+        // Procedure completes successfully
+        break;
+      } catch (ServiceException se) {
+        // TODO: retry or just fail
+        IOException ioe = ProtobufUtil.getRemoteException(se);
+        LOG.warn("Failed to get split region procedure result.  Retrying", ioe);
+        if (rssStub == rss) {
+          rssStub = null;
+        }
+      }
+    }
+    return true;
+  }
+
   /**
    * Trigger a flush in the primary region replica if this region is a secondary replica. Does not
    * block this thread. See RegionReplicaFlushHandler for details.
@@ -2145,7 +2227,7 @@ public class HRegionServer extends HasThread implements
    */
   @Override
   public void abort(String reason, Throwable cause) {
-    String msg = "ABORTING region server " + this + ": " + reason;
+    String msg = "***** ABORTING region server " + this + ": " + reason + " *****";
     if (cause != null) {
       LOG.fatal(msg, cause);
     } else {
@@ -2235,11 +2317,7 @@ public class HRegionServer extends HasThread implements
       this.spanReceiverHost.closeReceivers();
     }
     if (this.walRoller != null) {
-      Threads.shutdown(this.walRoller.getThread());
-    }
-    final LogRoller metawalRoller = this.metawalRoller.get();
-    if (metawalRoller != null) {
-      Threads.shutdown(metawalRoller.getThread());
+      this.walRoller.close();
     }
     if (this.compactSplitThread != null) {
       this.compactSplitThread.join();
@@ -2770,6 +2848,7 @@ public class HRegionServer extends HasThread implements
    * @see org.apache.hadoop.hbase.regionserver.HRegionServerCommandLine
    */
   public static void main(String[] args) throws Exception {
+    LOG.info("***** STARTING service '" + HRegionServer.class.getSimpleName() + "' *****");
     VersionInfo.logVersion();
     Configuration conf = HBaseConfiguration.create();
     @SuppressWarnings("unchecked")
@@ -2944,6 +3023,59 @@ public class HRegionServer extends HasThread implements
     }
     this.service.submit(crh);
     return true;
+  }
+
+  /**
+   * Close and offline the region for split
+   *
+   * @param parentRegionEncodedName the name of the region to close
+   * @return True if closed the region successfully.
+   * @throws IOException
+  */
+ protected boolean closeAndOfflineRegionForSplit(
+     final String parentRegionEncodedName) throws IOException {
+   Region parentRegion = this.getFromOnlineRegions(parentRegionEncodedName);
+   if (parentRegion != null) {
+     Map<byte[], List<StoreFile>> hstoreFilesToSplit = null;
+     Exception exceptionToThrow = null;
+     try{
+       hstoreFilesToSplit = ((HRegion)parentRegion).close(false);
+     } catch (Exception e) {
+       exceptionToThrow = e;
+     }
+     if (exceptionToThrow == null && hstoreFilesToSplit == null) {
+       // The region was closed by someone else
+       exceptionToThrow =
+           new IOException("Failed to close region: already closed by another thread");
+     }
+
+     if (exceptionToThrow != null) {
+       if (exceptionToThrow instanceof IOException) throw (IOException)exceptionToThrow;
+       throw new IOException(exceptionToThrow);
+     }
+     if (parentRegion.getTableDesc().hasSerialReplicationScope()) {
+       // For serial replication, we need add a final barrier on this region. But the splitting may
+       // be reverted, so we should make sure if we reopen this region, the open barrier is same as
+       // this final barrier
+       long seq = parentRegion.getMaxFlushedSeqId();
+       if (seq == HConstants.NO_SEQNUM) {
+         // No edits in WAL for this region; get the sequence number when the region was opened.
+         seq = parentRegion.getOpenSeqNum();
+         if (seq == HConstants.NO_SEQNUM) {
+           // This region has no data
+           seq = 0;
+         }
+       } else {
+         seq++;
+       }
+       Put finalBarrier = MetaTableAccessor.makeBarrierPut(Bytes.toBytes(parentRegionEncodedName),
+           seq, parentRegion.getTableDesc().getTableName().getName());
+       MetaTableAccessor.putToMetaTable(getConnection(), finalBarrier);
+     }
+     // Offline the region
+     this.removeFromOnlineRegions(parentRegion, null);
+   }
+   return true;
   }
 
    /**
@@ -3415,11 +3547,6 @@ public class HRegionServer extends HasThread implements
   }
 
   @Override
-  public HeapMemoryManager getHeapMemoryManager() {
-    return hMemManager;
-  }
-
-  @Override
   public double getCompactionPressure() {
     double max = 0;
     for (Region region : onlineRegions.values()) {
@@ -3431,6 +3558,11 @@ public class HRegionServer extends HasThread implements
       }
     }
     return max;
+  }
+
+  @Override
+  public HeapMemoryManager getHeapMemoryManager() {
+    return hMemManager;
   }
 
   /**

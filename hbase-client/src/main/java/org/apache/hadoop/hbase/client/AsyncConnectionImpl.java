@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.IOUtils;
@@ -66,7 +67,7 @@ class AsyncConnectionImpl implements AsyncConnection {
 
   private final User user;
 
-  private final ClusterRegistry registry;
+  final AsyncRegistry registry;
 
   private final String clusterId;
 
@@ -87,16 +88,12 @@ class AsyncConnectionImpl implements AsyncConnection {
   private final ConcurrentMap<String, ClientService.Interface> rsStubs = new ConcurrentHashMap<>();
 
   @SuppressWarnings("deprecation")
-  public AsyncConnectionImpl(Configuration conf, User user) throws IOException {
+  public AsyncConnectionImpl(Configuration conf, User user) {
     this.conf = conf;
     this.user = user;
-
     this.connConf = new AsyncConnectionConfiguration(conf);
-
-    this.locator = new AsyncRegionLocator(conf);
-
-    // action below will not throw exception so no need to catch and close.
-    this.registry = ClusterRegistryFactory.getRegistry(conf);
+    this.locator = new AsyncRegionLocator(this);
+    this.registry = AsyncRegistryFactory.getRegistry(conf);
     this.clusterId = Optional.ofNullable(registry.getClusterId()).orElseGet(() -> {
       if (LOG.isDebugEnabled()) {
         LOG.debug("cluster id came back null, using default " + CLUSTER_ID_DEFAULT);
@@ -122,7 +119,6 @@ class AsyncConnectionImpl implements AsyncConnection {
 
   @Override
   public void close() {
-    IOUtils.closeQuietly(locator);
     IOUtils.closeQuietly(rpcClient);
     IOUtils.closeQuietly(registry);
   }
@@ -153,7 +149,12 @@ class AsyncConnectionImpl implements AsyncConnection {
   }
 
   @Override
-  public AsyncTable getTable(TableName tableName) {
-    return new AsyncTableImpl(this, tableName);
+  public RawAsyncTable getRawTable(TableName tableName) {
+    return new RawAsyncTableImpl(this, tableName);
+  }
+
+  @Override
+  public AsyncTable getTable(TableName tableName, ExecutorService pool) {
+    return new AsyncTableImpl(this, tableName, pool);
   }
 }

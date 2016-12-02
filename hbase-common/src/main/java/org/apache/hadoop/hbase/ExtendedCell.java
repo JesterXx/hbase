@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.io.HeapSize;
@@ -65,5 +66,16 @@ public interface ExtendedCell extends Cell, SettableSequenceId, SettableTimestam
    * @param buf The buffer where to write the Cell.
    * @param offset The offset within buffer, to write the Cell.
    */
-  void write(byte[] buf, int offset);
+  void write(ByteBuffer buf, int offset);
+
+  /**
+   * @return The heap size overhead associated with this Cell.
+   */
+  long heapOverhead();
+
+  /**
+   * Does a deep copy of the contents to a new memory area and returns it as a new cell.
+   * @return The deep cloned cell
+   */
+  Cell deepClone();
 }

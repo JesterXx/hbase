@@ -34,7 +34,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionLocation;
-import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
@@ -100,7 +99,7 @@ public class TestAsyncSingleRequestRpcRetryingCaller {
     int index = TEST_UTIL.getHBaseCluster().getServerWith(loc.getRegionInfo().getRegionName());
     TEST_UTIL.getAdmin().move(loc.getRegionInfo().getEncodedNameAsBytes(), Bytes.toBytes(
       TEST_UTIL.getHBaseCluster().getRegionServer(1 - index).getServerName().getServerName()));
-    AsyncTable table = asyncConn.getTable(TABLE_NAME);
+    RawAsyncTable table = asyncConn.getRawTable(TABLE_NAME);
     table.put(new Put(ROW).addColumn(FAMILY, QUALIFIER, VALUE)).get();
 
     // move back
@@ -151,11 +150,9 @@ public class TestAsyncSingleRequestRpcRetryingCaller {
     AtomicBoolean errorTriggered = new AtomicBoolean(false);
     AtomicInteger count = new AtomicInteger(0);
     HRegionLocation loc = asyncConn.getRegionLocator(TABLE_NAME).getRegionLocation(ROW).get();
-
-    try (AsyncRegionLocator mockedLocator = new AsyncRegionLocator(asyncConn.getConfiguration()) {
+    AsyncRegionLocator mockedLocator = new AsyncRegionLocator(asyncConn) {
       @Override
-      CompletableFuture<HRegionLocation> getRegionLocation(TableName tableName, byte[] row,
-          boolean reload) {
+      CompletableFuture<HRegionLocation> getRegionLocation(TableName tableName, byte[] row) {
         if (tableName.equals(TABLE_NAME)) {
           CompletableFuture<HRegionLocation> future = new CompletableFuture<>();
           if (count.getAndIncrement() == 0) {
@@ -166,24 +163,29 @@ public class TestAsyncSingleRequestRpcRetryingCaller {
           }
           return future;
         } else {
-          return super.getRegionLocation(tableName, row, reload);
+          return super.getRegionLocation(tableName, row);
         }
       }
 
       @Override
-      void updateCachedLocations(TableName tableName, byte[] regionName, byte[] row,
-          Object exception, ServerName source) {
+      CompletableFuture<HRegionLocation> getPreviousRegionLocation(TableName tableName,
+          byte[] startRowOfCurrentRegion) {
+        return super.getPreviousRegionLocation(tableName, startRowOfCurrentRegion);
+      }
+
+      @Override
+      void updateCachedLocation(HRegionLocation loc, Throwable exception) {
       }
     };
-        AsyncConnectionImpl mockedConn = new AsyncConnectionImpl(asyncConn.getConfiguration(),
-            User.getCurrent()) {
+    try (AsyncConnectionImpl mockedConn =
+        new AsyncConnectionImpl(asyncConn.getConfiguration(), User.getCurrent()) {
 
           @Override
           AsyncRegionLocator getLocator() {
             return mockedLocator;
           }
         }) {
-      AsyncTable table = new AsyncTableImpl(mockedConn, TABLE_NAME);
+      RawAsyncTable table = new RawAsyncTableImpl(mockedConn, TABLE_NAME);
       table.put(new Put(ROW).addColumn(FAMILY, QUALIFIER, VALUE)).get();
       assertTrue(errorTriggered.get());
       errorTriggered.set(false);

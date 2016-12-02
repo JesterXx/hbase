@@ -19,23 +19,39 @@
  */
 package org.apache.hadoop.hbase.client;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
-
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.Coprocessor;
+import org.apache.hadoop.hbase.coprocessor.ObserverContext;
+import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
+import org.apache.hadoop.hbase.coprocessor.RegionObserver;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.regionserver.MiniBatchOperationInProgress;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
+import org.apache.hadoop.hbase.regionserver.Region;
+import org.apache.hadoop.hbase.regionserver.RegionScanner;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.coprocessor.MultiRowMutationEndpoint;
+import org.apache.hadoop.hbase.ipc.CoprocessorRpcUtils;
+import org.apache.hadoop.hbase.ipc.ServerRpcController;
+import org.apache.hadoop.hbase.protobuf.generated.MultiRowMutationProtos;
+import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
@@ -44,6 +60,11 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.junit.After;
 import org.junit.AfterClass;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -478,5 +499,251 @@ public class TestFromClientSide3 {
   public void testConnectionDefaultUsesCodec() throws Exception {
     ClusterConnection con = (ClusterConnection) TEST_UTIL.getConnection();
     assertTrue(con.hasCellBlockSupport());
+  }
+
+  @Test(timeout = 60000)
+  public void testPutWithPreBatchMutate() throws Exception {
+    TableName tableName = TableName.valueOf("testPutWithPreBatchMutate");
+    testPreBatchMutate(tableName, () -> {
+      try {
+        Table t = TEST_UTIL.getConnection().getTable(tableName);
+        Put put = new Put(ROW);
+        put.addColumn(FAMILY, QUALIFIER, VALUE);
+        t.put(put);
+      } catch (IOException ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+  }
+
+  @Test(timeout = 60000)
+  public void testRowMutationsWithPreBatchMutate() throws Exception {
+    TableName tableName = TableName.valueOf("testRowMutationsWithPreBatchMutate");
+    testPreBatchMutate(tableName, () -> {
+      try {
+        RowMutations rm = new RowMutations(ROW, 1);
+        Table t = TEST_UTIL.getConnection().getTable(tableName);
+        Put put = new Put(ROW);
+        put.addColumn(FAMILY, QUALIFIER, VALUE);
+        rm.add(put);
+        t.mutateRow(rm);
+      } catch (IOException ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+  }
+
+  private void testPreBatchMutate(TableName tableName, Runnable rn)throws Exception {
+    HTableDescriptor desc = new HTableDescriptor(tableName);
+    desc.addCoprocessor(WatiingForScanObserver.class.getName());
+    desc.addFamily(new HColumnDescriptor(FAMILY));
+    TEST_UTIL.getAdmin().createTable(desc);
+    ExecutorService service = Executors.newFixedThreadPool(2);
+    service.execute(rn);
+    final List<Cell> cells = new ArrayList<>();
+    service.execute(() -> {
+      try {
+        // waiting for update.
+        TimeUnit.SECONDS.sleep(3);
+        Table t = TEST_UTIL.getConnection().getTable(tableName);
+        Scan scan = new Scan();
+        try (ResultScanner scanner = t.getScanner(scan)) {
+          for (Result r : scanner) {
+            cells.addAll(Arrays.asList(r.rawCells()));
+          }
+        }
+      } catch (IOException | InterruptedException ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    service.shutdown();
+    service.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+    assertEquals("The write is blocking by RegionObserver#postBatchMutate"
+      + ", so the data is invisible to reader", 0, cells.size());
+    TEST_UTIL.deleteTable(tableName);
+  }
+
+  @Test(timeout = 30000)
+  public void testLockLeakWithDelta() throws Exception, Throwable {
+    TableName tableName = TableName.valueOf("testLockLeakWithDelta");
+    HTableDescriptor desc = new HTableDescriptor(tableName);
+    desc.addCoprocessor(WatiingForMultiMutationsObserver.class.getName());
+    desc.setConfiguration("hbase.rowlock.wait.duration", String.valueOf(5000));
+    desc.addFamily(new HColumnDescriptor(FAMILY));
+    TEST_UTIL.getAdmin().createTable(desc);
+    // new a connection for lower retry number.
+    Configuration copy = new Configuration(TEST_UTIL.getConfiguration());
+    copy.setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 2);
+    try (Connection con = ConnectionFactory.createConnection(copy)) {
+      HRegion region = (HRegion) find(tableName);
+      region.setTimeoutForWriteLock(10);
+      ExecutorService putService = Executors.newSingleThreadExecutor();
+      putService.execute(() -> {
+        try (Table table = con.getTable(tableName)) {
+          Put put = new Put(ROW);
+          put.addColumn(FAMILY, QUALIFIER, VALUE);
+          // the put will be blocked by WatiingForMultiMutationsObserver.
+          table.put(put);
+        } catch (IOException ex) {
+          throw new RuntimeException(ex);
+        }
+      });
+      ExecutorService appendService = Executors.newSingleThreadExecutor();
+      appendService.execute(() -> {
+        Append append = new Append(ROW);
+        append.add(FAMILY, QUALIFIER, VALUE);
+        try (Table table = con.getTable(tableName)) {
+          table.append(append);
+          fail("The APPEND should fail because the target lock is blocked by previous put");
+        } catch (Throwable ex) {
+        }
+      });
+      appendService.shutdown();
+      appendService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+      WatiingForMultiMutationsObserver observer = find(tableName, WatiingForMultiMutationsObserver.class);
+      observer.latch.countDown();
+      putService.shutdown();
+      putService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+      try (Table table = con.getTable(tableName)) {
+        Result r = table.get(new Get(ROW));
+        assertFalse(r.isEmpty());
+        assertTrue(Bytes.equals(r.getValue(FAMILY, QUALIFIER), VALUE));
+      }
+    }
+    HRegion region = (HRegion) find(tableName);
+    int readLockCount = region.getReadLockCount();
+    LOG.info("readLockCount:" + readLockCount);
+    assertEquals(0, readLockCount);
+  }
+
+  @Test(timeout = 30000)
+  public void testMultiRowMutations() throws Exception, Throwable {
+    TableName tableName = TableName.valueOf("testMultiRowMutations");
+    HTableDescriptor desc = new HTableDescriptor(tableName);
+    desc.addCoprocessor(MultiRowMutationEndpoint.class.getName());
+    desc.addCoprocessor(WatiingForMultiMutationsObserver.class.getName());
+    desc.setConfiguration("hbase.rowlock.wait.duration", String.valueOf(5000));
+    desc.addFamily(new HColumnDescriptor(FAMILY));
+    TEST_UTIL.getAdmin().createTable(desc);
+    // new a connection for lower retry number.
+    Configuration copy = new Configuration(TEST_UTIL.getConfiguration());
+    copy.setInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER, 2);
+    try (Connection con = ConnectionFactory.createConnection(copy)) {
+      byte[] row = Bytes.toBytes("ROW-0");
+      byte[] rowLocked= Bytes.toBytes("ROW-1");
+      byte[] value0 = Bytes.toBytes("VALUE-0");
+      byte[] value1 = Bytes.toBytes("VALUE-1");
+      byte[] value2 = Bytes.toBytes("VALUE-2");
+      assertNoLocks(tableName);
+      ExecutorService putService = Executors.newSingleThreadExecutor();
+      putService.execute(() -> {
+        try (Table table = con.getTable(tableName)) {
+          Put put0 = new Put(rowLocked);
+          put0.addColumn(FAMILY, QUALIFIER, value0);
+          // the put will be blocked by WatiingForMultiMutationsObserver.
+          table.put(put0);
+        } catch (IOException ex) {
+          throw new RuntimeException(ex);
+        }
+      });
+      ExecutorService cpService = Executors.newSingleThreadExecutor();
+      cpService.execute(() -> {
+        Put put1 = new Put(row);
+        Put put2 = new Put(rowLocked);
+        put1.addColumn(FAMILY, QUALIFIER, value1);
+        put2.addColumn(FAMILY, QUALIFIER, value2);
+        try (Table table = con.getTable(tableName)) {
+          MultiRowMutationProtos.MutateRowsRequest request
+            = MultiRowMutationProtos.MutateRowsRequest.newBuilder()
+              .addMutationRequest(org.apache.hadoop.hbase.protobuf.ProtobufUtil.toMutation(
+                      org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutationProto.MutationType.PUT, put1))
+              .addMutationRequest(org.apache.hadoop.hbase.protobuf.ProtobufUtil.toMutation(
+                      org.apache.hadoop.hbase.protobuf.generated.ClientProtos.MutationProto.MutationType.PUT, put2))
+              .build();
+          table.coprocessorService(MultiRowMutationProtos.MultiRowMutationService.class,
+            ROW, ROW,
+            (MultiRowMutationProtos.MultiRowMutationService exe) -> {
+              ServerRpcController controller = new ServerRpcController();
+              CoprocessorRpcUtils.BlockingRpcCallback<MultiRowMutationProtos.MutateRowsResponse>
+                rpcCallback = new CoprocessorRpcUtils.BlockingRpcCallback<>();
+              exe.mutateRows(controller, request, rpcCallback);
+              return rpcCallback.get();
+            });
+          fail("This cp should fail because the target lock is blocked by previous put");
+        } catch (Throwable ex) {
+        }
+      });
+      cpService.shutdown();
+      cpService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+      WatiingForMultiMutationsObserver observer = find(tableName, WatiingForMultiMutationsObserver.class);
+      observer.latch.countDown();
+      putService.shutdown();
+      putService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+      try (Table table = con.getTable(tableName)) {
+        Get g0 = new Get(row);
+        Get g1 = new Get(rowLocked);
+        Result r0 = table.get(g0);
+        Result r1 = table.get(g1);
+        assertTrue(r0.isEmpty());
+        assertFalse(r1.isEmpty());
+        assertTrue(Bytes.equals(r1.getValue(FAMILY, QUALIFIER), value0));
+      }
+      assertNoLocks(tableName);
+    }
+  }
+
+  private static void assertNoLocks(final TableName tableName) throws IOException, InterruptedException {
+    HRegion region = (HRegion) find(tableName);
+    assertEquals(0, region.getLockedRows().size());
+  }
+  private static Region find(final TableName tableName)
+      throws IOException, InterruptedException {
+    HRegionServer rs = TEST_UTIL.getRSForFirstRegionInTable(tableName);
+    List<Region> regions = rs.getOnlineRegions(tableName);
+    assertEquals(1, regions.size());
+    return regions.get(0);
+  }
+
+  private static <T extends RegionObserver> T find(final TableName tableName,
+          Class<T> clz) throws IOException, InterruptedException {
+    Region region = find(tableName);
+    Coprocessor cp = region.getCoprocessorHost().findCoprocessor(clz.getName());
+    assertTrue("The cp instance should be " + clz.getName()
+            + ", current instance is " + cp.getClass().getName(), clz.isInstance(cp));
+    return clz.cast(cp);
+  }
+
+  public static class WatiingForMultiMutationsObserver extends BaseRegionObserver {
+    final CountDownLatch latch = new CountDownLatch(1);
+    @Override
+    public void postBatchMutate(final ObserverContext<RegionCoprocessorEnvironment> c,
+            final MiniBatchOperationInProgress<Mutation> miniBatchOp) throws IOException {
+      try {
+        latch.await();
+      } catch (InterruptedException ex) {
+        throw new IOException(ex);
+      }
+    }
+  }
+
+  public static class WatiingForScanObserver extends BaseRegionObserver {
+    private final CountDownLatch latch = new CountDownLatch(1);
+    @Override
+    public void postBatchMutate(final ObserverContext<RegionCoprocessorEnvironment> c,
+            final MiniBatchOperationInProgress<Mutation> miniBatchOp) throws IOException {
+      try {
+        // waiting for scanner
+        latch.await();
+      } catch (InterruptedException ex) {
+        throw new IOException(ex);
+      }
+    }
+
+    @Override
+    public RegionScanner postScannerOpen(final ObserverContext<RegionCoprocessorEnvironment> e,
+            final Scan scan, final RegionScanner s) throws IOException {
+      latch.countDown();
+      return s;
+    }
   }
 }

@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
@@ -195,7 +196,11 @@ public interface Region extends ConfigurationObserver {
    */
   void updateWriteRequestsCount(long i);
 
-  /** @return memstore size for this region, in bytes */
+  /**
+   * @return memstore size for this region, in bytes. It just accounts data size of cells added to
+   *         the memstores of this Region. Means size in bytes for key, value and tags within Cells.
+   *         It wont consider any java heap overhead for the cell objects or any other.
+   */
   long getMemstoreSize();
 
   /** @return store services for this region, to access services required by store level needs */
@@ -281,15 +286,23 @@ public interface Region extends ConfigurationObserver {
   }
 
   /**
-   * Tries to acquire a lock on the given row.
-   * @param waitForLock if true, will block until the lock is available.
-   *        Otherwise, just tries to obtain the lock and returns
-   *        false if unavailable.
-   * @return the row lock if acquired,
-   *   null if waitForLock was false and the lock was not acquired
-   * @throws IOException if waitForLock was true and the lock could not be acquired after waiting
+   *
+   * Get a row lock for the specified row. All locks are reentrant.
+   *
+   * Before calling this function make sure that a region operation has already been
+   * started (the calling thread has already acquired the region-close-guard lock).
+   * 
+   * NOTE: the boolean passed here has changed. It used to be a boolean that
+   * stated whether or not to wait on the lock. Now it is whether it an exclusive
+   * lock is requested.
+   * 
+   * @param row The row actions will be performed against
+   * @param readLock is the lock reader or writer. True indicates that a non-exclusive
+   * lock is requested
+   * @see #startRegionOperation()
+   * @see #startRegionOperation(Operation)
    */
-  RowLock getRowLock(byte[] row, boolean waitForLock) throws IOException;
+  RowLock getRowLock(byte[] row, boolean readLock) throws IOException;
 
   /**
    * If the given list of row locks is not null, releases all locks.
@@ -546,11 +559,11 @@ public interface Region extends ConfigurationObserver {
    * @param bulkLoadListener Internal hooks enabling massaging/preparation of a
    * file about to be bulk loaded
    * @param assignSeqId
-   * @return true if successful, false if failed recoverably
+   * @return Map from family to List of store file paths if successful, null if failed recoverably
    * @throws IOException if failed unrecoverably.
    */
-  boolean bulkLoadHFiles(Collection<Pair<byte[], String>> familyPaths, boolean assignSeqId,
-      BulkLoadListener bulkLoadListener) throws IOException;
+  Map<byte[], List<Path>> bulkLoadHFiles(Collection<Pair<byte[], String>> familyPaths,
+      boolean assignSeqId, BulkLoadListener bulkLoadListener) throws IOException;
 
   /**
    * Attempts to atomically load a group of hfiles.  This is critical for loading
@@ -561,11 +574,11 @@ public interface Region extends ConfigurationObserver {
    * @param bulkLoadListener Internal hooks enabling massaging/preparation of a
    * file about to be bulk loaded
    * @param copyFile always copy hfiles if true
-   * @return true if successful, false if failed recoverably
+   * @return Map from family to List of store file paths if successful, null if failed recoverably
    * @throws IOException if failed unrecoverably.
    */
-  boolean bulkLoadHFiles(Collection<Pair<byte[], String>> familyPaths, boolean assignSeqId,
-      BulkLoadListener bulkLoadListener, boolean copyFile) throws IOException;
+  Map<byte[], List<Path>> bulkLoadHFiles(Collection<Pair<byte[], String>> familyPaths,
+      boolean assignSeqId, BulkLoadListener bulkLoadListener, boolean copyFile) throws IOException;
 
   ///////////////////////////////////////////////////////////////////////////
   // Coprocessors

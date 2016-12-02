@@ -20,8 +20,8 @@ package org.apache.hadoop.hbase.ipc;
 import java.util.Deque;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Abortable;
@@ -44,25 +44,22 @@ public class FastPathBalancedQueueRpcExecutor extends BalancedQueueRpcExecutor {
   private final Deque<FastPathHandler> fastPathHandlerStack = new ConcurrentLinkedDeque<>();
 
   public FastPathBalancedQueueRpcExecutor(final String name, final int handlerCount,
-                                          final int numQueues, final int maxQueueLength, final Configuration conf,
-                                          final Abortable abortable) {
-    super(name, handlerCount, numQueues, conf, abortable, LinkedBlockingQueue.class,
-        maxQueueLength);
+      final int maxQueueLength, final PriorityFunction priority, final Configuration conf,
+      final Abortable abortable) {
+    super(name, handlerCount, maxQueueLength, priority, conf, abortable);
   }
 
-  public FastPathBalancedQueueRpcExecutor(String name, int handlerCount,
-                                          int numCallQueues,
-                                          Configuration conf,
-                                          Abortable abortable,
-                                          Class<? extends BlockingQueue> queueClass,
-                                          Object... args) {
-    super(name, handlerCount, numCallQueues, conf, abortable, queueClass, args);
+  public FastPathBalancedQueueRpcExecutor(final String name, final int handlerCount,
+      final String callQueueType, final int maxQueueLength, final PriorityFunction priority,
+      final Configuration conf, final Abortable abortable) {
+    super(name, handlerCount, callQueueType, maxQueueLength, priority, conf, abortable);
   }
 
   @Override
   protected Handler getHandler(String name, double handlerFailureThreshhold,
-      BlockingQueue<CallRunner> q) {
-    return new FastPathHandler(name, handlerFailureThreshhold, q, fastPathHandlerStack);
+      BlockingQueue<CallRunner> q, AtomicInteger activeHandlerCount) {
+    return new FastPathHandler(name, handlerFailureThreshhold, q, activeHandlerCount,
+        fastPathHandlerStack);
   }
 
   @Override
@@ -88,8 +85,9 @@ public class FastPathBalancedQueueRpcExecutor extends BalancedQueueRpcExecutor {
     private CallRunner loadedCallRunner;
 
     FastPathHandler(String name, double handlerFailureThreshhold, BlockingQueue<CallRunner> q,
+        final AtomicInteger activeHandlerCount,
         final Deque<FastPathHandler> fastPathHandlerStack) {
-      super(name, handlerFailureThreshhold, q);
+      super(name, handlerFailureThreshhold, q, activeHandlerCount);
       this.fastPathHandlerStack = fastPathHandlerStack;
     }
 

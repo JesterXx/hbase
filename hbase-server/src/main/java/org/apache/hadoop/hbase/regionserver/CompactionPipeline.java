@@ -90,13 +90,16 @@ public class CompactionPipeline {
    * Swapping only if there were no changes to the suffix of the list while it was compacted.
    * @param versionedList tail of the pipeline that was compacted
    * @param segment new compacted segment
+   * @param closeSuffix whether to close the suffix (to release memory), as part of swapping it out
+   *        During index merge op this will be false and for compaction it will be true.
    * @return true iff swapped tail with new compacted segment
    */
-  public boolean swap(VersionedSegmentsList versionedList, ImmutableSegment segment) {
+  public boolean swap(
+      VersionedSegmentsList versionedList, ImmutableSegment segment, boolean closeSuffix) {
     if (versionedList.getVersion() != version) {
       return false;
     }
-    LinkedList<ImmutableSegment> suffix;
+    List<ImmutableSegment> suffix;
     synchronized (pipeline){
       if(versionedList.getVersion() != version) {
         return false;
@@ -108,20 +111,32 @@ public class CompactionPipeline {
             + versionedList.getStoreSegments().size()
             + ", and the number of cells in new segment is:" + segment.getCellsCount());
       }
-      swapSuffix(suffix,segment);
+      swapSuffix(suffix,segment, closeSuffix);
     }
     if (region != null) {
       // update the global memstore size counter
-      long suffixSize = getSegmentsKeySize(suffix);
-      long newSize = segment.keySize();
-      long delta = suffixSize - newSize;
-      long globalMemstoreSize = region.addAndGetGlobalMemstoreSize(-delta);
+      long suffixDataSize = getSegmentsKeySize(suffix);
+      long newDataSize = segment.keySize();
+      long dataSizeDelta = suffixDataSize - newDataSize;
+      long suffixHeapOverhead = getSegmentsHeapOverhead(suffix);
+      long newHeapOverhead = segment.heapOverhead();
+      long heapOverheadDelta = suffixHeapOverhead - newHeapOverhead;
+      region.addMemstoreSize(new MemstoreSize(-dataSizeDelta, -heapOverheadDelta));
       if (LOG.isDebugEnabled()) {
-        LOG.debug("Suffix size: " + suffixSize + " compacted item size: " + newSize
-            + " globalMemstoreSize: " + globalMemstoreSize);
+        LOG.debug("Suffix data size: " + suffixDataSize + " compacted item data size: "
+            + newDataSize + ". Suffix heap overhead: " + suffixHeapOverhead
+            + " compacted item heap overhead: " + newHeapOverhead);
       }
     }
     return true;
+  }
+
+  private static long getSegmentsHeapOverhead(List<? extends Segment> list) {
+    long res = 0;
+    for (Segment segment : list) {
+      res += segment.heapOverhead();
+    }
+    return res;
   }
 
   private static long getSegmentsKeySize(List<? extends Segment> list) {
@@ -156,16 +171,12 @@ public class CompactionPipeline {
 
       for (ImmutableSegment s : pipeline) {
         // remember the old size in case this segment is going to be flatten
-        long sizeBeforeFlat = s.keySize();
-        long globalMemstoreSize = 0;
-        if (s.flatten()) {
+        MemstoreSize memstoreSize = new MemstoreSize();
+        if (s.flatten(memstoreSize)) {
           if(region != null) {
-            long sizeAfterFlat = s.keySize();
-            long delta = sizeBeforeFlat - sizeAfterFlat;
-            globalMemstoreSize = region.addAndGetGlobalMemstoreSize(-delta);
+            region.addMemstoreSize(memstoreSize);
           }
-          LOG.debug("Compaction pipeline segment " + s + " was flattened; globalMemstoreSize: "
-              + globalMemstoreSize);
+          LOG.debug("Compaction pipeline segment " + s + " was flattened");
           return true;
         }
       }
@@ -199,15 +210,24 @@ public class CompactionPipeline {
     return minSequenceId;
   }
 
-  public long getTailSize() {
-    if (isEmpty()) return 0;
-    return pipeline.peekLast().keySize();
+  public MemstoreSize getTailSize() {
+    if (isEmpty()) return MemstoreSize.EMPTY_SIZE;
+    return new MemstoreSize(pipeline.peekLast().keySize(), pipeline.peekLast().heapOverhead());
   }
 
-  private void swapSuffix(LinkedList<ImmutableSegment> suffix, ImmutableSegment segment) {
+  private void swapSuffix(List<ImmutableSegment> suffix, ImmutableSegment segment,
+      boolean closeSegmentsInSuffix) {
     version++;
-    for (Segment itemInSuffix : suffix) {
-      itemInSuffix.close();
+    // During index merge we won't be closing the segments undergoing the merge. Segment#close()
+    // will release the MSLAB chunks to pool. But in case of index merge there wont be any data copy
+    // from old MSLABs. So the new cells in new segment also refers to same chunks. In case of data
+    // compaction, we would have copied the cells data from old MSLAB chunks into a new chunk
+    // created for the result segment. So we can release the chunks associated with the compacted
+    // segments.
+    if (closeSegmentsInSuffix) {
+      for (Segment itemInSuffix : suffix) {
+        itemInSuffix.close();
+      }
     }
     pipeline.removeAll(suffix);
     pipeline.addLast(segment);

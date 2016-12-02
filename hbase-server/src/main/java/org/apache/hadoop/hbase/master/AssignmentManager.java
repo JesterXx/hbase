@@ -61,7 +61,6 @@ import org.apache.hadoop.hbase.RegionLocations;
 import org.apache.hadoop.hbase.RegionStateListener;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.MasterSwitchType;
 import org.apache.hadoop.hbase.client.RegionReplicaUtil;
@@ -611,7 +610,7 @@ public class AssignmentManager {
       if (files[i].isFile() && files[i].getLen() > 0) {
         LOG.debug(dir + " has a non-empty file: " + files[i].getPath());
         return true;
-      } else if (files[i].isDirectory() && checkWals(fs, dir)) {
+      } else if (files[i].isDirectory() && checkWals(fs, files[i].getPath())) {
         LOG.debug(dir + " is a directory and has a non-empty file: " + files[i].getPath());
         return true;
       }
@@ -2432,6 +2431,39 @@ public class AssignmentManager {
     return null;
   }
 
+  public void assignDaughterRegions(
+      final HRegionInfo parentHRI,
+      final HRegionInfo daughterAHRI,
+      final HRegionInfo daughterBHRI) throws InterruptedException, IOException {
+    //Offline the parent region
+    regionOffline(parentHRI, State.SPLIT);
+
+    //Set daughter regions to offline
+    regionStates.prepareAssignDaughters(daughterAHRI, daughterBHRI);
+
+    // Assign daughter regions
+    invokeAssign(daughterAHRI);
+    invokeAssign(daughterBHRI);
+
+    Callable<Object> splitReplicasCallable = new Callable<Object>() {
+      @Override
+      public Object call() {
+        doSplittingOfReplicas(parentHRI, daughterAHRI, daughterBHRI);
+        return null;
+      }
+    };
+    threadPoolExecutorService.submit(splitReplicasCallable);
+
+    // wait for assignment completion
+    ArrayList<HRegionInfo> regionAssignSet = new ArrayList<HRegionInfo>(2);
+    regionAssignSet.add(daughterAHRI);
+    regionAssignSet.add(daughterBHRI);
+    while (!waitForAssignment(regionAssignSet, true, regionAssignSet.size(),
+      Long.MAX_VALUE)) {
+      LOG.debug("some user regions are still in transition: " + regionAssignSet);
+    }
+  }
+
   private String onRegionSplit(final RegionState current, final HRegionInfo hri,
       final ServerName serverName, final RegionStateTransition transition) {
     // The region must be splitting on this server, and the daughters must be in
@@ -2668,9 +2700,16 @@ public class AssignmentManager {
         + ", a=" + rs_a + ", b=" + rs_b;
     }
 
+    // Always bring the children back online. Even if they are not offline
+    // there's no harm in making them online again.
     regionOnline(a, serverName);
     regionOnline(b, serverName);
-    regionOffline(hri);
+
+    // Only offline the merging region if it is known to exist.
+    RegionState rs_p = regionStates.getRegionState(hri);
+    if (rs_p != null) {
+      regionOffline(hri);
+    }
 
     if (getTableStateManager().isTableState(hri.getTable(),
         TableState.State.DISABLED, TableState.State.DISABLING)) {
@@ -2866,7 +2905,7 @@ public class AssignmentManager {
    *      (d) Other scenarios should be handled similarly as for
    *        region open/close
    */
-  protected String onRegionTransition(final ServerName serverName,
+  public String onRegionTransition(final ServerName serverName,
       final RegionStateTransition transition) {
     TransitionCode code = transition.getTransitionCode();
     HRegionInfo hri = HRegionInfo.convert(transition.getRegionInfo(0));

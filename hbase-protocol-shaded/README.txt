@@ -1,4 +1,6 @@
 Please read carefully as the 'menu options' have changed.
+What you do in here is not what you do elsewhere to generate
+proto java files.
 
 This module has proto files used by core. These protos
 overlap with protos that are used by coprocessor endpoints
@@ -16,33 +18,36 @@ protobuf Message class is at
 org.apache.hadoop.hbase.shaded.com.google.protobuf.Message
 rather than at com.google.protobuf.Message.
 
-Below we describe how to generate the java files for this
-module. Run this step any time you change the proto files
-in this module or if you change the protobuf version. If you
-add a new file, be sure to add mention of the proto in the
-pom.xml (scroll till you see the listing of protos to consider).
+Finally, this module also includes patches applied on top of
+protobuf to add functionality not yet in protobuf that we
+need now.
 
-First ensure that the appropriate protobuf protoc tool is in
-your $PATH as in:
+If you make changes to protos, to the protobuf version or to
+the patches you want to apply to protobuf, you must rerun the
+below step and then check in what it generated:
 
- $ export PATH=~/bin/protobuf-3.1.0/src:$PATH
-
-.. or pass -Dprotoc.path=PATH_TO_PROTOC when running
-the below mvn commands. You may need to download protobuf and
-build protoc first.
-
-Run:
-
- $ mvn install -Dgenerate-shaded-classes
+ $ mvn install -Dcompile-protobuf
 
 or
 
- $ mvn install -Pgenerate-shaded-classes
+ $ mvn install -Pcompile-protobuf
 
-to build and trigger the special generate-shaded-classes
-profile. When finished, the content of
-src/main/java/org/apache/hadoop/hbase/shaded will have
-been updated. Check in the changes.
+NOTE: 'install' above whereas other proto generation only needs 'compile'
+NOTE: Unlike elsehwere the above command does NOT install this modules jar
+into the repo., intentionally. The jar made by the above is a scratch jar
+that is part of the process that gets us to a set of files to check in;
+it is not for consumption. Run mvn install without the '-Pcompile-protobuf'
+option to get this modules' artifact installed in your repo!
 
-See the pom.xml under the generate-shaded-classes profile
-for more info on how this step works.
+When finished, the content of src/main/java/org/apache/hadoop/hbase/shaded
+will have been updated. Make sure all builds and then carefully
+check in the changes. Files may have been added or removed
+by the steps above.
+
+The protobuf version used internally by hbase differs from what
+is used over in the CPEP hbase-protocol module but mvn takes care
+of ensuring we have the right protobuf in place so you don't have to.
+
+If you have patches for the protobuf, add them to
+src/main/patches directory. They will be applied after
+protobuf is shaded and unbundled into src/main/java.

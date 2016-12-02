@@ -20,13 +20,12 @@
 package org.apache.hadoop.hbase.wal;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.hadoop.hbase.Cell;
-import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
@@ -34,11 +33,9 @@ import org.apache.hadoop.hbase.classification.InterfaceStability;
 // imports we use from yet-to-be-moved regionsever.wal
 import org.apache.hadoop.hbase.regionserver.wal.CompressionContext;
 import org.apache.hadoop.hbase.regionserver.wal.FailedLogCloseException;
-import org.apache.hadoop.hbase.regionserver.wal.HLogKey;
 import org.apache.hadoop.hbase.regionserver.wal.WALActionsListener;
 import org.apache.hadoop.hbase.regionserver.wal.WALCoprocessorHost;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
-import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * A Write Ahead Log (WAL) provides service for reading, writing waledits. This interface provides
@@ -214,13 +211,6 @@ public interface WAL extends Closeable {
   String toString();
 
   /**
-   * In some WAL implementation, we will write WAL entries to new file if sync failed, which means,
-   * the fail recovery is depended on log roller. So here we tell the WAL that log roller has
-   * already been exited so the WAL cloud give up recovery.
-   */
-  void logRollerExited();
-
-  /**
    * When outside clients need to consume persisted WALs, they rely on a provided
    * Reader.
    */
@@ -236,13 +226,11 @@ public interface WAL extends Closeable {
    * Utility class that lets us keep track of the edit with it's key.
    */
   class Entry {
-    private WALEdit edit;
-    private WALKey key;
+    private final WALEdit edit;
+    private final WALKey key;
 
     public Entry() {
-      edit = new WALEdit();
-      // we use HLogKey here instead of WALKey directly to support legacy coprocessors.
-      key = new HLogKey();
+      this(new WALKey(), new WALEdit());
     }
 
     /**
@@ -252,7 +240,6 @@ public interface WAL extends Closeable {
      * @param key log's key
      */
     public Entry(WALKey key, WALEdit edit) {
-      super();
       this.key = key;
       this.edit = edit;
     }

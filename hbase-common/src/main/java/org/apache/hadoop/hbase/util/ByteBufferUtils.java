@@ -29,7 +29,7 @@ import java.util.Arrays;
 
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
-import org.apache.hadoop.hbase.io.ByteBufferSupportOutputStream;
+import org.apache.hadoop.hbase.io.ByteBufferWriter;
 import org.apache.hadoop.hbase.io.util.StreamUtils;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.WritableUtils;
@@ -144,8 +144,8 @@ public final class ByteBufferUtils {
      // We have writeInt in ByteBufferOutputStream so that it can directly write
      // int to underlying
      // ByteBuffer in one step.
-     if (out instanceof ByteBufferSupportOutputStream) {
-       ((ByteBufferSupportOutputStream) out).writeInt(value);
+     if (out instanceof ByteBufferWriter) {
+       ((ByteBufferWriter) out).writeInt(value);
      } else {
        StreamUtils.writeInt(out, value);
      }
@@ -182,8 +182,8 @@ public final class ByteBufferUtils {
    */
   public static void copyBufferToStream(OutputStream out, ByteBuffer in,
       int offset, int length) throws IOException {
-    if (out instanceof ByteBufferSupportOutputStream) {
-      ((ByteBufferSupportOutputStream) out).write(in, offset, length);
+    if (out instanceof ByteBufferWriter) {
+      ((ByteBufferWriter) out).write(in, offset, length);
     } else if (in.hasArray()) {
       out.write(in.array(), in.arrayOffset() + offset, length);
     } else {
@@ -365,16 +365,22 @@ public final class ByteBufferUtils {
 
   /**
    * Copy one buffer's whole data to another. Write starts at the current position of 'out' buffer.
-   * Note : This will advance the position marker of {@code out} but not change the position maker
-   * for {@code in}. The position and limit of the {@code in} buffer to be set properly by caller.
+   * Note : This will advance the position marker of {@code out} and also change the position maker
+   * for {@code in}.
    * @param in source buffer
    * @param out destination buffer
    */
   public static void copyFromBufferToBuffer(ByteBuffer in, ByteBuffer out) {
-    if (UNSAFE_AVAIL) {
+    if (in.hasArray() && out.hasArray()) {
+      int length = in.remaining();
+      System.arraycopy(in.array(), in.arrayOffset(), out.array(), out.arrayOffset(), length);
+      out.position(out.position() + length);
+      in.position(in.limit());
+    } else if (UNSAFE_AVAIL) {
       int length = in.remaining();
       UnsafeAccess.copy(in, in.position(), out, out.position(), length);
       out.position(out.position() + length);
+      in.position(in.limit());
     } else {
       out.put(in);
     }
@@ -870,6 +876,14 @@ public final class ByteBufferUtils {
     }
   }
 
+  public static int putInt(ByteBuffer buffer, int index, int val) {
+    if (UNSAFE_UNALIGNED) {
+      return UnsafeAccess.putInt(buffer, index, val);
+    }
+    buffer.putInt(index, val);
+    return index + Bytes.SIZEOF_INT;
+  }
+
   /**
    * Reads a double value at the given buffer's offset.
    * @param buffer
@@ -913,6 +927,21 @@ public final class ByteBufferUtils {
     }
   }
 
+  public static int putShort(ByteBuffer buffer, int index, short val) {
+    if (UNSAFE_UNALIGNED) {
+      return UnsafeAccess.putShort(buffer, index, val);
+    }
+    buffer.putShort(index, val);
+    return index + Bytes.SIZEOF_SHORT;
+  }
+
+  public static int putAsShort(ByteBuffer buf, int index, int val) {
+    buf.put(index + 1, (byte) val);
+    val >>= 8;
+    buf.put(index, (byte) val);
+    return index + Bytes.SIZEOF_SHORT;
+  }
+
   /**
    * Put a long value out to the given ByteBuffer's current position in big-endian format.
    * This also advances the position in buffer by long size.
@@ -927,6 +956,15 @@ public final class ByteBufferUtils {
       buffer.putLong(val);
     }
   }
+
+  public static int putLong(ByteBuffer buffer, int index, long val) {
+    if (UNSAFE_UNALIGNED) {
+      return UnsafeAccess.putLong(buffer, index, val);
+    }
+    buffer.putLong(index, val);
+    return index + Bytes.SIZEOF_LONG;
+  }
+
   /**
    * Copies the bytes from given array's offset to length part into the given buffer. Puts the bytes
    * to buffer's current position. This also advances the position in the 'out' buffer by 'length'

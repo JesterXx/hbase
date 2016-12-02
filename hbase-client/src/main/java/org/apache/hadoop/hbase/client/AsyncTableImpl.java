@@ -17,249 +17,178 @@
  */
 package org.apache.hadoop.hbase.client;
 
-import static org.apache.hadoop.hbase.client.ConnectionUtils.checkHasFamilies;
-
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
-import org.apache.hadoop.hbase.client.AsyncRpcRetryingCallerFactory.SingleRequestCallerBuilder;
-import org.apache.hadoop.hbase.filter.BinaryComparator;
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp;
-import org.apache.hadoop.hbase.ipc.HBaseRpcController;
-import org.apache.hadoop.hbase.shaded.com.google.protobuf.RpcCallback;
-import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
-import org.apache.hadoop.hbase.shaded.protobuf.RequestConverter;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.ClientService;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.GetRequest;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.GetResponse;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.MutateRequest;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.MutateResponse;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.CompareType;
+import org.apache.hadoop.hbase.util.ReflectionUtils;
 
 /**
- * The implementation of AsyncTable.
+ * The implementation of AsyncTable. Based on {@link RawAsyncTable}.
  */
 @InterfaceAudience.Private
 class AsyncTableImpl implements AsyncTable {
 
-  private final AsyncConnectionImpl conn;
+  private final RawAsyncTable rawTable;
 
-  private final TableName tableName;
+  private final ExecutorService pool;
 
-  private long readRpcTimeoutNs;
+  private final long defaultScannerMaxResultSize;
 
-  private long writeRpcTimeoutNs;
-
-  private long operationTimeoutNs;
-
-  public AsyncTableImpl(AsyncConnectionImpl conn, TableName tableName) {
-    this.conn = conn;
-    this.tableName = tableName;
-    this.readRpcTimeoutNs = conn.connConf.getReadRpcTimeoutNs();
-    this.writeRpcTimeoutNs = conn.connConf.getWriteRpcTimeoutNs();
-    this.operationTimeoutNs = tableName.isSystemTable() ? conn.connConf.getMetaOperationTimeoutNs()
-        : conn.connConf.getOperationTimeoutNs();
+  public AsyncTableImpl(AsyncConnectionImpl conn, TableName tableName, ExecutorService pool) {
+    this.rawTable = conn.getRawTable(tableName);
+    this.pool = pool;
+    this.defaultScannerMaxResultSize = conn.connConf.getScannerMaxResultSize();
   }
 
   @Override
   public TableName getName() {
-    return tableName;
+    return rawTable.getName();
   }
 
   @Override
   public Configuration getConfiguration() {
-    return conn.getConfiguration();
+    return rawTable.getConfiguration();
   }
 
-  @FunctionalInterface
-  private interface Converter<D, I, S> {
-    D convert(I info, S src) throws IOException;
+  @Override
+  public void setReadRpcTimeout(long timeout, TimeUnit unit) {
+    rawTable.setReadRpcTimeout(timeout, unit);
   }
 
-  @FunctionalInterface
-  private interface RpcCall<RESP, REQ> {
-    void call(ClientService.Interface stub, HBaseRpcController controller, REQ req,
-        RpcCallback<RESP> done);
+  @Override
+  public long getReadRpcTimeout(TimeUnit unit) {
+    return rawTable.getReadRpcTimeout(unit);
   }
 
-  private static <REQ, PREQ, PRESP, RESP> CompletableFuture<RESP> call(
-      HBaseRpcController controller, HRegionLocation loc, ClientService.Interface stub, REQ req,
-      Converter<PREQ, byte[], REQ> reqConvert, RpcCall<PRESP, PREQ> rpcCall,
-      Converter<RESP, HBaseRpcController, PRESP> respConverter) {
-    CompletableFuture<RESP> future = new CompletableFuture<>();
-    try {
-      rpcCall.call(stub, controller, reqConvert.convert(loc.getRegionInfo().getRegionName(), req),
-        new RpcCallback<PRESP>() {
-
-          @Override
-          public void run(PRESP resp) {
-            if (controller.failed()) {
-              future.completeExceptionally(controller.getFailed());
-            } else {
-              try {
-                future.complete(respConverter.convert(controller, resp));
-              } catch (IOException e) {
-                future.completeExceptionally(e);
-              }
-            }
-          }
-        });
-    } catch (IOException e) {
-      future.completeExceptionally(e);
-    }
-    return future;
+  @Override
+  public void setWriteRpcTimeout(long timeout, TimeUnit unit) {
+    rawTable.setWriteRpcTimeout(timeout, unit);
   }
 
-  private static <REQ, RESP> CompletableFuture<RESP> mutate(HBaseRpcController controller,
-      HRegionLocation loc, ClientService.Interface stub, REQ req,
-      Converter<MutateRequest, byte[], REQ> reqConvert,
-      Converter<RESP, HBaseRpcController, MutateResponse> respConverter) {
-    return call(controller, loc, stub, req, reqConvert, (s, c, r, done) -> s.mutate(c, r, done),
-      respConverter);
+  @Override
+  public long getWriteRpcTimeout(TimeUnit unit) {
+    return rawTable.getWriteRpcTimeout(unit);
   }
 
-  private static <REQ> CompletableFuture<Void> voidMutate(HBaseRpcController controller,
-      HRegionLocation loc, ClientService.Interface stub, REQ req,
-      Converter<MutateRequest, byte[], REQ> reqConvert) {
-    return mutate(controller, loc, stub, req, reqConvert, (c, resp) -> {
-      return null;
-    });
+  @Override
+  public void setOperationTimeout(long timeout, TimeUnit unit) {
+    rawTable.setOperationTimeout(timeout, unit);
   }
 
-  private static Result toResult(HBaseRpcController controller, MutateResponse resp)
-      throws IOException {
-    if (!resp.hasResult()) {
-      return null;
-    }
-    return ProtobufUtil.toResult(resp.getResult(), controller.cellScanner());
+  @Override
+  public long getOperationTimeout(TimeUnit unit) {
+    return rawTable.getOperationTimeout(unit);
   }
 
-  @FunctionalInterface
-  private interface NoncedConverter<D, I, S> {
-    D convert(I info, S src, long nonceGroup, long nonce) throws IOException;
+  @Override
+  public void setScanTimeout(long timeout, TimeUnit unit) {
+    rawTable.setScanTimeout(timeout, unit);
   }
 
-  private <REQ, RESP> CompletableFuture<RESP> noncedMutate(HBaseRpcController controller,
-      HRegionLocation loc, ClientService.Interface stub, REQ req,
-      NoncedConverter<MutateRequest, byte[], REQ> reqConvert,
-      Converter<RESP, HBaseRpcController, MutateResponse> respConverter) {
-    long nonceGroup = conn.getNonceGenerator().getNonceGroup();
-    long nonce = conn.getNonceGenerator().newNonce();
-    return mutate(controller, loc, stub, req,
-      (info, src) -> reqConvert.convert(info, src, nonceGroup, nonce), respConverter);
+  @Override
+  public long getScanTimeout(TimeUnit unit) {
+    return rawTable.getScanTimeout(unit);
   }
 
-  private <T> SingleRequestCallerBuilder<T> newCaller(byte[] row, long rpcTimeoutNs) {
-    return conn.callerFactory.<T> single().table(tableName).row(row)
-        .rpcTimeout(rpcTimeoutNs, TimeUnit.NANOSECONDS)
-        .operationTimeout(operationTimeoutNs, TimeUnit.NANOSECONDS);
-  }
-
-  private <T> SingleRequestCallerBuilder<T> newCaller(Row row, long rpcTimeoutNs) {
-    return newCaller(row.getRow(), rpcTimeoutNs);
+  private <T> CompletableFuture<T> wrap(CompletableFuture<T> future) {
+    CompletableFuture<T> asyncFuture = new CompletableFuture<>();
+    future.whenCompleteAsync((r, e) -> {
+      if (e != null) {
+        asyncFuture.completeExceptionally(e);
+      } else {
+        asyncFuture.complete(r);
+      }
+    }, pool);
+    return asyncFuture;
   }
 
   @Override
   public CompletableFuture<Result> get(Get get) {
-    return this.<Result> newCaller(get, readRpcTimeoutNs)
-        .action((controller, loc, stub) -> AsyncTableImpl
-            .<Get, GetRequest, GetResponse, Result> call(controller, loc, stub, get,
-              RequestConverter::buildGetRequest, (s, c, req, done) -> s.get(c, req, done),
-              (c, resp) -> ProtobufUtil.toResult(resp.getResult(), c.cellScanner())))
-        .call();
+    return wrap(rawTable.get(get));
   }
 
   @Override
   public CompletableFuture<Void> put(Put put) {
-    return this
-        .<Void> newCaller(put, writeRpcTimeoutNs).action((controller, loc, stub) -> AsyncTableImpl
-            .<Put> voidMutate(controller, loc, stub, put, RequestConverter::buildMutateRequest))
-        .call();
+    return wrap(rawTable.put(put));
   }
 
   @Override
   public CompletableFuture<Void> delete(Delete delete) {
-    return this.<Void> newCaller(delete, writeRpcTimeoutNs)
-        .action((controller, loc, stub) -> AsyncTableImpl.<Delete> voidMutate(controller, loc, stub,
-          delete, RequestConverter::buildMutateRequest))
-        .call();
+    return wrap(rawTable.delete(delete));
   }
 
   @Override
   public CompletableFuture<Result> append(Append append) {
-    checkHasFamilies(append);
-    return this.<Result> newCaller(append, writeRpcTimeoutNs)
-        .action((controller, loc, stub) -> this.<Append, Result> noncedMutate(controller, loc, stub,
-          append, RequestConverter::buildMutateRequest, AsyncTableImpl::toResult))
-        .call();
+    return wrap(rawTable.append(append));
   }
 
   @Override
   public CompletableFuture<Result> increment(Increment increment) {
-    checkHasFamilies(increment);
-    return this.<Result> newCaller(increment, writeRpcTimeoutNs)
-        .action((controller, loc, stub) -> this.<Increment, Result> noncedMutate(controller, loc,
-          stub, increment, RequestConverter::buildMutateRequest, AsyncTableImpl::toResult))
-        .call();
+    return wrap(rawTable.increment(increment));
   }
 
   @Override
   public CompletableFuture<Boolean> checkAndPut(byte[] row, byte[] family, byte[] qualifier,
       CompareOp compareOp, byte[] value, Put put) {
-    return this.<Boolean> newCaller(row, writeRpcTimeoutNs)
-        .action((controller, loc, stub) -> AsyncTableImpl.<Put, Boolean> mutate(controller, loc,
-          stub, put,
-          (rn, p) -> RequestConverter.buildMutateRequest(rn, row, family, qualifier,
-            new BinaryComparator(value), CompareType.valueOf(compareOp.name()), p),
-          (c, r) -> r.getProcessed()))
-        .call();
+    return wrap(rawTable.checkAndPut(row, family, qualifier, compareOp, value, put));
   }
 
   @Override
   public CompletableFuture<Boolean> checkAndDelete(byte[] row, byte[] family, byte[] qualifier,
       CompareOp compareOp, byte[] value, Delete delete) {
-    return this.<Boolean> newCaller(row, writeRpcTimeoutNs)
-        .action((controller, loc, stub) -> AsyncTableImpl.<Delete, Boolean> mutate(controller, loc,
-          stub, delete,
-          (rn, d) -> RequestConverter.buildMutateRequest(rn, row, family, qualifier,
-            new BinaryComparator(value), CompareType.valueOf(compareOp.name()), d),
-          (c, r) -> r.getProcessed()))
-        .call();
+    return wrap(rawTable.checkAndDelete(row, family, qualifier, compareOp, value, delete));
   }
 
   @Override
-  public void setReadRpcTimeout(long timeout, TimeUnit unit) {
-    this.readRpcTimeoutNs = unit.toNanos(timeout);
+  public CompletableFuture<Void> mutateRow(RowMutations mutation) {
+    return wrap(rawTable.mutateRow(mutation));
   }
 
   @Override
-  public long getReadRpcTimeout(TimeUnit unit) {
-    return unit.convert(readRpcTimeoutNs, TimeUnit.NANOSECONDS);
+  public CompletableFuture<Boolean> checkAndMutate(byte[] row, byte[] family, byte[] qualifier,
+      CompareOp compareOp, byte[] value, RowMutations mutation) {
+    return wrap(rawTable.checkAndMutate(row, family, qualifier, compareOp, value, mutation));
   }
 
   @Override
-  public void setWriteRpcTimeout(long timeout, TimeUnit unit) {
-    this.writeRpcTimeoutNs = unit.toNanos(timeout);
+  public CompletableFuture<List<Result>> smallScan(Scan scan, int limit) {
+    return wrap(rawTable.smallScan(scan, limit));
+  }
+
+  private long resultSize2CacheSize(long maxResultSize) {
+    // * 2 if possible
+    return maxResultSize > Long.MAX_VALUE / 2 ? maxResultSize : maxResultSize * 2;
   }
 
   @Override
-  public long getWriteRpcTimeout(TimeUnit unit) {
-    return unit.convert(writeRpcTimeoutNs, TimeUnit.NANOSECONDS);
+  public ResultScanner getScanner(Scan scan) {
+    return new AsyncTableResultScanner(rawTable, ReflectionUtils.newInstance(scan.getClass(), scan),
+        resultSize2CacheSize(
+          scan.getMaxResultSize() > 0 ? scan.getMaxResultSize() : defaultScannerMaxResultSize));
+  }
+
+  private void scan0(Scan scan, ScanResultConsumer consumer) {
+    try (ResultScanner scanner = getScanner(scan)) {
+      for (Result result; (result = scanner.next()) != null;) {
+        if (!consumer.onNext(result)) {
+          break;
+        }
+      }
+      consumer.onComplete();
+    } catch (IOException e) {
+      consumer.onError(e);
+    }
   }
 
   @Override
-  public void setOperationTimeout(long timeout, TimeUnit unit) {
-    this.operationTimeoutNs = unit.toNanos(timeout);
+  public void scan(Scan scan, ScanResultConsumer consumer) {
+    pool.execute(() -> scan0(scan, consumer));
   }
-
-  @Override
-  public long getOperationTimeout(TimeUnit unit) {
-    return unit.convert(operationTimeoutNs, TimeUnit.NANOSECONDS);
-  }
-
 }

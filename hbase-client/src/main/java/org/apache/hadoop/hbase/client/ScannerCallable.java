@@ -359,7 +359,10 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
         throw ProtobufUtil.handleRemoteException(e);
       }
     } catch (IOException e) {
-      LOG.warn("Ignore, probably already closed", e);
+      TableName table = getTableName();
+      String tableDetails = (table == null) ? "" : (" on table: " + table.getNameAsString());
+      LOG.warn("Ignore, probably already closed. Current scan: " + getScan().toString()
+          + tableDetails, e);
     }
     this.scannerId = -1L;
   }
@@ -374,6 +377,9 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
       if (logScannerActivity) {
         LOG.info("Open scanner=" + id + " for scan=" + scan.toString()
           + " on region " + getLocation().toString());
+      }
+      if (response.hasMvccReadPoint()) {
+        this.scan.setMvccReadPoint(response.getMvccReadPoint());
       }
       return id;
     } catch (Exception e) {

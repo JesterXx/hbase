@@ -18,6 +18,10 @@
  */
 package org.apache.hadoop.hbase.master;
 
+import static org.apache.hadoop.hbase.util.CollectionUtils.computeIfAbsent;
+
+import com.google.common.annotations.VisibleForTesting;
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -56,6 +60,11 @@ import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.master.procedure.ServerCrashProcedure;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.regionserver.RegionOpeningState;
+import org.apache.hadoop.hbase.security.User;
+import org.apache.hadoop.hbase.shaded.com.google.protobuf.ServiceException;
+import org.apache.hadoop.hbase.shaded.com.google.protobuf.UnsafeByteOperations;
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.shaded.protobuf.RequestConverter;
 import org.apache.hadoop.hbase.shaded.protobuf.ResponseConverter;
@@ -67,9 +76,6 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.ClusterStatusProtos.Reg
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClusterStatusProtos.StoreSequenceId;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.RegionServerStartupRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ZooKeeperProtos.SplitLogTask.RecoveryMode;
-import org.apache.hadoop.hbase.regionserver.HRegionServer;
-import org.apache.hadoop.hbase.regionserver.RegionOpeningState;
-import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.RetryCounter;
@@ -77,12 +83,6 @@ import org.apache.hadoop.hbase.util.RetryCounterFactory;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.zookeeper.KeeperException;
-
-import com.google.common.annotations.VisibleForTesting;
-
-import org.apache.hadoop.hbase.shaded.com.google.protobuf.ByteString;
-import org.apache.hadoop.hbase.shaded.com.google.protobuf.ServiceException;
-import org.apache.hadoop.hbase.shaded.com.google.protobuf.UnsafeByteOperations;
 
 /**
  * The ServerManager class manages info about region servers.
@@ -274,18 +274,6 @@ public class ServerManager {
     return sn;
   }
 
-  private ConcurrentNavigableMap<byte[], Long> getOrCreateStoreFlushedSequenceId(
-    byte[] regionName) {
-    ConcurrentNavigableMap<byte[], Long> storeFlushedSequenceId =
-        storeFlushedSequenceIdsByRegion.get(regionName);
-    if (storeFlushedSequenceId != null) {
-      return storeFlushedSequenceId;
-    }
-    storeFlushedSequenceId = new ConcurrentSkipListMap<byte[], Long>(Bytes.BYTES_COMPARATOR);
-    ConcurrentNavigableMap<byte[], Long> alreadyPut =
-        storeFlushedSequenceIdsByRegion.putIfAbsent(regionName, storeFlushedSequenceId);
-    return alreadyPut == null ? storeFlushedSequenceId : alreadyPut;
-  }
   /**
    * Updates last flushed sequence Ids for the regions on server sn
    * @param sn
@@ -310,7 +298,8 @@ public class ServerManager {
             + existingValue + ") for region " + Bytes.toString(entry.getKey()) + " Ignoring.");
       }
       ConcurrentNavigableMap<byte[], Long> storeFlushedSequenceId =
-          getOrCreateStoreFlushedSequenceId(encodedRegionName);
+          computeIfAbsent(storeFlushedSequenceIdsByRegion, encodedRegionName,
+            () -> new ConcurrentSkipListMap<>(Bytes.BYTES_COMPARATOR));
       for (StoreSequenceId storeSeqId : entry.getValue().getStoreCompleteSequenceId()) {
         byte[] family = storeSeqId.getFamilyName().toByteArray();
         existingValue = storeFlushedSequenceId.get(family);
@@ -826,6 +815,31 @@ public class ServerManager {
   public boolean sendRegionClose(ServerName server,
       HRegionInfo region) throws IOException {
     return sendRegionClose(server, region, null);
+  }
+
+  /**
+   * Sends an CLOSE RPC to the specified server to close the specified region for SPLIT.
+   * <p>
+   * A region server could reject the close request because it either does not
+   * have the specified region or the region is being split.
+   * @param server server to close a region
+   * @param regionToClose the info of the region to close
+   * @throws IOException
+   */
+  public boolean sendRegionCloseForSplit(
+      final ServerName server,
+      final HRegionInfo regionToClose) throws IOException {
+    if (server == null) {
+      throw new NullPointerException("Passed server is null");
+    }
+    AdminService.BlockingInterface admin = getRsAdmin(server);
+    if (admin == null) {
+      throw new IOException("Attempting to send CLOSE For Split RPC to server " +
+        server.toString() + " for region " + regionToClose.getRegionNameAsString() +
+        " failed because no RPC connection found to this server");
+    }
+    HBaseRpcController controller = newRpcController();
+    return ProtobufUtil.closeRegionForSplit(controller, admin, server, regionToClose);
   }
 
   /**

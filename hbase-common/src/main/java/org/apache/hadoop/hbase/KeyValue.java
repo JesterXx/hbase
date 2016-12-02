@@ -85,6 +85,11 @@ public class KeyValue implements ExtendedCell {
 
   private static final Log LOG = LogFactory.getLog(KeyValue.class);
 
+  public static final long FIXED_OVERHEAD = ClassSize.OBJECT + // the KeyValue object itself
+      ClassSize.REFERENCE + // pointer to "bytes"
+      2 * Bytes.SIZEOF_INT + // offset, length
+      Bytes.SIZEOF_LONG;// memstoreTS
+
   /**
    * Colon character in UTF-8
    */
@@ -152,8 +157,6 @@ public class KeyValue implements ExtendedCell {
   public static final int TAGS_LENGTH_SIZE = Bytes.SIZEOF_SHORT;
 
   public static final int KEYVALUE_WITH_TAGS_INFRASTRUCTURE_SIZE = ROW_OFFSET + TAGS_LENGTH_SIZE;
-
-  private static final int MAX_TAGS_LENGTH = (2 * Short.MAX_VALUE) + 1;
 
   /**
    * Computes the number of bytes that a <code>KeyValue</code> instance with the provided
@@ -784,7 +787,7 @@ public class KeyValue implements ExtendedCell {
     if (qlength > Integer.MAX_VALUE - rlength - flength) {
       throw new IllegalArgumentException("Qualifier > " + Integer.MAX_VALUE);
     }
-    checkForTagsLength(tagsLength);
+    TagUtil.checkForTagsLength(tagsLength);
     // Key length
     long longkeylength = getKeyDataStructureSize(rlength, flength, qlength);
     if (longkeylength > Integer.MAX_VALUE) {
@@ -830,7 +833,7 @@ public class KeyValue implements ExtendedCell {
    *
    * @throws IllegalArgumentException an illegal value was passed
    */
-  private static void checkParameters(final byte [] row, final int rlength,
+  static void checkParameters(final byte [] row, final int rlength,
       final byte [] family, int flength, int qlength, int vlength)
           throws IllegalArgumentException {
     if (rlength > Short.MAX_VALUE) {
@@ -902,7 +905,7 @@ public class KeyValue implements ExtendedCell {
         tagsLength += t.getValueLength() + Tag.INFRASTRUCTURE_SIZE;
       }
     }
-    checkForTagsLength(tagsLength);
+    TagUtil.checkForTagsLength(tagsLength);
     int keyLength = (int) getKeyDataStructureSize(rlength, flength, qlength);
     int keyValueLength = (int) getKeyValueDataStructureSize(rlength, flength, qlength, vlength,
         tagsLength);
@@ -943,12 +946,6 @@ public class KeyValue implements ExtendedCell {
     return keyValueLength;
   }
 
-  private static void checkForTagsLength(int tagsLength) {
-    if (tagsLength > MAX_TAGS_LENGTH) {
-      throw new IllegalArgumentException("tagslength "+ tagsLength + " > " + MAX_TAGS_LENGTH);
-    }
-  }
-
   /**
    * Write KeyValue format into a byte array.
    * @param row row key
@@ -975,7 +972,7 @@ public class KeyValue implements ExtendedCell {
       int vlength, byte[] tags, int tagsOffset, int tagsLength) {
 
     checkParameters(row, rlength, family, flength, qlength, vlength);
-    checkForTagsLength(tagsLength);
+    TagUtil.checkForTagsLength(tagsLength);
     // Allocate right-sized byte array.
     int keyLength = (int) getKeyDataStructureSize(rlength, flength, qlength);
     byte[] bytes = new byte[(int) getKeyValueDataStructureSize(rlength, flength, qlength, vlength,
@@ -1025,7 +1022,7 @@ public class KeyValue implements ExtendedCell {
         tagsLength += t.getValueLength() + Tag.INFRASTRUCTURE_SIZE;
       }
     }
-    checkForTagsLength(tagsLength);
+    TagUtil.checkForTagsLength(tagsLength);
     // Allocate right-sized byte array.
     int keyLength = (int) getKeyDataStructureSize(rlength, flength, qlength);
     byte[] bytes = new byte[(int) getKeyValueDataStructureSize(rlength, flength, qlength, vlength,
@@ -2494,8 +2491,8 @@ public class KeyValue implements ExtendedCell {
   }
 
   @Override
-  public void write(byte[] buf, int offset) {
-    System.arraycopy(this.bytes, this.offset, buf, offset, this.length);
+  public void write(ByteBuffer buf, int offset) {
+    ByteBufferUtils.copyFromArrayToBuffer(buf, offset, this.bytes, this.offset, this.length);
   }
 
   /**
@@ -2603,12 +2600,7 @@ public class KeyValue implements ExtendedCell {
    */
   @Override
   public long heapSize() {
-    int sum = 0;
-    sum += ClassSize.OBJECT;// the KeyValue object itself
-    sum += ClassSize.REFERENCE;// pointer to "bytes"
-    sum += 2 * Bytes.SIZEOF_INT;// offset, length
-    sum += Bytes.SIZEOF_LONG;// memstoreTS
-
+    long sum = FIXED_OVERHEAD;
     /*
      * Deep object overhead for this KV consists of two parts. The first part is the KV object
      * itself, while the second part is the backing byte[]. We will only count the array overhead
@@ -2812,5 +2804,23 @@ public class KeyValue implements ExtendedCell {
       // of Cell to be returned back over the RPC
       throw new IllegalStateException("A reader should never return this type of a Cell");
     }
+
+    @Override
+    public long heapOverhead() {
+      return super.heapOverhead() + Bytes.SIZEOF_SHORT;
+    }
+  }
+
+  @Override
+  public long heapOverhead() {
+    return FIXED_OVERHEAD;
+  }
+
+  @Override
+  public Cell deepClone() {
+    byte[] copy = Bytes.copy(this.bytes, this.offset, this.length);
+    KeyValue kv = new KeyValue(copy, 0, copy.length);
+    kv.setSequenceId(this.getSequenceId());
+    return kv;
   }
 }
