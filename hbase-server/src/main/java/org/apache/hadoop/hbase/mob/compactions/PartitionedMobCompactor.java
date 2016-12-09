@@ -25,6 +25,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -43,10 +44,10 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.TagType;
+import org.apache.hadoop.hbase.TagUtil;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
@@ -92,7 +93,7 @@ public class PartitionedMobCompactor extends MobCompactor {
   private final Path tempPath;
   private final Path bulkloadPath;
   private final CacheConfig compactionCacheConfig;
-  private final Tag tableNameTag;
+  private final byte[] refCellTags;
   private Encryption.Context cryptoContext = Encryption.Context.NONE;
 
   public PartitionedMobCompactor(Configuration conf, FileSystem fs, TableName tableName,
@@ -113,7 +114,11 @@ public class PartitionedMobCompactor extends MobCompactor {
     Configuration copyOfConf = new Configuration(conf);
     copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
     compactionCacheConfig = new CacheConfig(copyOfConf);
-    tableNameTag = new ArrayBackedTag(TagType.MOB_TABLE_NAME_TAG_TYPE, tableName.getName());
+    List<Tag> tags = new ArrayList<>(2);
+    tags.add(MobConstants.MOB_REF_TAG);
+    Tag tableNameTag = new ArrayBackedTag(TagType.MOB_TABLE_NAME_TAG_TYPE, tableName.getName());
+    tags.add(tableNameTag);
+    this.refCellTags = TagUtil.fromList(tags);
     cryptoContext = EncryptionUtil.createEncryptionContext(copyOfConf, column);
   }
 
@@ -140,10 +145,12 @@ public class PartitionedMobCompactor extends MobCompactor {
    */
   protected PartitionedMobCompactionRequest select(List<FileStatus> candidates,
     boolean allFiles) throws IOException {
-    Collection<FileStatus> allDelFiles = new ArrayList<>();
-    Map<CompactionPartitionId, CompactionPartition> filesToCompact = new HashMap<>();
+    final Collection<FileStatus> allDelFiles = new ArrayList<>();
+    final Map<CompactionPartitionId, CompactionPartition> filesToCompact = new HashMap<>();
+    final CompactionPartitionId id = new CompactionPartitionId();
     int selectedFileCount = 0;
     int irrelevantFileCount = 0;
+
     for (FileStatus file : candidates) {
       if (!file.isFile()) {
         irrelevantFileCount++;
@@ -162,23 +169,44 @@ public class PartitionedMobCompactor extends MobCompactor {
       }
       if (StoreFileInfo.isDelFile(linkedFile.getPath())) {
         allDelFiles.add(file);
-      } else if (allFiles || linkedFile.getLen() < mergeableSize) {
+      } else if (allFiles || (linkedFile.getLen() < mergeableSize)) {
         // add all files if allFiles is true,
         // otherwise add the small files to the merge pool
-        MobFileName fileName = MobFileName.create(linkedFile.getPath().getName());
-        CompactionPartitionId id = new CompactionPartitionId(fileName.getStartKey(),
-          fileName.getDate());
+        String fileName = linkedFile.getPath().getName();
+        id.setStartKey(MobFileName.getStartKeyFromName(fileName));
+        id.setDate(MobFileName.getDateFromName(fileName));
         CompactionPartition compactionPartition = filesToCompact.get(id);
         if (compactionPartition == null) {
-          compactionPartition = new CompactionPartition(id);
+          CompactionPartitionId newId = new CompactionPartitionId(id.getStartKey(), id.getDate());
+          compactionPartition = new CompactionPartition(newId);
+
           compactionPartition.addFile(file);
-          filesToCompact.put(id, compactionPartition);
+          filesToCompact.put(newId, compactionPartition);
         } else {
           compactionPartition.addFile(file);
         }
         selectedFileCount++;
       }
     }
+
+    /*
+     * If it is not a major mob compaction with del files, and the file number in Partition is 1,
+     * remove the partition from filesToCompact list to avoid re-compacting files which has been
+     * compacted with del files.
+     */
+    if (!allFiles && (allDelFiles.size() > 0)) {
+      Iterator<Map.Entry<CompactionPartitionId, CompactionPartition>> it =
+          filesToCompact.entrySet().iterator();
+
+      while(it.hasNext()) {
+        Map.Entry<CompactionPartitionId, CompactionPartition> entry = it.next();
+        if (entry.getValue().getFileCount() == 1) {
+          it.remove();
+          --selectedFileCount;
+        }
+      }
+    }
+
     PartitionedMobCompactionRequest request = new PartitionedMobCompactionRequest(
       filesToCompact.values(), allDelFiles);
     if (candidates.size() == (allDelFiles.size() + selectedFileCount + irrelevantFileCount)) {
@@ -421,7 +449,7 @@ public class PartitionedMobCompactor extends MobCompactor {
             // write the mob cell to the mob file.
             writer.append(cell);
             // write the new reference cell to the store file.
-            KeyValue reference = MobUtils.createMobRefKeyValue(cell, fileName, tableNameTag);
+            Cell reference = MobUtils.createMobRefCell(cell, fileName, this.refCellTags);
             refFileWriter.append(reference);
             mobCells++;
           }

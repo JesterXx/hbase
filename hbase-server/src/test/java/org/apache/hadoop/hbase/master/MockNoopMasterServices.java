@@ -33,6 +33,7 @@ import org.apache.hadoop.hbase.TableDescriptors;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.executor.ExecutorService;
+import org.apache.hadoop.hbase.favored.FavoredNodesManager;
 import org.apache.hadoop.hbase.master.normalizer.RegionNormalizer;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
@@ -287,6 +288,15 @@ public class MockNoopMasterServices implements MasterServices, Server {
   }
 
   @Override
+  public long mergeRegions(
+      final HRegionInfo[] regionsToMerge,
+      final boolean forcible,
+      final long nonceGroup,
+      final long nonce) throws IOException {
+    return -1;
+  }
+
+  @Override
   public long splitRegion(
       final HRegionInfo regionInfo,
       final byte[] splitRow,
@@ -353,6 +363,11 @@ public class MockNoopMasterServices implements MasterServices, Server {
 
   @Override
   public LoadBalancer getLoadBalancer() {
+    return null;
+  }
+
+  @Override
+  public FavoredNodesManager getFavoredNodesManager() {
     return null;
   }
 

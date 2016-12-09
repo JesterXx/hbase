@@ -83,6 +83,8 @@ import org.apache.hadoop.hbase.coprocessor.CoprocessorHost;
 import org.apache.hadoop.hbase.exceptions.DeserializationException;
 import org.apache.hadoop.hbase.exceptions.MergeRegionException;
 import org.apache.hadoop.hbase.executor.ExecutorType;
+import org.apache.hadoop.hbase.favored.FavoredNodesManager;
+import org.apache.hadoop.hbase.favored.FavoredNodesPromoter;
 import org.apache.hadoop.hbase.ipc.CoprocessorRpcUtils;
 import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.ipc.ServerNotRunningYetException;
@@ -91,7 +93,6 @@ import org.apache.hadoop.hbase.master.balancer.BalancerChore;
 import org.apache.hadoop.hbase.master.balancer.BaseLoadBalancer;
 import org.apache.hadoop.hbase.master.balancer.ClusterStatusChore;
 import org.apache.hadoop.hbase.master.balancer.LoadBalancerFactory;
-import org.apache.hadoop.hbase.master.balancer.SimpleLoadBalancer;
 import org.apache.hadoop.hbase.master.cleaner.HFileCleaner;
 import org.apache.hadoop.hbase.master.cleaner.LogCleaner;
 import org.apache.hadoop.hbase.master.cleaner.ReplicationMetaCleaner;
@@ -109,6 +110,7 @@ import org.apache.hadoop.hbase.master.procedure.DispatchMergingRegionsProcedure;
 import org.apache.hadoop.hbase.master.procedure.EnableTableProcedure;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureConstants;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
+import org.apache.hadoop.hbase.master.procedure.MergeTableRegionsProcedure;
 import org.apache.hadoop.hbase.master.procedure.ModifyColumnFamilyProcedure;
 import org.apache.hadoop.hbase.master.procedure.ModifyTableProcedure;
 import org.apache.hadoop.hbase.master.procedure.ProcedurePrepareLatch;
@@ -363,6 +365,9 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   /** flag used in test cases in order to simulate RS failures during master initialization */
   private volatile boolean initializationBeforeMetaAssignment = false;
+
+  /* Handle favored nodes information */
+  private FavoredNodesManager favoredNodesManager;
 
   /** jetty server for master to redirect requests to regionserver infoServer */
   private org.mortbay.jetty.Server masterJettyServer;
@@ -748,6 +753,9 @@ public class HMaster extends HRegionServer implements MasterServices {
 
     this.initializationBeforeMetaAssignment = true;
 
+    if (this.balancer instanceof FavoredNodesPromoter) {
+      favoredNodesManager = new FavoredNodesManager(this);
+    }
     // Wait for regionserver to finish initialization.
     if (BaseLoadBalancer.tablesOnMaster(conf)) {
       waitForServerOnline();
@@ -769,6 +777,14 @@ public class HMaster extends HRegionServer implements MasterServices {
     // check if master is shutting down because above assignMeta could return even hbase:meta isn't
     // assigned when master is shutting down
     if (isStopped()) return;
+
+    //Initialize after meta as it scans meta
+    if (favoredNodesManager != null) {
+      SnapshotOfRegionAssignmentFromMeta snapshotOfRegionAssignment =
+          new SnapshotOfRegionAssignmentFromMeta(getConnection());
+      snapshotOfRegionAssignment.initialize();
+      favoredNodesManager.initialize(snapshotOfRegionAssignment);
+    }
 
     // migrating existent table state from zk, so splitters
     // and recovery process treat states properly.
@@ -1420,6 +1436,50 @@ public class HMaster extends HRegionServer implements MasterServices {
   }
 
   @Override
+  public long mergeRegions(
+      final HRegionInfo[] regionsToMerge,
+      final boolean forcible,
+      final long nonceGroup,
+      final long nonce) throws IOException {
+    checkInitialized();
+
+    assert(regionsToMerge.length == 2);
+
+    TableName tableName = regionsToMerge[0].getTable();
+    if (tableName == null || regionsToMerge[1].getTable() == null) {
+      throw new UnknownRegionException ("Can't merge regions without table associated");
+    }
+
+    if (!tableName.equals(regionsToMerge[1].getTable())) {
+      throw new IOException (
+        "Cannot merge regions from two different tables " + regionsToMerge[0].getTable()
+        + " and " + regionsToMerge[1].getTable());
+    }
+
+    if (regionsToMerge[0].compareTo(regionsToMerge[1]) == 0) {
+      throw new MergeRegionException(
+        "Cannot merge a region to itself " + regionsToMerge[0] + ", " + regionsToMerge[1]);
+    }
+
+    if (cpHost != null) {
+      cpHost.preMergeRegions(regionsToMerge);
+    }
+
+    LOG.info(getClientIdAuditPrefix() + " Merge regions "
+        + regionsToMerge[0].getEncodedName() + " and " + regionsToMerge[1].getEncodedName());
+
+    long procId = this.procedureExecutor.submitProcedure(
+      new MergeTableRegionsProcedure(procedureExecutor.getEnvironment(), regionsToMerge, forcible),
+      nonceGroup,
+      nonce);
+
+    if (cpHost != null) {
+      cpHost.postMergeRegions(regionsToMerge);
+    }
+    return procId;
+  }
+
+  @Override
   public long splitRegion(
       final HRegionInfo regionInfo,
       final byte[] splitRow,
@@ -1649,7 +1709,7 @@ public class HMaster extends HRegionServer implements MasterServices {
       warnOrThrowExceptionForFailure(false, CONF_KEY, e.getMessage(), e);
     }
     // check that we have at least 1 CF
-    if (htd.getColumnFamilies().length == 0) {
+    if (htd.getColumnFamilyCount() == 0) {
       String message = "Table should have at least one column family.";
       warnOrThrowExceptionForFailure(logWarn, CONF_KEY, message, null);
     }
@@ -2949,5 +3009,10 @@ public class HMaster extends HRegionServer implements MasterServices {
   @Override
   public LoadBalancer getLoadBalancer() {
     return balancer;
+  }
+
+  @Override
+  public FavoredNodesManager getFavoredNodesManager() {
+    return favoredNodesManager;
   }
 }

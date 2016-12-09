@@ -32,6 +32,7 @@ import org.apache.hadoop.hbase.TableNotDisabledException;
 import org.apache.hadoop.hbase.TableNotFoundException;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.executor.ExecutorService;
+import org.apache.hadoop.hbase.favored.FavoredNodesManager;
 import org.apache.hadoop.hbase.master.normalizer.RegionNormalizer;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.master.snapshot.SnapshotManager;
@@ -265,6 +266,21 @@ public interface MasterServices extends Server {
       throws IOException;
 
   /**
+   * Merge regions in a table.
+   * @param regionsToMerge daughter regions to merge
+   * @param forcible whether to force to merge even two regions are not adjacent
+   * @param nonceGroup used to detect duplicate
+   * @param nonce used to detect duplicate
+   * @return  procedure Id
+   * @throws IOException
+   */
+  long mergeRegions(
+      final HRegionInfo[] regionsToMerge,
+      final boolean forcible,
+      final long nonceGroup,
+      final long nonce) throws IOException;
+
+  /**
    * Split a region.
    * @param regionInfo region to split
    * @param splitRow split point
@@ -273,7 +289,7 @@ public interface MasterServices extends Server {
    * @return  procedure Id
    * @throws IOException
    */
-  public long splitRegion(
+  long splitRegion(
       final HRegionInfo regionInfo,
       final byte [] splitRow,
       final long nonceGroup,
@@ -394,4 +410,9 @@ public interface MasterServices extends Server {
    * @return True if this master is stopping.
    */
   boolean isStopping();
+
+  /**
+   * @return Favored Nodes Manager
+   */
+  public FavoredNodesManager getFavoredNodesManager();
 }

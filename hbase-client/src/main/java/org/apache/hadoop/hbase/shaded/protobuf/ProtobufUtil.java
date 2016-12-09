@@ -40,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.ByteBufferCell;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.CellUtil;
@@ -105,8 +106,8 @@ import org.apache.hadoop.hbase.shaded.com.google.protobuf.ServiceException;
 import org.apache.hadoop.hbase.shaded.com.google.protobuf.TextFormat;
 import org.apache.hadoop.hbase.shaded.com.google.protobuf.UnsafeByteOperations;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.AdminService;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionForSplitRequest;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionForSplitResponse;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionForSplitOrMergeRequest;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionForSplitOrMergeResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.CloseRegionResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.GetOnlineRegionRequest;
@@ -496,13 +497,12 @@ public final class ProtobufUtil {
     if (proto.getCfTimeRangeCount() > 0) {
       for (HBaseProtos.ColumnFamilyTimeRange cftr : proto.getCfTimeRangeList()) {
         TimeRange timeRange = protoToTimeRange(cftr.getTimeRange());
-        get.setColumnFamilyTimeRange(cftr.getColumnFamily().toByteArray(),
-            timeRange.getMin(), timeRange.getMax());
+        get.setColumnFamilyTimeRange(cftr.getColumnFamily().toByteArray(), timeRange);
       }
     }
     if (proto.hasTimeRange()) {
       TimeRange timeRange = protoToTimeRange(proto.getTimeRange());
-      get.setTimeRange(timeRange.getMin(), timeRange.getMax());
+      get.setTimeRange(timeRange);
     }
     if (proto.hasFilter()) {
       FilterProtos.Filter filter = proto.getFilter();
@@ -919,7 +919,7 @@ public final class ProtobufUtil {
     }
     if (proto.hasTimeRange()) {
       TimeRange timeRange = protoToTimeRange(proto.getTimeRange());
-      get.setTimeRange(timeRange.getMin(), timeRange.getMax());
+      get.setTimeRange(timeRange);
     }
     for (NameBytesPair attribute : proto.getAttributeList()) {
       get.setAttribute(attribute.getName(), attribute.getValue().toByteArray());
@@ -1063,13 +1063,12 @@ public final class ProtobufUtil {
     if (proto.getCfTimeRangeCount() > 0) {
       for (HBaseProtos.ColumnFamilyTimeRange cftr : proto.getCfTimeRangeList()) {
         TimeRange timeRange = protoToTimeRange(cftr.getTimeRange());
-        scan.setColumnFamilyTimeRange(cftr.getColumnFamily().toByteArray(),
-            timeRange.getMin(), timeRange.getMax());
+        scan.setColumnFamilyTimeRange(cftr.getColumnFamily().toByteArray(), timeRange);
       }
     }
     if (proto.hasTimeRange()) {
       TimeRange timeRange = protoToTimeRange(proto.getTimeRange());
-      scan.setTimeRange(timeRange.getMin(), timeRange.getMax());
+      scan.setTimeRange(timeRange);
     }
     if (proto.hasFilter()) {
       FilterProtos.Filter filter = proto.getFilter();
@@ -1756,26 +1755,26 @@ public final class ProtobufUtil {
   }
 
   /**
-   * A helper to close a region for split
+   * A helper to close a region for split or merge
    * using admin protocol.
    *
    * @param controller RPC controller
    * @param admin Admin service
    * @param server the RS that hosts the target region
-   * @param parentRegionInfo the target region info
+   * @param regionInfo the target region info
    * @return true if the region is closed
    * @throws IOException
    */
-  public static boolean closeRegionForSplit(
+  public static boolean closeRegionForSplitOrMerge(
       final RpcController controller,
       final AdminService.BlockingInterface admin,
       final ServerName server,
-      final HRegionInfo parentRegionInfo) throws IOException {
-    CloseRegionForSplitRequest closeRegionForSplitRequest =
-        ProtobufUtil.buildCloseRegionForSplitRequest(server, parentRegionInfo);
+      final HRegionInfo... regionInfo) throws IOException {
+    CloseRegionForSplitOrMergeRequest closeRegionForRequest =
+        ProtobufUtil.buildCloseRegionForSplitOrMergeRequest(server, regionInfo);
     try {
-      CloseRegionForSplitResponse response =
-          admin.closeRegionForSplit(controller, closeRegionForSplitRequest);
+      CloseRegionForSplitOrMergeResponse response =
+          admin.closeRegionForSplitOrMerge(controller, closeRegionForRequest);
       return ResponseConverter.isClosed(response);
     } catch (ServiceException se) {
       throw getRemoteException(se);
@@ -2077,17 +2076,38 @@ public final class ProtobufUtil {
     // Doing this is going to kill us if we do it for all data passed.
     // St.Ack 20121205
     CellProtos.Cell.Builder kvbuilder = CellProtos.Cell.newBuilder();
-    kvbuilder.setRow(UnsafeByteOperations.unsafeWrap(kv.getRowArray(), kv.getRowOffset(),
-        kv.getRowLength()));
-    kvbuilder.setFamily(UnsafeByteOperations.unsafeWrap(kv.getFamilyArray(),
-        kv.getFamilyOffset(), kv.getFamilyLength()));
-    kvbuilder.setQualifier(UnsafeByteOperations.unsafeWrap(kv.getQualifierArray(),
+    if (kv instanceof ByteBufferCell) {
+      kvbuilder.setRow(wrap(((ByteBufferCell) kv).getRowByteBuffer(),
+        ((ByteBufferCell) kv).getRowPosition(), kv.getRowLength()));
+      kvbuilder.setFamily(wrap(((ByteBufferCell) kv).getFamilyByteBuffer(),
+        ((ByteBufferCell) kv).getFamilyPosition(), kv.getFamilyLength()));
+      kvbuilder.setQualifier(wrap(((ByteBufferCell) kv).getQualifierByteBuffer(),
+        ((ByteBufferCell) kv).getQualifierPosition(), kv.getQualifierLength()));
+      kvbuilder.setCellType(CellProtos.CellType.valueOf(kv.getTypeByte()));
+      kvbuilder.setTimestamp(kv.getTimestamp());
+      kvbuilder.setValue(wrap(((ByteBufferCell) kv).getValueByteBuffer(),
+        ((ByteBufferCell) kv).getValuePosition(), kv.getValueLength()));
+      // TODO : Once tags become first class then we may have to set tags to kvbuilder.
+    } else {
+      kvbuilder.setRow(
+        UnsafeByteOperations.unsafeWrap(kv.getRowArray(), kv.getRowOffset(), kv.getRowLength()));
+      kvbuilder.setFamily(UnsafeByteOperations.unsafeWrap(kv.getFamilyArray(), kv.getFamilyOffset(),
+        kv.getFamilyLength()));
+      kvbuilder.setQualifier(UnsafeByteOperations.unsafeWrap(kv.getQualifierArray(),
         kv.getQualifierOffset(), kv.getQualifierLength()));
-    kvbuilder.setCellType(CellProtos.CellType.valueOf(kv.getTypeByte()));
-    kvbuilder.setTimestamp(kv.getTimestamp());
-    kvbuilder.setValue(UnsafeByteOperations.unsafeWrap(kv.getValueArray(), kv.getValueOffset(),
+      kvbuilder.setCellType(CellProtos.CellType.valueOf(kv.getTypeByte()));
+      kvbuilder.setTimestamp(kv.getTimestamp());
+      kvbuilder.setValue(UnsafeByteOperations.unsafeWrap(kv.getValueArray(), kv.getValueOffset(),
         kv.getValueLength()));
+    }
     return kvbuilder.build();
+  }
+
+  private static ByteString wrap(ByteBuffer b, int offset, int length) {
+    ByteBuffer dup = b.duplicate();
+    dup.position(offset);
+    dup.limit(offset + length);
+    return UnsafeByteOperations.unsafeWrap(dup);
   }
 
   public static Cell toCell(final CellProtos.Cell cell) {
@@ -3130,19 +3150,22 @@ public final class ProtobufUtil {
   }
 
   /**
-   * Create a CloseRegionForSplitRequest for a given region
+   * Create a CloseRegionForSplitOrMergeRequest for given regions
    *
    * @param server the RS server that hosts the region
-   * @param parentRegionInfo the info of the region to close
+   * @param regionsToClose the info of the regions to close
    * @return a CloseRegionForSplitRequest
    */
-  public static CloseRegionForSplitRequest buildCloseRegionForSplitRequest(
+  public static CloseRegionForSplitOrMergeRequest buildCloseRegionForSplitOrMergeRequest(
       final ServerName server,
-      final HRegionInfo parentRegionInfo) {
-    CloseRegionForSplitRequest.Builder builder = CloseRegionForSplitRequest.newBuilder();
-    RegionSpecifier parentRegion = RequestConverter.buildRegionSpecifier(
-      RegionSpecifierType.REGION_NAME, parentRegionInfo.getRegionName());
-    builder.setRegion(parentRegion);
+      final HRegionInfo... regionsToClose) {
+    CloseRegionForSplitOrMergeRequest.Builder builder =
+        CloseRegionForSplitOrMergeRequest.newBuilder();
+    for(int i = 0; i < regionsToClose.length; i++) {
+        RegionSpecifier regionToClose = RequestConverter.buildRegionSpecifier(
+          RegionSpecifierType.REGION_NAME, regionsToClose[i].getRegionName());
+        builder.addRegion(regionToClose);
+    }
     return builder.build();
   }
 

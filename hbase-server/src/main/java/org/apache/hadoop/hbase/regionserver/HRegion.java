@@ -136,7 +136,6 @@ import org.apache.hadoop.hbase.ipc.CallerDisconnectedException;
 import org.apache.hadoop.hbase.ipc.CoprocessorRpcUtils;
 import org.apache.hadoop.hbase.ipc.RpcCallContext;
 import org.apache.hadoop.hbase.ipc.RpcServer;
-import org.apache.hadoop.hbase.mob.MobUtils;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.monitoring.TaskMonitor;
 import org.apache.hadoop.hbase.regionserver.MultiVersionConcurrencyControl.WriteEntry;
@@ -802,7 +801,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   private long initialize(final CancelableProgressable reporter) throws IOException {
 
     //Refuse to open the region if there is no column family in the table
-    if (htableDescriptor.getColumnFamilies().length == 0) {
+    if (htableDescriptor.getColumnFamilyCount() == 0) {
       throw new DoNotRetryIOException("Table " + htableDescriptor.getNameAsString() +
           " should have at least one column family.");
     }
@@ -3749,24 +3748,6 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     SnapshotManifest manifest = SnapshotManifest.create(conf, getFilesystem(),
             snapshotDir, desc, exnSnare);
     manifest.addRegion(this);
-
-    // The regionserver holding the first region of the table is responsible for taking the
-    // manifest of the mob dir.
-    if (!Bytes.equals(getRegionInfo().getStartKey(), HConstants.EMPTY_START_ROW))
-      return;
-
-    // if any cf's have is mob enabled, add the "mob region" to the manifest.
-    List<Store> stores = getStores();
-    for (Store store : stores) {
-      boolean hasMobStore = store.getFamily().isMobEnabled();
-      if (hasMobStore) {
-        // use the .mob as the start key and 0 as the regionid
-        HRegionInfo mobRegionInfo = MobUtils.getMobRegionInfo(this.getTableDesc().getTableName());
-        mobRegionInfo.setOffline(true);
-        manifest.addMobRegion(mobRegionInfo, this.getTableDesc().getColumnFamilies());
-        return;
-      }
-    }
   }
 
   private void updateSequenceId(final Iterable<List<Cell>> cellItr, final long sequenceId)
@@ -5709,7 +5690,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       } else {
         this.filter = null;
       }
-      this.comparator = region.getCellCompartor();
+      this.comparator = region.getCellComparator();
       /**
        * By default, calls to next/nextRaw must enforce the batch limit. Thus, construct a default
        * scanner context that can be used to enforce the batch limit in the event that a
@@ -8176,7 +8157,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   }
 
   @Override
-  public CellComparator getCellCompartor() {
+  public CellComparator getCellComparator() {
     return this.getRegionInfo().isMetaRegion() ? CellComparator.META_COMPARATOR
         : CellComparator.COMPARATOR;
   }

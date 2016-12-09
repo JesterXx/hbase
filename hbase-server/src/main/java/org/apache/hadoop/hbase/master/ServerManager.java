@@ -21,7 +21,6 @@ package org.apache.hadoop.hbase.master;
 import static org.apache.hadoop.hbase.util.CollectionUtils.computeIfAbsent;
 
 import com.google.common.annotations.VisibleForTesting;
-
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -37,7 +36,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-
+import java.util.function.Predicate;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -72,6 +71,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.AdminServic
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.OpenRegionRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.OpenRegionResponse;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.ServerInfo;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos.UpdateFavoredNodesRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClusterStatusProtos.RegionStoreSequenceIds;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClusterStatusProtos.StoreSequenceId;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos.RegionServerStartupRequest;
@@ -823,23 +823,22 @@ public class ServerManager {
    * A region server could reject the close request because it either does not
    * have the specified region or the region is being split.
    * @param server server to close a region
-   * @param regionToClose the info of the region to close
+   * @param regionToClose the info of the region(s) to close
    * @throws IOException
    */
-  public boolean sendRegionCloseForSplit(
+  public boolean sendRegionCloseForSplitOrMerge(
       final ServerName server,
-      final HRegionInfo regionToClose) throws IOException {
+      final HRegionInfo... regionToClose) throws IOException {
     if (server == null) {
       throw new NullPointerException("Passed server is null");
     }
     AdminService.BlockingInterface admin = getRsAdmin(server);
     if (admin == null) {
-      throw new IOException("Attempting to send CLOSE For Split RPC to server " +
-        server.toString() + " for region " + regionToClose.getRegionNameAsString() +
-        " failed because no RPC connection found to this server");
+      throw new IOException("Attempting to send CLOSE For Split or Merge RPC to server " +
+        server.toString() + " failed because no RPC connection found to this server.");
     }
     HBaseRpcController controller = newRpcController();
-    return ProtobufUtil.closeRegionForSplit(controller, admin, server, regionToClose);
+    return ProtobufUtil.closeRegionForSplitOrMerge(controller, admin, server, regionToClose);
   }
 
   /**
@@ -1075,6 +1074,27 @@ public class ServerManager {
   }
 
   /**
+   * @param keys The target server name
+   * @param idleServerPredicator Evaluates the server on the given load
+   * @return A copy of the internal list of online servers matched by the predicator
+   */
+  public List<ServerName> getOnlineServersListWithPredicator(List<ServerName> keys,
+    Predicate<ServerLoad> idleServerPredicator) {
+    List<ServerName> names = new ArrayList<>();
+    if (keys != null && idleServerPredicator != null) {
+      keys.forEach(name -> {
+        ServerLoad load = onlineServers.get(name);
+        if (load != null) {
+          if (idleServerPredicator.test(load)) {
+            names.add(name);
+          }
+        }
+      });
+    }
+    return names;
+  }
+
+  /**
    * @return A copy of the internal list of draining servers.
    */
   public List<ServerName> getDrainingServersList() {
@@ -1216,6 +1236,29 @@ public class ServerManager {
   public void removeRegions(final List<HRegionInfo> regions) {
     for (HRegionInfo hri: regions) {
       removeRegion(hri);
+    }
+  }
+
+  public void sendFavoredNodes(final ServerName server,
+      Map<HRegionInfo, List<ServerName>> favoredNodes) throws IOException {
+    AdminService.BlockingInterface admin = getRsAdmin(server);
+    if (admin == null) {
+      LOG.warn("Attempting to send favored nodes update rpc to server " + server.toString()
+          + " failed because no RPC connection found to this server");
+    } else {
+      List<Pair<HRegionInfo, List<ServerName>>> regionUpdateInfos =
+          new ArrayList<Pair<HRegionInfo, List<ServerName>>>();
+      for (Entry<HRegionInfo, List<ServerName>> entry : favoredNodes.entrySet()) {
+        regionUpdateInfos.add(new Pair<HRegionInfo, List<ServerName>>(entry.getKey(),
+          entry.getValue()));
+      }
+      UpdateFavoredNodesRequest request =
+        RequestConverter.buildUpdateFavoredNodesRequest(regionUpdateInfos);
+      try {
+        admin.updateFavoredNodes(null, request);
+      } catch (ServiceException se) {
+        throw ProtobufUtil.getRemoteException(se);
+      }
     }
   }
 }
