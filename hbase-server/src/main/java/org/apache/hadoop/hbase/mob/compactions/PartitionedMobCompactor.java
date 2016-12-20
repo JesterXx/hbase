@@ -429,7 +429,7 @@ public class PartitionedMobCompactor extends MobCompactor {
     try {
       try {
         writer = MobUtils
-            .createWriter(conf, fs, column, partition.getPartitionId().getDate(), tempPath,
+            .createWriter(null, conf, fs, column, partition.getPartitionId().getDate(), tempPath,
                 Long.MAX_VALUE, column.getCompactionCompressionType(),
                 partition.getPartitionId().getStartKey(), compactionCacheConfig, cryptoContext);
         cleanupTmpMobFile = true;

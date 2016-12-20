@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.mob;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -43,7 +44,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
-import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionInfo;
@@ -448,6 +448,7 @@ public final class MobUtils {
 
   /**
    * Creates a writer for the mob file in temp directory.
+   * @param favoredNodes The favored nodes.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -461,15 +462,16 @@ public final class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public static StoreFileWriter createWriter(Configuration conf, FileSystem fs,
+  public static StoreFileWriter createWriter(InetSocketAddress[] favoredNodes,
+      Configuration conf, FileSystem fs,
       HColumnDescriptor family, String date, Path basePath, long maxKeyCount,
       Compression.Algorithm compression, String startKey, CacheConfig cacheConfig,
       Encryption.Context cryptoContext)
       throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID().toString()
         .replaceAll("-", ""));
-    return createWriter(conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
-      cacheConfig, cryptoContext);
+    return createWriter(favoredNodes, conf, fs, family, mobFileName, basePath, maxKeyCount,
+      compression, cacheConfig, cryptoContext);
   }
 
   /**
@@ -504,6 +506,7 @@ public final class MobUtils {
 
   /**
    * Creates a writer for the mob file in temp directory.
+   * @param favoredNodes The favored nodes.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -517,15 +520,16 @@ public final class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  public static StoreFileWriter createWriter(Configuration conf, FileSystem fs,
+  public static StoreFileWriter createWriter(InetSocketAddress[] favoredNodes,
+      Configuration conf, FileSystem fs,
       HColumnDescriptor family, String date, Path basePath, long maxKeyCount,
       Compression.Algorithm compression, byte[] startKey, CacheConfig cacheConfig,
       Encryption.Context cryptoContext)
       throws IOException {
     MobFileName mobFileName = MobFileName.create(startKey, date, UUID.randomUUID().toString()
         .replaceAll("-", ""));
-    return createWriter(conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
-      cacheConfig, cryptoContext);
+    return createWriter(favoredNodes, conf, fs, family, mobFileName, basePath, maxKeyCount,
+      compression, cacheConfig, cryptoContext);
   }
 
   /**
@@ -551,12 +555,13 @@ public final class MobUtils {
     String suffix = UUID
       .randomUUID().toString().replaceAll("-", "") + "_del";
     MobFileName mobFileName = MobFileName.create(startKey, date, suffix);
-    return createWriter(conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
+    return createWriter(null, conf, fs, family, mobFileName, basePath, maxKeyCount, compression,
       cacheConfig, cryptoContext);
   }
 
   /**
    * Creates a writer for the mob file in temp directory.
+   * @param favoredNodes The favored nodes.
    * @param conf The current configuration.
    * @param fs The current file system.
    * @param family The descriptor of the current column family.
@@ -569,7 +574,8 @@ public final class MobUtils {
    * @return The writer for the mob file.
    * @throws IOException
    */
-  private static StoreFileWriter createWriter(Configuration conf, FileSystem fs,
+  private static StoreFileWriter createWriter(InetSocketAddress[] favoredNodes,
+    Configuration conf, FileSystem fs,
     HColumnDescriptor family, MobFileName mobFileName, Path basePath, long maxKeyCount,
     Compression.Algorithm compression, CacheConfig cacheConfig, Encryption.Context cryptoContext)
     throws IOException {
@@ -585,7 +591,8 @@ public final class MobUtils {
     StoreFileWriter w = new StoreFileWriter.Builder(conf, cacheConfig, fs)
       .withFilePath(new Path(basePath, mobFileName.getFileName()))
       .withComparator(CellComparator.COMPARATOR).withBloomType(BloomType.NONE)
-      .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext).build();
+      .withMaxKeyCount(maxKeyCount).withFileContext(hFileContext)
+      .withFavoredNodes(favoredNodes).build();
     return w;
   }
 
@@ -750,7 +757,7 @@ public final class MobUtils {
    * @param conf the Configuration
    * @return A thread pool.
    */
-  public static ExecutorService createMobCompactorThreadPool(Configuration conf) {
+  public static ThreadPoolExecutor createMobCompactorThreadPool(Configuration conf) {
     int maxThreads = conf.getInt(MobConstants.MOB_COMPACTION_THREADS_MAX,
       MobConstants.DEFAULT_MOB_COMPACTION_THREADS_MAX);
     if (maxThreads == 0) {
@@ -769,7 +776,7 @@ public final class MobUtils {
           }
         }
       });
-    ((ThreadPoolExecutor) pool).allowCoreThreadTimeOut(true);
+    pool.allowCoreThreadTimeOut(true);
     return pool;
   }
 
@@ -815,10 +822,7 @@ public final class MobUtils {
    */
   public static void archiveMobStoreFiles(Configuration conf, FileSystem fs,
       HRegionInfo mobRegionInfo, Path mobFamilyDir, byte[] family) throws IOException {
-    // disable the block cache.
-    Configuration copyOfConf = HBaseConfiguration.create(conf);
-    copyOfConf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0f);
-    CacheConfig cacheConfig = new CacheConfig(copyOfConf);
+    CacheConfig cacheConfig = new CacheConfig(conf);
     FileStatus[] fileStatus = FSUtils.listStatus(fs, mobFamilyDir);
     List<StoreFile> storeFileList = new ArrayList<StoreFile>();
     for (FileStatus file : fileStatus) {
