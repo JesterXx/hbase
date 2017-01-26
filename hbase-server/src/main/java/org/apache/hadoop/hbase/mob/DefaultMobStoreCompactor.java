@@ -112,7 +112,7 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
    * This is for when the mob threshold size has changed or if the mob
    * column family mode has been toggled via an alter table statement.
    * Compacts the files by the following rules.
-   * 1. If the cell has a mob reference tag, the cell's value is the path of the mob file.
+   * 1. If the Put cell has a mob reference tag, the cell's value is the path of the mob file.
    * <ol>
    * <li>
    * If the value size of a cell is larger than the threshold, this cell is regarded as a mob,
@@ -123,7 +123,7 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
    * the new store file.
    * </li>
    * </ol>
-   * 2. If the cell doesn't have a reference tag.
+   * 2. If the Put cell doesn't have a reference tag.
    * <ol>
    * <li>
    * If the value size of a cell is larger than the threshold, this cell is regarded as a mob,
@@ -133,8 +133,17 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
    * Otherwise, directly write this cell into the store file.
    * </li>
    * </ol>
-   * In the mob compaction, the {@link MobCompactionStoreScanner} is used as a scanner
-   * which could output the normal cells and delete markers together when required.
+   * 3. Decide how to write a Delete cell.
+   * <ol>
+   * <li>
+   * If a Delete cell does not have a mob reference tag which means this delete marker have not
+   * been written to the mob del file, write this cell to the mob del file, and write this cell
+   * with a ref tag to a store file.
+   * </li>
+   * <li>
+   * Otherwise, directly write it to a store file.
+   * </li>
+   * </ol> 
    * After the major compaction on the normal hfiles, we have a guarantee that we have purged all
    * deleted or old version mob refs, and the delete markers are written to a del file with the
    * suffix _del. Because of this, it is safe to use the del file in the mob compaction.
@@ -186,13 +195,13 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
         hasMore = scanner.next(cells, scannerContext);
         for (Cell c : cells) {
           if (major && CellUtil.isDelete(c)) {
-            if (MobUtils.isMobOutputDeleteMarker(c)) {
-              // Directly write it to store file
+            if (MobUtils.isMobReferenceCell(c)) {
+              // Directly write it to a store file
               writer.append(c);
             } else {
-              // Add a tag to this cell and write it to store file.
-              writer.append(MobUtils.createMobOutputDeleteMarker(c));
-              // Write the cell to del file
+              // Add a ref tag to this cell and write it to a store file.
+              writer.append(MobUtils.createMobRefDeleteMarker(c));
+              // Write the cell to a del file
               delFileWriter.append(c);
               deleteMarkersCount++;
             }

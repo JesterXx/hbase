@@ -99,13 +99,6 @@ public final class MobConstants {
   public static final String MOB_COMPACTION_THREADS_MAX =
     "hbase.mob.compaction.threads.max";
   public static final int DEFAULT_MOB_COMPACTION_THREADS_MAX = 1;
-
-  // For delete markers in MOB-enabled columns.
-  // If a delete marker has this tag, it is not flushed to a mob file in major compaction.
-  // If a delete marker does not have this tag, it is flushed to a mob file and this tag
-  // is added to this delete marker in major compaction.
-  public static final Tag MOB_OUTPUT_DELETE_MARKER_TAG =
-      new ArrayBackedTag(TagType.MOB_OUTPUT_DELETE_MARKER_TAG_TYPE, HConstants.EMPTY_BYTE_ARRAY);
   private MobConstants() {
 
   }

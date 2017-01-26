@@ -90,11 +90,11 @@ public final class MobUtils {
     }
   };
 
-  private static final byte[] OUTPUT_DELETE_MARKER_TAG_BYTES;
+  private static final byte[] REF_DELETE_MARKER_TAG_BYTES;
   static {
     List<Tag> tags = new ArrayList<>();
-    tags.add(MobConstants.MOB_OUTPUT_DELETE_MARKER_TAG);
-    OUTPUT_DELETE_MARKER_TAG_BYTES = TagUtil.fromList(tags);
+    tags.add(MobConstants.MOB_REF_TAG);
+    REF_DELETE_MARKER_TAG_BYTES = TagUtil.fromList(tags);
   }
 
   /**
@@ -817,27 +817,17 @@ public final class MobUtils {
   }
 
   /**
-   * Checks if the current cell is a mob output delete marker.
-   * @param cell The current cell.
-   * @return True if the cell is a output delete marker, false if it isn't.
-   */
-  public static boolean isMobOutputDeleteMarker(Cell cell) {
-    return cell.getTagsLength() > 0
-        ? CellUtil.getTag(cell, TagType.MOB_OUTPUT_DELETE_MARKER_TAG_TYPE) != null : false;
-  }
-
-  /**
-   * Creates a mob output delete marker.
+   * Creates a mob ref delete marker.
    * @param cell The current delete marker.
-   * @return A delete marker with the output delete marker tag.
+   * @return A delete marker with the ref tag.
    */
-  public static Cell createMobOutputDeleteMarker(Cell cell) {
-    return CellUtil.createCell(cell, TagUtil.concatTags(OUTPUT_DELETE_MARKER_TAG_BYTES, cell));
+  public static Cell createMobRefDeleteMarker(Cell cell) {
+    return CellUtil.createCell(cell, TagUtil.concatTags(REF_DELETE_MARKER_TAG_BYTES, cell));
   }
 
   /**
    * Checks if the mob file is expired.
-   * @param column The descriptor of the current column family. 
+   * @param column The descriptor of the current column family.
    * @param current The current time.
    * @param fileDate The date string parsed from the mob file name.
    * @return True if the mob file is expired.
