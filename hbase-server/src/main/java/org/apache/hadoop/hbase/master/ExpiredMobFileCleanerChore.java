@@ -68,7 +68,7 @@ public class ExpiredMobFileCleanerChore extends ScheduledChore {
             // clean only for mob-enabled column.
             // obtain a read table lock before cleaning, synchronize with MobFileCompactionChore.
             final LockManager.MasterLock lock = master.getLockManager().createMasterLock(
-                MobUtils.getTableLockName(htd.getTableName()), LockProcedure.LockType.EXCLUSIVE,
+                MobUtils.getTableLockName(htd.getTableName()), LockProcedure.LockType.SHARED,
                 this.getClass().getSimpleName() + ": Cleaning expired mob files");
             try {
               lock.acquire();
