@@ -143,7 +143,7 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
    * <li>
    * Otherwise, directly write it to a store file.
    * </li>
-   * </ol> 
+   * </ol>
    * After the major compaction on the normal hfiles, we have a guarantee that we have purged all
    * deleted or old version mob refs, and the delete markers are written to a del file with the
    * suffix _del. Because of this, it is safe to use the del file in the mob compaction.
