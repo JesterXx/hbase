@@ -474,7 +474,7 @@ public class TestMultiRowRangeFilter {
   }
 
   @Test
-  public void testRowRangeWithOneRange() throws IOException {
+  public void testOneRowRange() throws IOException {
     tableName = TableName.valueOf(name.getMethodName());
     Table ht = TEST_UTIL.createTable(tableName, family, Integer.MAX_VALUE);
     generateRows(numRows, ht, family, qf, value);
