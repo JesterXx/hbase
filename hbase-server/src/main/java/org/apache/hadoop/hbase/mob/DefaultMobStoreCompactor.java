@@ -203,7 +203,7 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
           compactionCompression, store.getRegionInfo().getStartKey(), true);
         fileName = Bytes.toBytes(mobFileWriter.getPath().getName());
       } catch (IOException e) {
-        LOG.error("Failed to create mob writer, "
+        LOG.warn("Failed to create mob writer, "
                + "we will continue the compaction by writing MOB cells directly in store files", e);
       }
       if (major) {
@@ -211,7 +211,7 @@ public class DefaultMobStoreCompactor extends DefaultCompactor {
           delFileWriter = mobStore.createDelFileWriterInTmp(new Date(fd.latestPutTs),
             fd.maxKeyCount, compactionCompression, store.getRegionInfo().getStartKey());
         } catch (IOException e) {
-          LOG.error(
+          LOG.warn(
             "Failed to create del writer, "
             + "we will continue the compaction by writing delete markers directly in store files",
             e);
