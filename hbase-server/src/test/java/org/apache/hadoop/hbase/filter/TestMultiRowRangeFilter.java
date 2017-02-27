@@ -530,6 +530,7 @@ public class TestMultiRowRangeFilter {
         kvList.add(kv);
       }
     }
+    scanner.close();
     return kvList;
   }
 
