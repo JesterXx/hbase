@@ -44,7 +44,7 @@ How can I find examples of NoSQL/HBase?::
 What is the history of HBase?::
   See <<hbase.history,hbase.history>>.
 
-Why are the cells above 10MB not recommended for HBase?
+Why are the cells above 10MB not recommended for HBase?::
   The large cells cannot fit the buffer well in HBase. Large cells bypass the MemStoreLAB per write operation and cannot be cached in the L2 block cache per read operation, HBase has to allocate the on-heap memory once a time. The GC can be very bad.
 
 === Upgrading
