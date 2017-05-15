@@ -35,6 +35,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
+import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
@@ -427,6 +428,8 @@ public class HMobStore extends HStore {
       + " or it is corrupt");
     if (readEmptyValueOnMobCellMiss) {
       return null;
+    } else if (throwable instanceof FileNotFoundException) {
+      throw new DoNotRetryIOException(throwable);
     } else if (throwable instanceof IOException) {
       throw (IOException) throwable;
     } else {
