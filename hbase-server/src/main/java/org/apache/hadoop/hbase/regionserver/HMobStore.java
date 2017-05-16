@@ -428,7 +428,8 @@ public class HMobStore extends HStore {
       + " or it is corrupt");
     if (readEmptyValueOnMobCellMiss) {
       return null;
-    } else if (throwable instanceof FileNotFoundException) {
+    } else if ((throwable instanceof FileNotFoundException)
+        || (throwable.getCause() instanceof FileNotFoundException)) {
       throw new DoNotRetryIOException(throwable);
     } else if (throwable instanceof IOException) {
       throw (IOException) throwable;
