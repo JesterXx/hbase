@@ -430,6 +430,10 @@ public class HMobStore extends HStore {
       return null;
     } else if ((throwable instanceof FileNotFoundException)
         || (throwable.getCause() instanceof FileNotFoundException)) {
+      // The region is re-opened when FileNotFoundException is thrown.
+      // This is not necessary when MOB files cannot be found, because the store files
+      // in a region only contain the references to MOB files and a re-open on a region
+      // doesn't help fix the lost MOB files.
       throw new DoNotRetryIOException(throwable);
     } else if (throwable instanceof IOException) {
       throw (IOException) throwable;
